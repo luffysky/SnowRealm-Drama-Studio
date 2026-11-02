@@ -1,0 +1,368 @@
+# 環境變數設定說明
+
+SnowRealm Drama Studio V1 — Neon PostgreSQL + Cloudflare R2 + Vercel
+
+本文件列出系統執行所需的**全部**環境變數、各自的用途、以及逐步取得方式。
+
+> **安全原則**
+> 下列變數**沒有任何一個**可以加上 `NEXT_PUBLIC_` 前綴。全部僅在伺服器端（Server Component、Route Handler、Server Action）讀取。一旦加上 `NEXT_PUBLIC_`，Next.js 會把值編譯進瀏覽器端的 JavaScript，等同公開你的資料庫與儲存空間金鑰。
+>
+> `.env.local` 已列入 `.gitignore`，請勿解除。真實金鑰不要寫進 `.env.example`、不要貼進 commit、不要貼進 issue。
+
+---
+
+## 總覽
+
+| 變數 | 必填 | 用途 |
+|---|---|---|
+| `DATABASE_URL` | ✅ | Neon 連線字串（**pooled**），應用程式執行期間使用 |
+| `DATABASE_URL_UNPOOLED` | ✅ | Neon 連線字串（**direct / unpooled**），僅供 migration 使用 |
+| `AUTH_SECRET` | ✅ | 簽發與驗證登入 session cookie |
+| `ENCRYPTION_KEY` | ⬜ | 加密資料庫中的 AI 供應商金鑰。留空則由 `AUTH_SECRET` 衍生 |
+| `R2_ACCOUNT_ID` | ✅ | Cloudflare 帳號 ID，用於組出 R2 的 S3 endpoint |
+| `R2_ACCESS_KEY_ID` | ✅ | R2 API Token 的 Access Key ID |
+| `R2_SECRET_ACCESS_KEY` | ✅ | R2 API Token 的 Secret Access Key |
+| `R2_BUCKET` | ✅ | 存放素材的 bucket 名稱 |
+| `R2_ENDPOINT` | ⬜ | 覆寫 S3 endpoint。留空則由 `R2_ACCOUNT_ID` 自動推導 |
+| `PRESIGN_TTL_SECONDS` | ⬜ | Presigned URL 有效秒數，預設 `300`（5 分鐘） |
+| `ANTHROPIC_API_KEY` | ⬜ | Claude API 金鑰。未設定時 AI 功能顯示「尚未啟用」，其餘功能不受影響 |
+| `CRON_SECRET` | ✅ | AI 背景 worker 的憑證。未設定則 worker 停用，AI 任務會一直停在佇列 |
+| `SEED_OWNER_EMAIL` | ✅* | 初始化 Owner 帳號 |
+| `SEED_OWNER_NAME` | ✅* | Owner 顯示名稱 |
+| `SEED_OWNER_PASSWORD` | ✅* | Owner 初始密碼（存入前做雜湊） |
+| `SEED_COLLABORATOR_EMAIL` | ✅* | 初始化 Collaborator 帳號 |
+| `SEED_COLLABORATOR_NAME` | ✅* | Collaborator 顯示名稱 |
+| `SEED_COLLABORATOR_PASSWORD` | ✅* | Collaborator 初始密碼（存入前做雜湊） |
+
+✅* = 只有執行 `npm run db:seed` 建立帳號時需要。帳號建立完成後，可以從 Vercel 移除這六個變數，應用程式執行期間不會讀取它們。
+
+---
+
+## 1. Neon PostgreSQL
+
+### 1.1 建立專案
+
+1. 登入 <https://console.neon.tech>
+2. **Create project**
+3. 設定：
+   - **Project name**：`snowrealm-drama-studio`
+   - **Postgres version**：17（預設即可）
+   - **Region**：選離 Vercel 部署區域最近的。台灣使用者建議 `Asia Pacific (Singapore)` 或 `Asia Pacific (Tokyo)`，並讓 Vercel 的 Function Region 設成同一區，可省下跨區來回延遲
+   - **Database name**：`snowrealm_drama_studio`
+
+### 1.2 取得兩條連線字串
+
+建立完成後，在專案首頁的 **Connection string**（或 **Connect**）面板：
+
+**取得 `DATABASE_URL`（pooled）**
+- 將 **Connection pooling** 開關**打開**
+- 複製字串，host 會包含 `-pooler`，例如：
+  ```
+  postgresql://neondb_owner:<密碼>@ep-xxxx-xxxx-pooler.ap-southeast-1.aws.neon.tech/snowrealm_drama_studio?sslmode=require
+  ```
+
+**取得 `DATABASE_URL_UNPOOLED`（direct）**
+- 將 **Connection pooling** 開關**關閉**
+- 複製字串，host **不含** `-pooler`：
+  ```
+  postgresql://neondb_owner:<密碼>@ep-xxxx-xxxx.ap-southeast-1.aws.neon.tech/snowrealm_drama_studio?sslmode=require
+  ```
+
+> 兩條字串的差別只在 host 有沒有 `-pooler`，帳號密碼相同。
+>
+> **為什麼要兩條**：Vercel 的 serverless function 每次請求可能是新的執行實例，連線數容易爆掉，所以應用程式走 pooled（PgBouncer）。但 PgBouncer 的 transaction 模式不支援 migration 需要的 session 級指令（例如 advisory lock），所以 `drizzle-kit migrate` 必須走 direct 連線。
+>
+> **`sslmode=require` 必須保留**，Neon 不接受未加密連線。若你複製到的字串還帶有 `channel_binding=require`，一併保留即可。
+
+### 1.3 本機開發用的獨立分支（建議）
+
+不要讓本機開發直接寫進正式資料庫。Neon 的 branch 功能可以複製一份：
+
+1. Neon 專案左側 → **Branches** → **Create branch**
+2. Branch name：`dev`，從 `main`（或 `production`）建立
+3. 在該 branch 頁面取得它自己的 pooled / direct 字串，寫進本機的 `.env.local`
+
+這樣本機和正式環境的資料完全隔離，schema 卻保持一致。
+
+> **離線備案**：沒有網路時，可以執行 `npm run db:local`，它會用 `embedded-postgres` 在 `127.0.0.1:55432` 起一個本機 PostgreSQL 17（不需要 Docker），連線字串為
+> `postgresql://srds:srds_local_dev@127.0.0.1:55432/snowrealm_drama_studio`
+> 這只是開發便利工具，正式環境一律使用 Neon。
+
+---
+
+## 2. Cloudflare R2
+
+### 2.1 建立 bucket
+
+1. 登入 <https://dash.cloudflare.com>
+2. 左側選單 → **R2**（第一次使用需先啟用，會要求綁定付款方式，免費額度內不扣款）
+3. **Create bucket**
+   - **Bucket name**：`snowrealm-drama-studio`
+   - **Location**：`Asia-Pacific (APAC)`
+4. 建立完成
+
+> **私有性確認**：R2 bucket 建立後預設就是私有的，不會有任何公開網址。請**不要**去開啟 bucket 設定裡的 **Public Development URL**（`r2.dev`），也**不要**綁定 Custom Domain。只要這兩項都不開，外界就無法直接存取或列出檔案，所有讀寫都必須經過本系統後端簽發的短效 URL。
+
+### 2.2 取得 `R2_ACCOUNT_ID`
+
+在 R2 總覽頁右側會顯示 **Account ID**，是一串 32 碼的十六進位字元。
+
+也可以從瀏覽器網址列讀出來 —— `dash.cloudflare.com/<這一段就是 Account ID>/r2/overview`。
+
+### 2.3 建立 API Token 取得金鑰
+
+1. R2 頁面右上 → **Manage R2 API Tokens** → **Create API token**
+2. 設定：
+   - **Token name**：`snowrealm-drama-studio-app`
+   - **Permissions**：選 **Object Read & Write**
+     （不要選 Admin Read & Write。應用程式只需要讀寫物件，不需要建立或刪除 bucket 的權限）
+   - **Specify bucket(s)**：限定只給上一步建立的 `snowrealm-drama-studio`
+     （不要留在 "Apply to all buckets"）
+   - **TTL**：若無特殊需求選 Forever
+3. **Create API Token**
+4. 畫面會顯示：
+   - **Access Key ID** → 填入 `R2_ACCESS_KEY_ID`
+   - **Secret Access Key** → 填入 `R2_SECRET_ACCESS_KEY`
+   - **Endpoint** → 形如 `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
+
+> ⚠️ **Secret Access Key 只會顯示這一次**，關閉視窗就再也看不到。請立刻複製到安全的地方（密碼管理器）。遺失只能重新建立 token。
+
+### 2.4 設定 CORS（瀏覽器直接上傳必須）
+
+本系統的大型素材是由瀏覽器拿到 presigned URL 後**直接 PUT 到 R2**，不經過 Vercel（避免 serverless function 的請求大小與執行時間限制）。這屬於跨來源請求，必須在 bucket 上設定 CORS，否則上傳會被瀏覽器攔下。
+
+1. bucket 頁面 → **Settings** → **CORS policy** → **Add CORS policy**
+2. 貼入以下內容，並把 `AllowedOrigins` 換成你的實際網域：
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "http://localhost:3400",
+      "https://你的專案.vercel.app"
+    ],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["content-type", "content-length"],
+    "ExposeHeaders": ["etag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+說明：
+- `PUT` 給單檔與 multipart 分段上傳；`GET` 給下載與預覽；`HEAD` 給上傳前的檔案存在性檢查
+- `etag` 必須 expose，multipart upload 完成時需要收集每個分段的 ETag 才能合併
+- 之後若綁自訂網域，記得把新網域加進 `AllowedOrigins`
+- Vercel 的 preview 部署網址每次不同，若需要在 preview 測上傳，可暫時加入 `https://*.vercel.app`，但正式環境建議只列明確網域
+
+### 2.5 Preview 環境建議用另一個 bucket
+
+若會使用 Vercel preview 部署測試，建議再建一個 `snowrealm-drama-studio-preview`，避免測試檔案混進正式素材庫。在 Vercel 的 Preview 環境把 `R2_BUCKET` 指向它即可，其他金鑰可共用。
+
+---
+
+## 3. AUTH_SECRET
+
+簽發登入 session cookie 用的密鑰。**自行產生，不要沿用任何範例值。**
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+輸出類似 `kJ8mN2pQ...`（43 字元）。
+
+本機與正式環境請使用**不同**的值。更換這個值會使所有既有登入 session 立即失效（兩人需重新登入），其餘資料不受影響。
+
+### 3.1 ENCRYPTION_KEY（選填）
+
+用於加密**存在資料庫裡**的 AI 供應商 API 金鑰（AES-256-GCM）。
+
+留空時，系統會用 HKDF 從 `AUTH_SECRET` 衍生一把獨立的加密金鑰，功能完全正常。
+
+⚠️ **但留空有一個後果**：之後若更換 `AUTH_SECRET`，已存的 AI 金鑰會無法解密，必須重新輸入。若你希望「換 session 密鑰」與「換加密密鑰」兩件事互不影響，就另外設定這一個：
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+### 3.2 ANTHROPIC_API_KEY（選填）
+
+Claude API 金鑰，從 <https://console.anthropic.com> 取得。
+
+AI 金鑰有兩種存放方式，擇一即可：
+
+| 方式 | 做法 | 適合 |
+|---|---|---|
+| 環境變數 | 設定 `ANTHROPIC_API_KEY` | 只有一組金鑰、不常更換 |
+| 資料庫 | 在「AI 模型連線與金鑰設定」填入 | 要在介面上更換、或要管理多個供應商 |
+
+兩者都設定時，資料庫中的設定優先。
+
+**未設定也不影響系統運作**：AI 相關功能會顯示明確的「尚未啟用」狀態並說明缺少什麼，其餘所有功能（小說、劇本、分鏡、素材、進度、成本）完全正常。
+
+### 3.3 CRON_SECRET（AI 功能必填）
+
+AI 任務不在 HTTP 請求裡執行 —— 長篇生成會超過 Vercel function 的時間上限。
+`POST /api/ai/jobs` 只把任務排入佇列，實際執行由 `/api/ai/worker` 負責，
+由 Vercel Cron 每分鐘觸發一次（設定在 `vercel.json`）。
+
+這個端點不能靠登入 session 保護（cron 呼叫沒有 cookie），改用 Bearer token：
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+在 Vercel 的環境變數填入 `CRON_SECRET` 後，Vercel Cron 觸發時會自動帶上
+`Authorization: Bearer $CRON_SECRET`。
+
+**未設定時的行為**：worker 回傳 503 並停用，AI 任務會一直留在 `QUEUED` 狀態。
+這是刻意的 fail-closed —— 沒有憑證就不執行，而不是讓端點開放給任何人觸發付費請求。
+
+> Vercel Hobby 方案的 cron 最短間隔是每天一次；每分鐘觸發需要 Pro 方案。
+> 若使用 Hobby，可改由前端在送出任務後呼叫一次 `POST /api/ai/worker`
+> （仍需帶 Bearer token），或把 `vercel.json` 的 schedule 改成方案允許的頻率。
+
+---
+
+## 4. 初始帳號
+
+系統不開放註冊，兩組帳號由 `npm run db:seed` 建立。
+
+密碼使用 **Argon2id**（`@node-rs/argon2`，參數 `memoryCost=19456 KiB`、`timeCost=2`、
+`parallelism=1`）雜湊後才寫入資料庫，資料庫內不會留下明文。
+
+> **舊 bcrypt 帳號的無感遷移**：系統保留 bcrypt 的驗證能力。若某個帳號的雜湊還是
+> bcrypt，使用者下次登入成功時，會用他本次輸入的密碼重新以 Argon2id 雜湊並更新，
+> 使用者完全不會察覺，也不需要重設密碼。舊雜湊不會被「轉換」（數學上不可能），
+> 而是以明文重新計算後整筆取代；更新採條件式寫入，兩人同時登入也不會互相覆蓋。
+
+| 變數 | 說明 |
+|---|---|
+| `SEED_OWNER_EMAIL` | Owner 登入用 email |
+| `SEED_OWNER_NAME` | Owner 顯示名稱，例如「製片」 |
+| `SEED_OWNER_PASSWORD` | Owner 初始密碼 |
+| `SEED_COLLABORATOR_EMAIL` | Collaborator 登入用 email |
+| `SEED_COLLABORATOR_NAME` | Collaborator 顯示名稱，例如「編導」 |
+| `SEED_COLLABORATOR_PASSWORD` | Collaborator 初始密碼 |
+
+**權限差異**
+- **Owner**：全部製作內容的讀寫，加上成員管理與刪除作品
+- **Collaborator**：全部製作內容的讀寫，不能管理成員或刪除作品
+
+密碼建議 12 字元以上。seed 執行完畢後，這六個變數即可從 Vercel 刪除。
+
+---
+
+## 5. 本機 `.env.local`
+
+在專案根目錄建立 `.env.local`（此檔已被 gitignore）：
+
+```bash
+# ---- Neon（建議使用 dev branch，不要用正式 branch）----
+DATABASE_URL=postgresql://neondb_owner:密碼@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/snowrealm_drama_studio?sslmode=require
+DATABASE_URL_UNPOOLED=postgresql://neondb_owner:密碼@ep-xxxx.ap-southeast-1.aws.neon.tech/snowrealm_drama_studio?sslmode=require
+
+# ---- 登入 ----
+AUTH_SECRET=自行產生的值
+
+# ---- Cloudflare R2 ----
+R2_ACCOUNT_ID=你的32碼帳號ID
+R2_ACCESS_KEY_ID=你的Access Key ID
+R2_SECRET_ACCESS_KEY=你的Secret Access Key
+R2_BUCKET=snowrealm-drama-studio
+
+# ---- 選填 ----
+# R2_ENDPOINT=
+# PRESIGN_TTL_SECONDS=300
+
+# ---- 初始帳號（seed 後可刪）----
+SEED_OWNER_EMAIL=
+SEED_OWNER_NAME=
+SEED_OWNER_PASSWORD=
+SEED_COLLABORATOR_EMAIL=
+SEED_COLLABORATOR_NAME=
+SEED_COLLABORATOR_PASSWORD=
+
+# ---- AI（選填，未設定則 AI 功能顯示「尚未啟用」）----
+ANTHROPIC_API_KEY=
+```
+
+填好後依序執行：
+
+```bash
+npm install
+npm run db:migrate     # 建立資料表
+npm run db:seed        # 建立兩組帳號與《一灶見山河》專案骨架
+npm run dev            # http://localhost:3400
+```
+
+驗證安裝是否正確：
+
+```bash
+npx tsx scripts/db-check.ts   # 列出所有資料表與筆數
+npm test                      # 單元測試
+npm run build && npm start    # 另開一個終端機
+npm run test:smoke            # 對執行中的伺服器做端對端測試
+```
+
+---
+
+## 6. Vercel 設定
+
+### 6.1 填入變數
+
+專案 → **Settings** → **Environment Variables**，逐一新增。
+
+| 變數 | Production | Preview | Development |
+|---|---|---|---|
+| `DATABASE_URL` | 正式 branch（pooled） | dev/preview branch（pooled） | 可留空，本機讀 `.env.local` |
+| `DATABASE_URL_UNPOOLED` | 正式 branch（direct） | dev/preview branch（direct） | 同上 |
+| `AUTH_SECRET` | 專用值 | 可與 Production 不同 | 同上 |
+| `R2_ACCOUNT_ID` | ✅ | ✅ | 同上 |
+| `R2_ACCESS_KEY_ID` | ✅ | ✅ | 同上 |
+| `R2_SECRET_ACCESS_KEY` | ✅ | ✅ | 同上 |
+| `R2_BUCKET` | `snowrealm-drama-studio` | `...-preview` | 同上 |
+
+新增時務必確認**沒有勾選**任何會暴露到前端的選項，且變數名稱不含 `NEXT_PUBLIC_`。
+
+> **Neon 官方整合（替代做法）**：Vercel 的 Marketplace 有 Neon integration，連結後會自動注入 `DATABASE_URL`、`DATABASE_URL_UNPOOLED` 等變數，並能為每個 preview 部署自動開一個資料庫 branch。若使用此整合，就不需要手動填前兩個變數 —— 但請確認它注入的名稱與上表一致，不一致時以上表為準手動補上。
+
+### 6.2 Function Region
+
+**Settings → Functions → Function Region** 設成與 Neon 同一區（例如 Neon 選 Singapore，這裡也選 Singapore `sin1`）。跨區會讓每個資料庫查詢多出可觀的往返延遲。
+
+### 6.3 部署後
+
+1. 第一次部署完成後，執行一次 migration 與 seed。最簡單的方式是在本機把 `.env.local` 暫時指向正式 Neon branch，然後：
+   ```bash
+   npm run db:migrate
+   npm run db:seed
+   ```
+   完成後記得把 `.env.local` 改回 dev branch。
+2. 回到 2.4 節，把正式網域加進 R2 的 CORS `AllowedOrigins`
+3. 用 Owner 帳號登入，確認可以上傳一張圖片並正常顯示
+
+---
+
+## 7. 疑難排解
+
+| 現象 | 可能原因 |
+|---|---|
+| `password authentication failed` | 連線字串的密碼被截斷，或密碼含特殊字元未做 URL encode |
+| `too many connections` | 應用程式誤用了 direct 連線。確認 `DATABASE_URL` 的 host 含 `-pooler` |
+| migration 卡住或報 advisory lock 錯誤 | `DATABASE_URL_UNPOOLED` 誤填成 pooled 字串。確認它的 host **不含** `-pooler` |
+| 上傳時瀏覽器 console 出現 CORS 錯誤 | R2 的 CORS policy 未設定，或 `AllowedOrigins` 沒有包含目前網域（注意 http/https 與連接埠要完全一致） |
+| 上傳回 `SignatureDoesNotMatch` | `R2_SECRET_ACCESS_KEY` 有誤，或 `R2_ACCOUNT_ID` 與金鑰不屬於同一個 Cloudflare 帳號 |
+| 圖片顯示破圖 | presigned URL 已過期。提高 `PRESIGN_TTL_SECONDS`，或重新載入頁面取得新 URL |
+| multipart 上傳合併失敗 | CORS 的 `ExposeHeaders` 缺少 `etag` |
+| 登入後立刻被登出 | `AUTH_SECRET` 未設定，或 Production 與 Preview 用了不同值而 cookie 跨環境共用 |
+
+---
+
+## 8. 金鑰外洩時的處置
+
+1. **R2**：Cloudflare → R2 → Manage R2 API Tokens → 刪除該 token → 建立新的 → 更新 `R2_ACCESS_KEY_ID` 與 `R2_SECRET_ACCESS_KEY` → 重新部署
+2. **Neon**：Neon Console → 該 branch 的 Roles → Reset password → 更新兩條連線字串 → 重新部署
+3. **AUTH_SECRET**：產生新值 → 更新 → 重新部署（兩人需重新登入）
+
+更換金鑰不會影響已儲存的素材與資料。

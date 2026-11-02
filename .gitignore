@@ -1,0 +1,26 @@
+node_modules/
+.next/
+out/
+build/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# env — never commit real credentials
+.env
+.env.local
+.env*.local
+
+# local database (embedded postgres data dir)
+.pgdata/
+
+# locally stored uploads (dev only; production stores assets in Cloudflare R2)
+public/uploads/*
+!public/uploads/.gitkeep
+
+# throwaway screenshots used while debugging
+debug_pic/
+
+# os
+.DS_Store
+Thumbs.db

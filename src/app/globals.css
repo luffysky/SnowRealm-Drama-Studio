@@ -1,0 +1,259 @@
+@import 'tailwindcss';
+
+/*
+ * SnowRealm Drama Studio — 深色紫藍霓虹玻璃風 (spec v2 §0)
+ *
+ * Calibrated against the reference art in `UI Design/`. The ground is a deep
+ * indigo rather than neutral black, panels sit a few steps above it with a
+ * violet cast, and emphasis comes from a violet→magenta gradient plus a soft
+ * outer glow — not from heavier borders.
+ *
+ * Dark-only by design: this is a film production tool read beside graded
+ * stills, where a light chrome would skew colour judgement.
+ */
+
+@theme {
+  /* Ground and panels: deep indigo, violet-cast, never neutral grey. */
+  --color-stage-990: #06030f;
+  --color-stage-950: #0a0618;
+  --color-stage-900: #0f0a22;
+  --color-stage-850: #150e2e;
+  --color-stage-800: #1b1339;
+  --color-stage-750: #231a47;
+  --color-stage-700: #2d2157;
+  --color-stage-600: #3b2d6e;
+  --color-stage-500: #4d3c8a;
+
+  /* Primary accent: violet, with magenta as its gradient partner. */
+  --color-accent-300: #c4b5fd;
+  --color-accent-400: #a78bfa;
+  --color-accent-500: #8b5cf6;
+  --color-accent-600: #7c3aed;
+  --color-accent-700: #6d28d9;
+
+  --color-magenta-400: #e879f9;
+  --color-magenta-500: #d946ef;
+  --color-magenta-600: #c026d3;
+
+  /* Sparing gold — reserved for 定稿 / CEO / approved. */
+  --color-gilt-300: #fcd34d;
+  --color-gilt-400: #f0b429;
+  --color-gilt-500: #d99a1f;
+
+  /* Text, tuned warm-violet so it sits on the indigo ground. */
+  --color-ink-50: #f4f1ff;
+  --color-ink-100: #e6e1fa;
+  --color-ink-200: #cfc8ee;
+  --color-ink-300: #b3aad9;
+  --color-ink-400: #8e84b8;
+  --color-ink-500: #6f6698;
+  --color-ink-600: #554d78;
+  --color-ink-700: #3e3759;
+
+  --font-sans:
+    'Inter', 'Noto Sans TC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC',
+    'Microsoft JhengHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Noto Sans Mono CJK TC', monospace;
+
+  /* Tabular figures keep dense numeric tables from shifting as values change. */
+  --default-font-feature-settings: 'tnum';
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    /* Avoid layout shift when a dialog locks scrolling. */
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    background-color: var(--color-stage-950);
+    color: var(--color-ink-200);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* A visible focus ring is mandatory: the whole tool is keyboard-driven. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent-400);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-accent-500) 45%, transparent);
+    color: var(--color-ink-50);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-stage-900);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-stage-700);
+    border-radius: 5px;
+    border: 2px solid var(--color-stage-900);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-stage-600);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /*
+   * The house panel: a faint top-light seam plus a violet-tinted edge. Used on
+   * every card so they read as lit glass rather than flat rectangles.
+   */
+  .panel {
+    background-image: linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-accent-500) 7%, transparent),
+      transparent 42%
+    );
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, white 8%, transparent),
+      0 1px 2px rgb(0 0 0 / 0.4);
+  }
+
+  /** Emphasis gradient — violet into magenta, as in the reference art. */
+  .bg-brand-gradient {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-accent-600),
+      var(--color-magenta-500)
+    );
+  }
+
+  .text-brand-gradient {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-accent-300),
+      var(--color-magenta-400)
+    );
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+
+  /** Outer glow for an active nav pill or a focused card. */
+  .glow-accent {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--color-accent-500) 55%, transparent),
+      0 0 18px -2px color-mix(in oklab, var(--color-accent-500) 60%, transparent);
+  }
+
+  .glow-accent-sm {
+    box-shadow: 0 0 12px -2px color-mix(in oklab, var(--color-accent-500) 55%, transparent);
+  }
+
+  .glow-gilt {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--color-gilt-400) 50%, transparent),
+      0 0 16px -3px color-mix(in oklab, var(--color-gilt-400) 55%, transparent);
+  }
+
+  /** Frosted overlay surface, for dialogs and sticky bars. */
+  .glass {
+    background-color: color-mix(in oklab, var(--color-stage-900) 82%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /*
+   * Placeholder artwork. Stands in for the generated imagery the design calls
+   * for, so a missing asset reads as an intentional surface rather than a
+   * broken image. Remove the class once a real asset is wired in.
+   */
+  .art-placeholder {
+    background-image:
+      radial-gradient(
+        ellipse at 30% 110%,
+        color-mix(in oklab, var(--color-magenta-500) 45%, transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse at 75% -10%,
+        color-mix(in oklab, var(--color-accent-500) 45%, transparent),
+        transparent 55%
+      ),
+      linear-gradient(160deg, var(--color-stage-800), var(--color-stage-950));
+  }
+}
+
+@keyframes srds-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes srds-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes srds-slide-left {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes srds-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-fade-in {
+  animation: srds-fade-in 150ms ease-out;
+}
+
+@utility animate-rise {
+  animation: srds-rise 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@utility animate-slide-left {
+  animation: srds-slide-left 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@utility animate-toast-in {
+  animation: srds-toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
