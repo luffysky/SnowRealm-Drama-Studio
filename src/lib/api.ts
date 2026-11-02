@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { ZodError } from 'zod'
 import { db } from '@/db'
 import { activities } from '@/db/schema'
-import { assertCsrf, isCsrfExempt } from '@/lib/auth/csrf'
+import { assertCsrf } from '@/lib/auth/csrf'
 import { can, type Permission } from '@/lib/auth/rbac'
 import { getSessionUser, type SessionUser } from '@/lib/auth/session'
 
@@ -142,10 +142,7 @@ export function handle<Args extends unknown[]>(
     try {
       const request = args[0]
       if (request instanceof Request) {
-        const { pathname } = new URL(request.url)
-        if (!isCsrfExempt(pathname)) {
-          await assertCsrf(request)
-        }
+        await assertCsrf(request)
       }
 
       const response = await fn(...args)

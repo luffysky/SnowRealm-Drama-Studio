@@ -2,8 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      "path": "/api/ai/worker?limit=2",
-      "schedule": "* * * * *"
+      "_comment": "Vercel Hobby allows at most one cron firing per day. This is the safety net that sweeps up jobs whose retry backoff expired while nobody was in the app; immediate processing comes from the client nudging /api/ai/worker right after it enqueues. On Pro, change to '*/1 * * * *' and the nudge becomes redundant.",
+      "path": "/api/ai/worker?limit=5",
+      "schedule": "0 3 * * *"
     }
   ]
 }

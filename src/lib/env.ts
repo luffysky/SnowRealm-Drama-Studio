@@ -31,6 +31,12 @@ const schema = z.object({
   /** Bearer token Vercel Cron presents to /api/ai/worker. Worker is disabled without it. */
   CRON_SECRET: z.string().optional(),
 
+  /**
+   * Output ceiling per AI generation. Defaults to 8000, sized for the Vercel
+   * Hobby plan's 60s function limit. Raise it on a plan allowing longer runs.
+   */
+  AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(256).max(128_000).optional(),
+
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 })
 

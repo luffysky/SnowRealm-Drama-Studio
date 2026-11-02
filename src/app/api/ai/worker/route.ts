@@ -1,75 +1,88 @@
 import { NextResponse } from 'next/server'
 import { handle, jsonOk, newRequestId } from '@/lib/api'
 import { runDueJobs } from '@/lib/ai/queue'
+import { getSessionUser } from '@/lib/auth/session'
 import { safeEqual } from '@/lib/crypto'
 
 /**
  * Background worker for the AI queue (spec v2 §6.6).
  *
- * Invoked by Vercel Cron on a schedule (see vercel.json) and safe to invoke
- * concurrently: claiming uses `FOR UPDATE SKIP LOCKED`, so two overlapping runs
- * take different jobs.
+ * Two callers are allowed, because the Vercel Hobby plan fires cron at most
+ * once per day — far too slow to be the only trigger:
  *
- * Authorisation is **not** a user session — a cron invocation has no cookies.
- * Vercel Cron sends `Authorization: Bearer $CRON_SECRET`; requests without it
- * are rejected, so the endpoint cannot be used by anyone else to burn API
- * credit.
+ * 1. **Vercel Cron**, authenticated by `Authorization: Bearer $CRON_SECRET`.
+ *    This is the nightly sweep that picks up jobs whose retry backoff expired
+ *    while nobody was using the app.
+ * 2. **A signed-in member**, authenticated by their session. The client nudges
+ *    this endpoint right after enqueueing so work starts immediately. That is
+ *    safe: anyone who can reach it can already create the jobs it runs, so it
+ *    grants no capability they did not have.
+ *
+ * Anonymous callers are rejected either way, so the endpoint can never be used
+ * by a stranger to burn API credit.
+ *
+ * Safe to invoke concurrently — claiming uses `FOR UPDATE SKIP LOCKED`, so two
+ * overlapping runs take different jobs.
  */
 export const runtime = 'nodejs'
 
 /**
- * Give the worker room for a long generation. Vercel caps this by plan, and a
- * value above the plan limit is clamped rather than rejected.
+ * Vercel Hobby caps a serverless function at 60s (Pro allows up to 300s).
+ * Asking for more than the plan permits fails the deployment, so this stays at
+ * the Hobby ceiling. It also bounds how much a single invocation attempts:
+ * see `limit` below.
  */
-export const maxDuration = 300
+export const maxDuration = 60
 
 export const dynamic = 'force-dynamic'
 
-function authorize(request: Request): NextResponse | null {
-  const secret = process.env.CRON_SECRET
+function unauthorized(message: string, status: number): NextResponse {
+  return NextResponse.json(
+    { error: { code: status === 503 ? 'not_configured' : 'unauthorized', message, requestId: newRequestId() } },
+    { status }
+  )
+}
 
-  // Without a configured secret the endpoint stays closed rather than open.
-  if (!secret) {
-    return NextResponse.json(
-      {
-        error: {
-          code: 'not_configured',
-          message: 'CRON_SECRET 未設定，worker 已停用。見 docs/ENVIRONMENT.md',
-          requestId: newRequestId(),
-        },
-      },
-      { status: 503 }
-    )
+/** Cron bearer token, or a logged-in member. Returns null when authorised. */
+async function authorize(request: Request): Promise<NextResponse | null> {
+  const header = request.headers.get('authorization') ?? ''
+
+  if (header.startsWith('Bearer ')) {
+    const secret = process.env.CRON_SECRET
+    if (!secret) {
+      // Fail closed: without a configured secret the cron path stays shut.
+      return unauthorized('CRON_SECRET 未設定，排程觸發已停用。見 docs/ENVIRONMENT.md', 503)
+    }
+    if (!safeEqual(header, `Bearer ${secret}`)) {
+      return unauthorized('cron 憑證不正確', 401)
+    }
+    return null
   }
 
-  const header = request.headers.get('authorization') ?? ''
-  const expected = `Bearer ${secret}`
-
-  if (!safeEqual(header, expected)) {
-    return NextResponse.json(
-      {
-        error: {
-          code: 'unauthorized',
-          message: '需要有效的 cron 憑證',
-          requestId: newRequestId(),
-        },
-      },
-      { status: 401 }
-    )
+  const user = await getSessionUser()
+  if (!user) {
+    return unauthorized('需要有效的 cron 憑證或登入工作階段', 401)
   }
 
   return null
 }
 
 export const GET = handle(async (request: Request) => {
-  const denied = authorize(request)
+  const denied = await authorize(request)
   if (denied) return denied
 
-  const limit = Number(new URL(request.url).searchParams.get('limit') ?? 2)
-  const report = await runDueJobs({ limit: Math.min(Math.max(limit, 1), 5) })
+  /*
+   * Default of 1 keeps a single invocation inside the 60s budget: one long
+   * generation can take most of it, and a run that is killed mid-flight leaves
+   * the job's lease to expire before anything retries it. The nightly cron
+   * asks for more, since it has the whole queue to clear.
+   */
+  const requested = Number(new URL(request.url).searchParams.get('limit') ?? 1)
+  const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 1, 1), 5)
 
+  const report = await runDueJobs({ limit })
   return jsonOk(report)
 })
 
-/** Same work as GET; lets the queue dialog nudge the worker after enqueueing. */
+/** Same work as GET; this is the verb the client nudge uses. */
 export const POST = GET

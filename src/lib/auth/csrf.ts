@@ -69,6 +69,17 @@ function allowedOrigins(request: Request): string[] {
 export async function assertCsrf(request: Request): Promise<void> {
   if (!PROTECTED_METHODS.has(request.method.toUpperCase())) return
 
+  /*
+   * A request carrying an `Authorization` header cannot be a CSRF attack: a
+   * browser never attaches that header on its own, so forging one would
+   * require script on this origin — which already has the token anyway.
+   *
+   * This is what lets Vercel Cron call the worker with a bearer secret and no
+   * cookies, while the same endpoint still enforces the token for the
+   * session-authenticated nudge from the app.
+   */
+  if (request.headers.get('authorization')) return
+
   // --- 1. Origin / Referer -------------------------------------------------
   const origin = request.headers.get('origin')
   const referer = request.headers.get('referer')
@@ -110,14 +121,12 @@ export async function assertCsrf(request: Request): Promise<void> {
 }
 
 /**
- * Routes that legitimately cannot carry a token.
+ * No path-based exemptions exist.
  *
- * The AI worker is called by Vercel Cron, which has no cookies at all; it is
- * authorised by its own bearer secret instead, so applying CSRF there would
- * simply break it without adding protection.
+ * There used to be one for `/api/ai/worker`, on the grounds that Vercel Cron
+ * sends no cookies. That became too broad once a signed-in member could also
+ * call the worker: the whole path was skipping the check, not just the cron
+ * caller. The `Authorization`-header rule in `assertCsrf` covers the cron case
+ * precisely, so an exemption list is no longer needed — and an endpoint can no
+ * longer lose CSRF protection just by being added to a list.
  */
-export const CSRF_EXEMPT_PATHS = ['/api/ai/worker'] as const
-
-export function isCsrfExempt(pathname: string): boolean {
-  return CSRF_EXEMPT_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
-}

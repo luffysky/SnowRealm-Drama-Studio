@@ -19,6 +19,20 @@ import {
 
 export const DEFAULT_MODEL = 'claude-opus-5'
 
+/**
+ * Default output ceiling for one generation.
+ *
+ * Sized for the Vercel Hobby plan, whose serverless functions are killed at
+ * 60s: a request that would run longer is not "slow", it is lost work that was
+ * still billed by the provider. 8k output tokens comfortably fits that budget.
+ *
+ * Raise it with AI_MAX_OUTPUT_TOKENS once the deployment allows longer
+ * functions (Pro permits 300s), or pass `maxTokens` per request.
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = Number(
+  process.env.AI_MAX_OUTPUT_TOKENS ?? 8000
+)
+
 export const AVAILABLE_MODELS = [
   'claude-opus-5',
   'claude-sonnet-5',
@@ -118,7 +132,7 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
 
     async estimate(request: AiRunRequest): Promise<AiEstimate> {
       const modelId = request.model || model
-      const maxOutputTokens = request.maxTokens ?? 16_000
+      const maxOutputTokens = request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
 
       if (!resolvedKey) {
         // Without a key we cannot call count_tokens; approximate from characters.
@@ -158,7 +172,7 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
       const client = clientOrThrow()
       const modelId = request.model || model
       const candidateCount = Math.min(Math.max(request.candidates ?? 1, 1), 3)
-      const maxTokens = request.maxTokens ?? 32_000
+      const maxTokens = request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
 
       const userMessage = buildUserMessage(request.task, request.context)
       const wantsJson = STRUCTURED_TASKS.has(request.task)

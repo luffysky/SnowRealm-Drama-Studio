@@ -26,6 +26,7 @@ SnowRealm Drama Studio V1 — Neon PostgreSQL + Cloudflare R2 + Vercel
 | `R2_ENDPOINT` | ⬜ | 覆寫 S3 endpoint。留空則由 `R2_ACCOUNT_ID` 自動推導 |
 | `PRESIGN_TTL_SECONDS` | ⬜ | Presigned URL 有效秒數，預設 `300`（5 分鐘） |
 | `ANTHROPIC_API_KEY` | ⬜ | Claude API 金鑰。未設定時 AI 功能顯示「尚未啟用」，其餘功能不受影響 |
+| `AI_MAX_OUTPUT_TOKENS` | ⬜ | AI 單次輸出上限，預設 `8000`（配合 Hobby 的 60 秒限制） |
 | `CRON_SECRET` | ✅ | AI 背景 worker 的憑證。未設定則 worker 停用，AI 任務會一直停在佇列 |
 | `SEED_OWNER_EMAIL` | ✅* | 初始化 Owner 帳號 |
 | `SEED_OWNER_NAME` | ✅* | Owner 顯示名稱 |
@@ -218,9 +219,32 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 **未設定時的行為**：worker 回傳 503 並停用，AI 任務會一直留在 `QUEUED` 狀態。
 這是刻意的 fail-closed —— 沒有憑證就不執行，而不是讓端點開放給任何人觸發付費請求。
 
-> Vercel Hobby 方案的 cron 最短間隔是每天一次；每分鐘觸發需要 Pro 方案。
-> 若使用 Hobby，可改由前端在送出任務後呼叫一次 `POST /api/ai/worker`
-> （仍需帶 Bearer token），或把 `vercel.json` 的 schedule 改成方案允許的頻率。
+### Hobby 方案的三個限制（本專案已針對 Hobby 調整）
+
+**1. cron 每天只能一次。** `vercel.json` 設為每天 03:00，當作「撿漏網之魚」的保險 ——
+專門處理退避重試到期、但當下沒人在使用系統的任務。
+
+**2. 即時執行靠前端推一下。** 送出 AI 任務後，前端會呼叫一次
+`POST /api/ai/worker`（`src/lib/ai/client.ts` 的 `submitAiJob`）。
+因此 worker **同時接受兩種身分**：
+
+| 呼叫者 | 驗證方式 | CSRF |
+|---|---|---|
+| Vercel Cron | `Authorization: Bearer $CRON_SECRET` | 跳過（帶 Authorization 標頭的請求不可能是 CSRF） |
+| 已登入成員 | session cookie | **強制**，要帶 `x-csrf-token` |
+
+匿名呼叫兩條路都走不通，外人無法觸發付費請求。
+
+**3. function 執行上限 60 秒。** 超過就被砍掉 —— 而那不是「比較慢」，
+是**already 付過錢的工作直接遺失**。因此：
+
+- `maxDuration = 60`（Pro 可到 300）
+- AI 單次輸出上限預設 **8000 tokens**，可用 `AI_MAX_OUTPUT_TOKENS` 調整
+- worker 單次預設只處理 1 筆（cron 那次才抓 5 筆）
+
+> **升級 Pro 之後要改的**：`vercel.json` 的 schedule 改 `*/1 * * * *`、
+> worker 的 `maxDuration` 改 `300`、`AI_MAX_OUTPUT_TOKENS` 可拉高。
+> 前端推一下的機制留著也無妨，只是變成多餘。
 
 ---
 

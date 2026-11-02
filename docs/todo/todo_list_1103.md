@@ -40,10 +40,18 @@
 
 ## 🟠 等使用者提供才能動（已寫進 `docs/NEEDED_FROM_YOU.md`）
 
-### 🚨 現在就卡著的
-- [ ] **Vercel 方案 Hobby / Pro？** —— `vercel.json` 目前設 cron **每分鐘**跑 AI worker，**Hobby 只支援每天一次**。
-  - 用 Hobby 的話三選一：升 Pro、把 schedule 改成方案允許的頻率（AI 任務會延後）、或改成前端送出任務後主動呼叫一次 worker（仍要帶 bearer token）。
-  - 使用者回答後我再改 `vercel.json`。
+### ~~🚨 Vercel 方案~~ ✅ 已決定：**Hobby**（1103）
+使用者：「Hobby 已經買了你跟GPT了 沒錢養其他東西了」。已完成對應調整：
+- ~~cron 改每天 03:00~~ ✅ 當保險，撿退避重試到期但沒人在線的任務
+- ~~前端推一下 worker~~ ✅ `src/lib/ai/client.ts` 的 `submitAiJob` 送完就 nudge，所以感覺是即時的
+- ~~worker 雙身分驗證~~ ✅ cron bearer（跳 CSRF，因為帶 Authorization 的請求不可能是 CSRF）或登入成員（強制 CSRF）。匿名兩條路都不通
+- ~~配合 60 秒 function 上限~~ ✅ `maxDuration=60`、AI 單次輸出預設 8000 tokens（`AI_MAX_OUTPUT_TOKENS` 可調）、worker 單次預設處理 1 筆
+
+> **之後升 Pro 要改的**：schedule → `*/1 * * * *`、`maxDuration` → 300、`AI_MAX_OUTPUT_TOKENS` 可拉高。
+
+**⚠️ 成本預期**（使用者明確表示預算緊）：Neon、R2 都有免費額度，本專案用量在免費範圍內。
+**唯一會真的花錢的是 Anthropic API**（按 token 計價，非訂閱）。
+所以 `usage.ts` 的預算攔截建議一定要設上限 —— 見 F3。
 
 ### 憑證（部署前必須）
 - [ ] Neon：`DATABASE_URL`（pooled，host 含 `-pooler`）+ `DATABASE_URL_UNPOOLED`（direct）
