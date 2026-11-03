@@ -158,3 +158,75 @@ describe.skipIf(!ready)('對話與訊息', () => {
     expect(hits.some((m) => m.body.includes('廚房'))).toBe(true)
   })
 })
+
+/**
+ * ICE 伺服器設定（Z99）。
+ *
+ * 這組值原本寫死在元件裡：要加 TURN——通話真的穿不過 NAT 時唯一的解法——
+ * 就得改程式碼重新部署，而帳密會留在版本庫裡。
+ */
+describe('ICE 伺服器設定', () => {
+  it('沒設定時給 Google 的 STUN', async () => {
+    const { DEFAULT_ICE_SERVERS } = await import('@/lib/settings')
+
+    expect(DEFAULT_ICE_SERVERS[0]?.urls.some((u) => u.startsWith('stun:'))).toBe(true)
+    // 沒有 TURN 是刻意的：要錢，而且大多數通話用不到。
+    expect(DEFAULT_ICE_SERVERS.some((s) => s.urls.some((u) => u.startsWith('turn:')))).toBe(false)
+  })
+
+  it.skipIf(!ready)('存得進也讀得回 TURN 的帳密', async () => {
+    const { getIceServers, setIceServers, DEFAULT_ICE_SERVERS } = await import('@/lib/settings')
+    const db = (await import('@/db')).db
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+
+    const [someone] = await db.select({ id: schema.users.id }).from(schema.users).limit(1)
+    if (!someone) return
+
+    try {
+      await setIceServers(
+        [
+          { urls: ['stun:stun.example.com:3478'] },
+          { urls: ['turn:turn.example.com:3478'], username: 'u', credential: 'p' },
+        ],
+        someone.id
+      )
+
+      const read = await getIceServers()
+      expect(read).toHaveLength(2)
+      expect(read[1]?.username).toBe('u')
+      expect(read[1]?.credential).toBe('p')
+    } finally {
+      await db.delete(schema.appSettings).where(eq(schema.appSettings.key, 'call.iceServers'))
+    }
+
+    // 刪掉設定就回到預設，不是回到空陣列——空陣列會讓每一通都接不起來。
+    expect(await getIceServers()).toEqual(DEFAULT_ICE_SERVERS)
+  })
+
+  it.skipIf(!ready)('沒有網址的那一列會被丟掉，不是整張表作廢', async () => {
+    const { setIceServers, getIceServers } = await import('@/lib/settings')
+    const db = (await import('@/db')).db
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+
+    const [someone] = await db.select({ id: schema.users.id }).from(schema.users).limit(1)
+    if (!someone) return
+
+    try {
+      await setIceServers(
+        [
+          { urls: [] },
+          { urls: ['stun:good.example.com:3478'] },
+        ],
+        someone.id
+      )
+
+      const read = await getIceServers()
+      expect(read).toHaveLength(1)
+      expect(read[0]?.urls[0]).toBe('stun:good.example.com:3478')
+    } finally {
+      await db.delete(schema.appSettings).where(eq(schema.appSettings.key, 'call.iceServers'))
+    }
+  })
+})

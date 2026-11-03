@@ -4,6 +4,7 @@ import { ChatRoom } from '@/components/chat/ChatRoom'
 import { getSessionUser } from '@/lib/auth/session'
 import { listMessages, openDirectConversation } from '@/lib/chat'
 import { listProjects } from '@/lib/projects'
+import { getIceServers } from '@/lib/settings'
 
 export const metadata: Metadata = { title: '訊息' }
 /** The thread changes constantly; a cached render would open on stale history. */
@@ -21,9 +22,10 @@ export default async function ChatPage() {
 
   const conversationId = await openDirectConversation(user.id)
 
-  const [messages, projects] = await Promise.all([
+  const [messages, projects, iceServers] = await Promise.all([
     listMessages({ conversationId, limit: 40 }),
     listProjects(user.id),
+    getIceServers(),
   ])
 
   /*
@@ -52,6 +54,7 @@ export default async function ChatPage() {
         createdAt: message.createdAt.toISOString(),
       }))}
       initialSeq={messages[messages.length - 1]?.seq ?? 0}
+      iceServers={iceServers}
     />
   )
 }

@@ -34,9 +34,12 @@ const STORAGE_KEY = 'srds.floatingChat.v1'
 export function FloatingChat({
   conversationId,
   meId,
+  iceServers,
 }: {
   conversationId: string
   meId: string
+  /** From `app_settings`; STUN by default, TURN when configured. */
+  iceServers: RTCIceServer[]
 }) {
   const pathname = usePathname()
   const [state, setState] = useState<'hidden' | 'ball' | 'open'>('ball')
@@ -277,6 +280,7 @@ export function FloatingChat({
           call={call}
           setCall={setCall}
           signalQueue={signalQueue}
+          iceServers={iceServers}
         />
 
         <Link

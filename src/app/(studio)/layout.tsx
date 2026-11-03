@@ -3,6 +3,7 @@ import { FloatingChat } from '@/components/chat/FloatingChat'
 import { getSessionUser } from '@/lib/auth/session'
 import { StudioShell } from '@/components/studio/StudioShell'
 import { openDirectConversation } from '@/lib/chat'
+import { getIceServers } from '@/lib/settings'
 
 /**
  * Guards every workbench route. The check runs server-side on each request, so
@@ -17,12 +18,15 @@ export default async function StudioLayout({ children }: { children: React.React
   const user = await getSessionUser()
   if (!user) redirect('/login')
 
-  const conversationId = await openDirectConversation(user.id)
+  const [conversationId, iceServers] = await Promise.all([
+    openDirectConversation(user.id),
+    getIceServers(),
+  ])
 
   return (
     <StudioShell user={user}>
       {children}
-      <FloatingChat conversationId={conversationId} meId={user.id} />
+      <FloatingChat conversationId={conversationId} meId={user.id} iceServers={iceServers} />
     </StudioShell>
   )
 }

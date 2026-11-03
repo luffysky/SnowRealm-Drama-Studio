@@ -26,10 +26,6 @@ import { cn } from '@/lib/utils'
  * connects and never explains itself is the worst version of this.
  */
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-]
-
 type Phase = 'idle' | 'ringing' | 'incoming' | 'connecting' | 'active' | 'failed'
 
 export function CallPanel({
@@ -39,6 +35,7 @@ export function CallPanel({
   call,
   setCall,
   signalQueue,
+  iceServers,
 }: {
   conversationId: string
   meId: string
@@ -47,6 +44,12 @@ export function CallPanel({
   setCall: (call: ChannelCall | null) => void
   /** Filled by the SSE channel; drained here. */
   signalQueue: MutableRefObject<ChannelSignal[]>
+  /**
+   * From `app_settings`. Hardcoding these meant that adding a TURN server —
+   * the one fix for a call that genuinely cannot be traversed — required a
+   * redeploy, and the credentials would have lived in the repository.
+   */
+  iceServers: RTCIceServer[]
 }) {
   const toast = useToast()
 
@@ -61,11 +64,15 @@ export function CallPanel({
   const [volume, setVolume] = useState(1)
   const [speaker, setSpeaker] = useState(false)
   const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([])
+  /** Live handshake state, shown while connecting and after a failure. */
+  const [trace, setTrace] = useState('')
 
   const peerRef = useRef<RTCPeerConnection | null>(null)
   /** Set by the signalling effect; called once a peer exists. */
   const replayRef = useRef<(() => void) | null>(null)
   const remoteStreamRef = useRef<MediaStream | null>(null)
+  /** ICE candidates by type, so a failure can be diagnosed rather than guessed. */
+  const candidates = useRef({ total: 0, host: 0, srflx: 0, relay: 0 })
   const localRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -88,10 +95,12 @@ export function CallPanel({
     callIdRef.current = null
     pendingIce.current = []
     remoteStreamRef.current = null
+    candidates.current = { total: 0, host: 0, srflx: 0, relay: 0 }
     setLocalStream(null)
     setRemoteStream(null)
     setSpeaker(false)
     setVolume(1)
+    setTrace('')
     setPhase('idle')
     setElapsed(0)
     setMuted(false)
@@ -110,7 +119,7 @@ export function CallPanel({
 
   const buildPeer = useCallback(
     async (callId: string, video: boolean) => {
-      const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+      const peer = new RTCPeerConnection({ iceServers })
       peerRef.current = peer
 
       const media = await navigator.mediaDevices.getUserMedia({ audio: true, video })
@@ -137,21 +146,96 @@ export function CallPanel({
       }
 
       peer.onicecandidate = (event) => {
-        if (event.candidate) void sendSignal(callId, 'ice', event.candidate.toJSON())
+        if (!event.candidate) return
+
+        // Count by type, for the diagnosis above.
+        const type = event.candidate.type
+        candidates.current.total += 1
+        if (type === 'host') candidates.current.host += 1
+        if (type === 'srflx') candidates.current.srflx += 1
+        if (type === 'relay') candidates.current.relay += 1
+
+        void sendSignal(callId, 'ice', event.candidate.toJSON())
       }
 
+      /*
+       * Diagnose, do not guess.
+       *
+       * The first version blamed every failure on NAT and told people to set
+       * up a TURN server. That is wrong most of the time: if the handshake
+       * never completed there is nothing for ICE to do, and two machines on
+       * one home network do not need STUN at all, let alone a relay. Sending
+       * someone to configure a relay they do not need — and which costs money
+       * — is worse than saying nothing.
+       *
+       * `signalingState` separates the two cases cleanly: still holding an
+       * offer or an answer means the other side never replied, which is a
+       * signalling problem. 'stable' means both descriptions are in and the
+       * failure really is the network between them.
+       */
       peer.onconnectionstatechange = () => {
-        if (peer.connectionState === 'connected') setPhase('active')
+        if (peer.connectionState === 'connected') {
+          setProblem(null)
+          setPhase('active')
+        }
+
         if (peer.connectionState === 'failed') {
-          /*
-           * Almost always a NAT that STUN cannot traverse. Saying which is
-           * better than "通話失敗" — the fix is a TURN server, and nobody can
-           * act on an error that does not name it.
-           */
-          setProblem(
-            '接不通：雙方的網路環境需要中繼伺服器（TURN）。目前只設定了 STUN，一般家用網路可以，行動網路或公司網路常常不行。'
-          )
+          const signalling = peer.signalingState
+          const ice = peer.iceConnectionState
+
+          if (signalling !== 'stable') {
+            setProblem(
+              `握手沒有完成（signalingState=${signalling}）。` +
+                '對方沒有回應 —— 通常是對方沒有真的接起來，或是兩邊版本不一致。重新整理兩邊的頁面再試一次。'
+            )
+          } else if (candidates.current.relay === 0 && candidates.current.srflx === 0) {
+            setProblem(
+              '連一個對外位址都拿不到（沒有 srflx candidate）。' +
+                'STUN 被擋了，或是網路沒有通。'
+            )
+          } else {
+            setProblem(
+              '雙方都拿到位址了但接不起來，這才是真的需要中繼伺服器（TURN）的情況。' +
+                `（ice=${ice}、host=${candidates.current.host}、srflx=${candidates.current.srflx}）`
+            )
+          }
+
           setPhase('failed')
+        }
+      }
+
+      /*
+       * What kinds of address we managed to gather. `host` alone means the
+       * same network; `srflx` means STUN answered; `relay` would mean TURN,
+       * which is not configured. This is the difference between "the
+       * handshake broke" and "the network genuinely cannot be traversed",
+       * and without it the message above is a guess.
+       */
+      /*
+       * A running trace of the handshake.
+       *
+       * Visible on screen because this is the one feature that cannot be
+       * tested from one machine — it takes two people on two networks. When
+       * it fails, the numbers here are what makes the report actionable
+       * instead of 「通話沒成功」.
+       */
+      const retrace = () => {
+        const c = candidates.current
+        setTrace(
+          `sig=${peer.signalingState} ice=${peer.iceConnectionState} ` +
+            `conn=${peer.connectionState} host=${c.host} srflx=${c.srflx} relay=${c.relay}`
+        )
+      }
+
+      peer.addEventListener('signalingstatechange', retrace)
+      peer.addEventListener('iceconnectionstatechange', retrace)
+      peer.addEventListener('connectionstatechange', retrace)
+      peer.addEventListener('icegatheringstatechange', retrace)
+      retrace()
+
+      peer.onicegatheringstatechange = () => {
+        if (peer.iceGatheringState === 'complete' && candidates.current.total === 0) {
+          setProblem('沒有收集到任何連線位址。通常是網路或防火牆擋掉了 UDP。')
         }
       }
 
@@ -160,7 +244,7 @@ export function CallPanel({
 
       return peer
     },
-    [sendSignal]
+    [sendSignal, iceServers]
   )
 
   /* ------------------------------------------------------------ signalling */
@@ -525,6 +609,17 @@ export function CallPanel({
             {problem && (
               <p role="alert" className="text-[10px] leading-relaxed text-amber-300">
                 {problem}
+              </p>
+            )}
+
+            {/*
+              Shown while connecting and after a failure, hidden once the call
+              is up. Ugly on purpose: it is a diagnostic, and it is readable
+              aloud over the very call that is failing.
+            */}
+            {trace && phase !== 'active' && phase !== 'incoming' && (
+              <p className="font-mono text-[9px] leading-relaxed break-all text-ink-600">
+                {trace}
               </p>
             )}
 

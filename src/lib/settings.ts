@@ -23,6 +23,7 @@ export const SETTING_KEYS = {
   storageCost: 'cost.storage',
   modelPricing: 'cost.models',
   taskProfiles: 'ai.taskProfiles',
+  iceServers: 'call.iceServers',
 } as const
 
 async function readSetting(key: string): Promise<unknown> {
@@ -267,4 +268,71 @@ export async function setTaskProfiles(profiles: TaskProfiles, userId: string): P
   const parsed = parseTaskProfiles(profiles)
   if (!parsed) throw new Error('AI 任務設定沒有任何一列是有效的')
   await writeSetting(SETTING_KEYS.taskProfiles, parsed, userId)
+}
+
+/* -------------------------------------------------------------------------- */
+/* 通話的 ICE 伺服器 (Z99)                                                      */
+/* -------------------------------------------------------------------------- */
+
+export type IceServer = {
+  urls: string[]
+  username?: string
+  credential?: string
+}
+
+/**
+ * STUN only, from Google's public servers.
+ *
+ * Enough for two ordinary home networks: STUN just tells each side what its
+ * own public address looks like, and the browsers connect directly. It is not
+ * enough for two symmetric NATs — some mobile carriers, most corporate
+ * networks — where the traffic has to be relayed by a TURN server.
+ *
+ * No TURN is configured because one costs money and most calls do not need
+ * it. When a call does fail for that reason, the panel says so with the
+ * evidence, and the credentials go in here rather than in the source.
+ */
+export const DEFAULT_ICE_SERVERS: IceServer[] = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+]
+
+function parseIceServers(value: unknown): IceServer[] | null {
+  if (!Array.isArray(value)) return null
+
+  const out: IceServer[] = []
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue
+    const row = entry as Record<string, unknown>
+
+    const urls = Array.isArray(row.urls)
+      ? row.urls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+      : typeof row.urls === 'string'
+        ? [row.urls]
+        : []
+
+    // A server with no URL is not a server; skipping the row beats handing
+    // the browser a malformed config it will reject wholesale.
+    if (urls.length === 0) continue
+
+    out.push({
+      urls,
+      ...(typeof row.username === 'string' && row.username ? { username: row.username } : {}),
+      ...(typeof row.credential === 'string' && row.credential
+        ? { credential: row.credential }
+        : {}),
+    })
+  }
+
+  return out.length > 0 ? out : null
+}
+
+export async function getIceServers(): Promise<IceServer[]> {
+  return parseIceServers(await readSetting(SETTING_KEYS.iceServers)) ?? DEFAULT_ICE_SERVERS
+}
+
+export async function setIceServers(servers: IceServer[], userId: string): Promise<void> {
+  const parsed = parseIceServers(servers)
+  if (!parsed) throw new Error('至少要有一台有網址的伺服器')
+  await writeSetting(SETTING_KEYS.iceServers, parsed, userId)
 }

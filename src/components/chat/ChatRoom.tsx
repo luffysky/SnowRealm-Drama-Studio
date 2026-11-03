@@ -41,6 +41,8 @@ type Props = {
   uploadProjectId: string | null
   initialMessages: ChannelMessage[]
   initialSeq: number
+  /** From `app_settings`; STUN by default, TURN when configured. */
+  iceServers: RTCIceServer[]
 }
 
 export function ChatRoom({
@@ -49,6 +51,7 @@ export function ChatRoom({
   uploadProjectId,
   initialMessages,
   initialSeq,
+  iceServers,
 }: Props) {
   const toast = useToast()
 
@@ -392,6 +395,7 @@ export function ChatRoom({
             call={channel.call}
             setCall={channel.setCall}
             signalQueue={signalQueue}
+            iceServers={iceServers}
           />
         </div>
       </header>
