@@ -2,13 +2,16 @@
 
 import { Check, FileText, History, Plus, Save, Search, Sparkles, Users } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { RichTextEditor } from '@/components/editor/RichTextEditor'
+import { AiAssistant } from '@/components/studio/AiAssistant'
 import { countHtmlChars } from '@/components/editor/extensions'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import type { EditorModuleId } from '@/lib/editor/modules'
+import type { CurrencyValue, FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
 /**
@@ -48,6 +51,11 @@ export type NovelEditorProps = {
   targetChars: number
   /** Editor modules enabled for 小說, read from app_settings. */
   modules: EditorModuleId[]
+  currency: CurrencyValue
+  fx: FxRates
+  /** Whether a provider key is configured; the AI panel explains when not. */
+  providerReady: boolean
+  providerDetail?: string
 }
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'
@@ -65,8 +73,13 @@ export function NovelEditor({
   lastEditorName,
   targetChars,
   modules,
+  currency,
+  fx,
+  providerReady,
+  providerDetail,
 }: NovelEditorProps) {
   const toast = useToast()
+  const router = useRouter()
   const [enabledModules, setEnabledModules] = useState(modules)
 
   const [chapters, setChapters] = useState(initialChapters)
@@ -314,11 +327,40 @@ export function NovelEditor({
             <h3 className="flex-1 text-xs font-medium text-ink-200">AI 創作助手</h3>
           </header>
           <div className="p-4">
-            <EmptyState
-              title="尚未啟用"
-              description="設定 ANTHROPIC_API_KEY 後，續寫、擴寫、潤飾等功能才會開放。訂閱方案不等於 API 額度。"
-              icon={<Sparkles aria-hidden className="size-5 text-ink-500" />}
-              className="py-6"
+            <AiAssistant
+              projectId={projectId}
+              episodeId={episodeId}
+              /* The AI works on the chapter in front of the reader, not the
+                 whole episode — a 4,000-character continuation prompt that
+                 includes nine other chapters mostly pays for context. */
+              sourceText={active?.content ?? ''}
+              currency={currency}
+              fx={fx}
+              providerReady={providerReady}
+              providerDetail={providerDetail}
+              onAdopted={() => router.refresh()}
+              tasks={[
+                {
+                  kind: 'NOVEL_CONTINUE',
+                  label: '續寫',
+                  hint: '接著目前的章節往下寫，不重寫既有段落。',
+                },
+                {
+                  kind: 'NOVEL_POLISH',
+                  label: '潤稿',
+                  hint: '修語病、統一用詞、加強畫面感；不動劇情事實。',
+                },
+                {
+                  kind: 'NOVEL_REWRITE',
+                  label: '改寫',
+                  hint: '保留事件，換一種寫法。建議在補充指示說明方向。',
+                },
+                {
+                  kind: 'NOVEL_REVIEW',
+                  label: '審稿',
+                  hint: '逐條指出節奏、動機與世界觀矛盾，只報告不改寫。',
+                },
+              ]}
             />
           </div>
         </section>

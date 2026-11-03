@@ -6,7 +6,8 @@ import { projects } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
-import { getEditorModules } from '@/lib/settings'
+import { adapterForTask } from '@/lib/ai/jobs'
+import { getEditorModules, getFxRates } from '@/lib/settings'
 import { openDocument } from '@/lib/writing'
 
 export const metadata: Metadata = { title: '劇本編輯器' }
@@ -26,7 +27,7 @@ export default async function EpisodeScriptPage({ params }: Params) {
   const { projectId, episodeId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const [document, modules, settings] = await Promise.all([
+  const [document, modules, settings, fx, provider] = await Promise.all([
     openDocument(project.id, episodeId, 'SCRIPT'),
     getEditorModules('SCRIPT'),
     db
@@ -34,6 +35,8 @@ export default async function EpisodeScriptPage({ params }: Params) {
       .from(projects)
       .where(eq(projects.id, project.id))
       .limit(1),
+    getFxRates(),
+    providerStatus(),
   ])
 
   if (!document) notFound()
@@ -54,6 +57,25 @@ export default async function EpisodeScriptPage({ params }: Params) {
       targetMinSec={settings[0]?.min ?? 120}
       targetMaxSec={settings[0]?.max ?? 180}
       modules={modules}
+      currency={user.displayCurrency}
+      fx={fx}
+      providerReady={provider.available}
+      providerDetail={provider.detail}
     />
   )
+}
+
+/** Whether a text provider is configured, and why not when it isn't. */
+async function providerStatus(): Promise<{ available: boolean; detail?: string }> {
+  try {
+    const resolved = await adapterForTask('NOVEL_TO_SCRIPT', null)
+    if (!resolved) return { available: false, detail: '尚未設定任何可用的 AI 供應商。' }
+    const status = await resolved.adapter.status()
+    return { available: status.available, detail: status.detail }
+  } catch (error) {
+    return {
+      available: false,
+      detail: error instanceof Error ? error.message : undefined,
+    }
+  }
 }

@@ -2,13 +2,16 @@
 
 import { Clapperboard, History, Plus, Save, Search, Sparkles } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { countHtmlChars } from '@/components/editor/extensions'
 import { RichTextEditor } from '@/components/editor/RichTextEditor'
+import { AiAssistant } from '@/components/studio/AiAssistant'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import type { EditorModuleId } from '@/lib/editor/modules'
+import type { CurrencyValue, FxRates } from '@/lib/money'
 import { cn, formatDurationZh, judgeDuration } from '@/lib/utils'
 
 /**
@@ -50,6 +53,10 @@ export type ScriptEditorProps = {
   targetMinSec: number
   targetMaxSec: number
   modules: EditorModuleId[]
+  currency: CurrencyValue
+  fx: FxRates
+  providerReady: boolean
+  providerDetail?: string
 }
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'
@@ -68,8 +75,13 @@ export function ScriptEditor({
   targetMinSec,
   targetMaxSec,
   modules,
+  currency,
+  fx,
+  providerReady,
+  providerDetail,
 }: ScriptEditorProps) {
   const toast = useToast()
+  const router = useRouter()
 
   const [scenes, setScenes] = useState(initialScenes)
   const [activeId, setActiveId] = useState(initialScenes[0]?.id ?? null)
@@ -308,11 +320,27 @@ export function ScriptEditor({
             <h3 className="flex-1 text-xs font-medium text-ink-200">AI 劇本助手</h3>
           </header>
           <div className="p-4">
-            <EmptyState
-              title="尚未啟用"
-              description="設定 ANTHROPIC_API_KEY 後，「根據小說生成劇本」「對白優化」「時長控制」才會開放。"
-              icon={<Sparkles aria-hidden className="size-5 text-ink-500" />}
-              className="py-6"
+            <AiAssistant
+              projectId={projectId}
+              episodeId={episodeId}
+              sourceText={active?.content ?? ''}
+              currency={currency}
+              fx={fx}
+              providerReady={providerReady}
+              providerDetail={providerDetail}
+              onAdopted={() => router.refresh()}
+              tasks={[
+                {
+                  kind: 'NOVEL_TO_SCRIPT',
+                  label: '依小說生成劇本',
+                  hint: '把本集小說改編成場次、動作與對白；不改動原著劇情。',
+                },
+                {
+                  kind: 'SCRIPT_ANALYZE',
+                  label: '劇本分析',
+                  hint: '估算片長（含動作與停頓）、指出對白過長與可刪減處。',
+                },
+              ]}
             />
           </div>
         </section>
