@@ -26,6 +26,17 @@ const schema = z.object({
   R2_ENDPOINT: z.string().optional(),
   PRESIGN_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
 
+  /*
+   * Cloudflare TURN, for calls that cannot be made peer-to-peer.
+   *
+   * The key is a long-term secret and never leaves the server: it is used to
+   * mint short-lived credentials per call, which is what the browser gets.
+   * Handing the key itself to the client would let anyone relay traffic on
+   * this account's bill.
+   */
+  CLOUDFLARE_TURN_KEY_ID: z.string().optional(),
+  CLOUDFLARE_TURN_API_TOKEN: z.string().optional(),
+
   ANTHROPIC_API_KEY: z.string().optional(),
 
   /** Bearer token Vercel Cron presents to /api/ai/worker. Worker is disabled without it. */

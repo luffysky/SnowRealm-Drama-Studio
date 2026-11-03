@@ -3,7 +3,7 @@ import { FloatingChat } from '@/components/chat/FloatingChat'
 import { getSessionUser } from '@/lib/auth/session'
 import { StudioShell } from '@/components/studio/StudioShell'
 import { openDirectConversation } from '@/lib/chat'
-import { getIceServers } from '@/lib/settings'
+import { iceServersForCall } from '@/lib/turn'
 
 /**
  * Guards every workbench route. The check runs server-side on each request, so
@@ -20,7 +20,7 @@ export default async function StudioLayout({ children }: { children: React.React
 
   const [conversationId, iceServers] = await Promise.all([
     openDirectConversation(user.id),
-    getIceServers(),
+    iceServersForCall(),
   ])
 
   return (

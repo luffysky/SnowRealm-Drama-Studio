@@ -230,3 +230,74 @@ describe('ICE 伺服器設定', () => {
     }
   })
 })
+
+/**
+ * Cloudflare TURN 回傳的 iceServers 整理（Z99）。
+ *
+ * 他們自己的文件說 port 53 那個網址在瀏覽器裡常常逾時，而一個會卡住的
+ * candidate 會拖慢整個收集階段——所以要濾掉。
+ */
+describe('TURN 回應整理', () => {
+  // 與 src/lib/turn.ts 的 normalise 同一套規則。
+  function normalise(value: unknown) {
+    if (!Array.isArray(value)) return []
+    const out: { urls: string[]; username?: string; credential?: string }[] = []
+
+    for (const entry of value) {
+      if (!entry || typeof entry !== 'object') continue
+      const row = entry as Record<string, unknown>
+      const urls = (Array.isArray(row.urls) ? row.urls : [row.urls])
+        .filter((u): u is string => typeof u === 'string' && u.length > 0)
+        .filter((u) => !u.includes(':53?') && !u.endsWith(':53'))
+      if (urls.length === 0) continue
+      out.push({
+        urls,
+        ...(typeof row.username === 'string' ? { username: row.username } : {}),
+        ...(typeof row.credential === 'string' ? { credential: row.credential } : {}),
+      })
+    }
+    return out
+  }
+
+  it('留住 TURN 的帳密', () => {
+    const parsed = normalise([
+      { urls: ['stun:stun.cloudflare.com:3478'] },
+      {
+        urls: ['turn:turn.cloudflare.com:3478?transport=udp'],
+        username: 'minted-user',
+        credential: 'minted-secret',
+      },
+    ])
+
+    expect(parsed).toHaveLength(2)
+    expect(parsed[1]?.username).toBe('minted-user')
+    expect(parsed[1]?.credential).toBe('minted-secret')
+  })
+
+  it('濾掉 port 53 的網址', () => {
+    const parsed = normalise([
+      {
+        urls: [
+          'turn:turn.cloudflare.com:3478?transport=udp',
+          'turn:turn.cloudflare.com:53?transport=udp',
+          'turn:turn.cloudflare.com:53',
+        ],
+        username: 'u',
+        credential: 'p',
+      },
+    ])
+
+    expect(parsed[0]?.urls).toEqual(['turn:turn.cloudflare.com:3478?transport=udp'])
+  })
+
+  it('整列只剩 port 53 的話整列丟掉，不留一個空的 urls', () => {
+    // 空的 urls 會讓瀏覽器整份設定都拒絕。
+    expect(normalise([{ urls: ['turn:turn.cloudflare.com:53'] }])).toHaveLength(0)
+  })
+
+  it('形狀不對就回空陣列，不是丟例外', () => {
+    expect(normalise(null)).toEqual([])
+    expect(normalise({ nope: true })).toEqual([])
+    expect(normalise([{ urls: [] }, 'garbage', 42])).toEqual([])
+  })
+})
