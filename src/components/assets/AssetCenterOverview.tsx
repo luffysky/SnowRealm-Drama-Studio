@@ -6,6 +6,7 @@ import {
   Mic,
   Music,
   Package,
+  Plus,
   ShieldCheck,
   Volume2,
   type LucideIcon,
@@ -77,7 +78,17 @@ export function AssetCenterOverview({
         </p>
       </header>
 
-      <AssetCenterNav projectId={projectId} counts={counts} />
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <AssetCenterNav projectId={projectId} counts={counts} />
+
+        <Link
+          href={`/projects/${projectId}/assets/music/new`}
+          className="mb-1 inline-flex items-center gap-1.5 rounded-md bg-accent-600 px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-accent-500"
+        >
+          <Plus aria-hidden className="size-3.5" />
+          新增音樂
+        </Link>
+      </div>
 
       <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
