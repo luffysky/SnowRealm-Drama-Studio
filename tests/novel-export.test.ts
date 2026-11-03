@@ -71,3 +71,46 @@ describe('createZip', () => {
     expect(zip.readUInt16LE(6) & 0x0800).toBe(0x0800)
   })
 })
+
+/**
+ * 章名與集名重複時不印章名。
+ *
+ * 一集一章是這裡的常態，而拆章工具把兩個名字設成同一個來源，所以匯出
+ * 會印「第 1 集　三文錢的生意」再緊接著「── 三文錢的生意 ──」。
+ */
+function showsChapterTitle(
+  episode: { title: string; chapters: unknown[] },
+  title: string
+): boolean {
+  const name = title.trim()
+  if (!name) return false
+  if (episode.chapters.length > 1) return true
+  return name !== episode.title.trim()
+}
+
+describe('showsChapterTitle', () => {
+  const one = (title: string) => ({ title, chapters: [1] })
+  const many = (title: string) => ({ title, chapters: [1, 2] })
+
+  it('hides a chapter title that repeats the episode title', () => {
+    expect(showsChapterTitle(one('三文錢的生意'), '三文錢的生意')).toBe(false)
+  })
+
+  it('ignores surrounding whitespace when comparing', () => {
+    expect(showsChapterTitle(one('三文錢的生意'), '  三文錢的生意 ')).toBe(false)
+  })
+
+  it('shows it when the chapter says something different', () => {
+    expect(showsChapterTitle(one('三文錢的生意'), '楔子')).toBe(true)
+  })
+
+  it('always shows it when an episode has several chapters', () => {
+    // Two chapters with no headings between them run together as one block.
+    expect(showsChapterTitle(many('三文錢的生意'), '三文錢的生意')).toBe(true)
+  })
+
+  it('hides an empty title rather than printing an empty heading', () => {
+    expect(showsChapterTitle(one('三文錢的生意'), '   ')).toBe(false)
+    expect(showsChapterTitle(many('三文錢的生意'), '')).toBe(false)
+  })
+})

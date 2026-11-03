@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/Toast'
 import type { AiSelectionAction } from '@/components/editor/AiSelectionMenu'
 import { RichTextEditor } from '@/components/editor/RichTextEditor'
 import { AiAssistant } from '@/components/studio/AiAssistant'
+import { NovelExportMenu } from '@/components/studio/NovelExportMenu'
 import { countHtmlChars } from '@/components/editor/extensions'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import type { AiJobKindValue } from '@/lib/constants'
@@ -367,6 +368,23 @@ export function NovelEditor({
               </button>
             ))}
           </div>
+
+          {/*
+            Export and copy sit with the chapter index rather than in the
+            editor pane: they act on the whole book, and the pane acts on one
+            chapter. `toc` already carries what has prose in it.
+          */}
+          <NovelExportMenu
+            projectId={projectId}
+            episodes={toc
+              .filter((episode) => episode.charCount > 0)
+              .map((episode) => ({
+                episodeId: episode.episodeId,
+                number: episode.number,
+                title: episode.title,
+                charCount: episode.charCount,
+              }))}
+          />
         </div>
 
         {scope === 'book' ? (

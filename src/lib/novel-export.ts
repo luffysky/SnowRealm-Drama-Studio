@@ -244,6 +244,23 @@ function paragraphs(text: string): string[] {
     .filter(Boolean)
 }
 
+/**
+ * Whether to print the chapter title above the prose.
+ *
+ * One chapter per episode is the normal arrangement here, and the split tool
+ * set both names from the same source — so the export was printing
+ * 「第 1 集　三文錢的生意」 and then 「── 三文錢的生意 ──」 directly
+ * under it. A heading that repeats the heading above it is noise.
+ *
+ * Only a chapter whose name says something the episode heading does not.
+ */
+function showsChapterTitle(episode: Episode, title: string): boolean {
+  const name = title.trim()
+  if (!name) return false
+  if (episode.chapters.length > 1) return true
+  return name !== episode.title.trim()
+}
+
 function episodeLabel(episode: Episode): string {
   const number = `第 ${episode.number} 集`
   return episode.title ? `${number}　${episode.title}` : number
@@ -302,7 +319,9 @@ function buildTxt(title: string, list: Episode[]): string {
     parts.push(episodeLabel(episode), '')
 
     for (const chapter of episode.chapters) {
-      if (chapter.title.trim()) parts.push(`　　── ${chapter.title} ──`, '')
+      if (showsChapterTitle(episode, chapter.title)) {
+        parts.push(`　　── ${chapter.title} ──`, '')
+      }
       // Two full-width spaces: the standard first-line indent in Chinese
       // typesetting, and what every reader app expects to find already there.
       for (const block of paragraphs(chapter.text)) {
@@ -324,7 +343,7 @@ function buildMarkdown(title: string, list: Episode[]): string {
     parts.push(`## ${episodeLabel(episode)}`, '')
 
     for (const chapter of episode.chapters) {
-      if (chapter.title.trim()) parts.push(`### ${chapter.title}`, '')
+      if (showsChapterTitle(episode, chapter.title)) parts.push(`### ${chapter.title}`, '')
       for (const block of paragraphs(chapter.text)) {
         parts.push(block.replace(/\n/g, '  \n'), '')
       }
@@ -339,7 +358,7 @@ function buildHtml(title: string, list: Episode[]): string {
     .map((episode) => {
       const inner = episode.chapters
         .map((chapter) => {
-          const head = chapter.title.trim()
+          const head = showsChapterTitle(episode, chapter.title)
             ? `<h3>${escapeXml(chapter.title)}</h3>\n`
             : ''
           const prose = paragraphs(chapter.text)
@@ -408,7 +427,9 @@ function buildEpub(title: string, synopsis: string, list: Episode[]): Buffer {
     const name = `ch${String(index + 1).padStart(4, '0')}.xhtml`
     const inner = episode.chapters
       .map((chapter) => {
-        const head = chapter.title.trim() ? `<h3>${escapeXml(chapter.title)}</h3>\n` : ''
+        const head = showsChapterTitle(episode, chapter.title)
+          ? `<h3>${escapeXml(chapter.title)}</h3>\n`
+          : ''
         const prose = paragraphs(chapter.text)
           .map((block) => `<p>${escapeXml(block).replace(/\n/g, '<br />')}</p>`)
           .join('\n')

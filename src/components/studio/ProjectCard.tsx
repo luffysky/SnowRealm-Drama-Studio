@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { CalendarDays, Crown, Heart, PlayCircle, Coins, MoreHorizontal } from 'lucide-react'
 import { useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
@@ -62,7 +63,14 @@ export function ProjectCard({
   const complete = pct >= 100
 
   async function toggleFavourite(event: React.MouseEvent) {
-    // The whole card is a selection target; the heart must not also select it.
+    /*
+     * The card is an anchor now, so both of these are needed:
+     * `stopPropagation` keeps the click off the card's own handlers, and
+     * `preventDefault` stops the browser following the href — the native
+     * navigation does not care that React stopped the event bubbling, so
+     * without it the heart would open the work.
+     */
+    event.preventDefault()
     event.stopPropagation()
     if (pending) return
 
@@ -94,11 +102,24 @@ export function ProjectCard({
         ? `規劃中（預計 ${project.plannedEpisodes} 集）`
         : '尚未規劃集數'
 
+  /*
+   * A link, not a button.
+   *
+   * It used to only *select* the card, which updated the detail rail beside
+   * it — and that rail is `hidden xl:block`, so below 1280px clicking a work
+   * did nothing at all. Even on a wide screen, clicking a work and not opening
+   * it is not what anyone expects from a card with a cover on it.
+   *
+   * Selecting still happens, on the same click, so the rail keeps working for
+   * whoever is using it.
+   */
   return (
-    <button
-      type="button"
+    <Link
+      href={`/projects/${project.id}`}
       onClick={() => onSelect(project.id)}
-      aria-pressed={selected}
+      onFocus={() => onSelect(project.id)}
+      onMouseEnter={() => onSelect(project.id)}
+      aria-current={selected ? 'true' : undefined}
       className={cn(
         'panel group flex flex-col overflow-hidden rounded-xl bg-stage-900 text-left ring-1 transition-all',
         selected
@@ -240,6 +261,6 @@ export function ProjectCard({
           </span>
         </div>
       </div>
-    </button>
+    </Link>
   )
 }

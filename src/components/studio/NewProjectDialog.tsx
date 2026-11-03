@@ -74,15 +74,22 @@ export function NewProjectDialog({ canWrite }: { canWrite: boolean }) {
 
       if (!response.ok) throw new Error(await readApiError(response))
 
-      const body = (await response.json()) as { data: { id: string; episodeCount: number } }
+      /*
+       * `jsonOk` returns the value as the body, not wrapped in `{ data }`.
+       * Reading `body.data.id` threw「Cannot read properties of undefined」
+       * *after* the work had already been created — so the dialog reported a
+       * failure for something that succeeded, and the next attempt made a
+       * second copy.
+       */
+      const body = (await response.json()) as { id: string; episodeCount: number }
 
       toast.success(
         `《${title.trim()}》已建立`,
-        body.data.episodeCount > 0 ? `已排好 ${body.data.episodeCount} 集` : undefined
+        body.episodeCount > 0 ? `已排好 ${body.episodeCount} 集` : undefined
       )
       setOpen(false)
       // Straight into the new work: the next thing anyone does is set it up.
-      router.push(`/projects/${body.data.id}`)
+      router.push(`/projects/${body.id}`)
       router.refresh()
     } catch (cause) {
       toast.error('建立失敗', cause instanceof Error ? cause.message : undefined)

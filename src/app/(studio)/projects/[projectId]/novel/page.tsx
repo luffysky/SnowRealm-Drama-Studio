@@ -2,6 +2,7 @@ import { BookOpen, FileText, PenLine } from 'lucide-react'
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { NovelExportMenu } from '@/components/studio/NovelExportMenu'
 import { OutlineBoard } from '@/components/studio/OutlineBoard'
 import { EmptyState } from '@/components/ui/StateViews'
 import { adapterForTask } from '@/lib/ai/jobs'
@@ -88,6 +89,27 @@ export default async function NovelWorkbenchPage({ params }: Params) {
             書名<span className="ml-1 text-ink-200">{novelTitle}</span>
           </p>
         )}
+
+        <div className="ml-auto flex items-center gap-2">
+          {written.length > 0 && (
+            <Link
+              href={`/read/${project.id}`}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-stage-800 px-2.5 py-1.5 text-[11px] text-ink-300 transition-colors hover:bg-stage-700 hover:text-ink-100"
+            >
+              <BookOpen aria-hidden className="size-3.5" />
+              閱讀
+            </Link>
+          )}
+          <NovelExportMenu
+            projectId={project.id}
+            episodes={written.map((row) => ({
+              episodeId: row.episodeId,
+              number: row.number,
+              title: row.title,
+              charCount: row.charCount,
+            }))}
+          />
+        </div>
       </header>
 
       {rows.length === 0 ? (
