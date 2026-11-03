@@ -1,0 +1,13 @@
+-- 小說封面（閱覽室）。
+--
+-- 作品已經有 cover_asset_id，那是短劇的主視覺——直式海報、劇名、演員。
+-- 小說封面是另一張圖：書名可能跟劇名不同（0010_project_titles），
+-- 版式也不同（書封偏方、以書名與作者為主）。共用同一欄的話，
+-- 書架跟作品列表只能二選一，另一邊一定是錯的那張。
+--
+-- 可以留空，代表「沿用作品封面」——跟 novel_title 空字串的意思一致，
+-- 不存一份會過期的複本。
+--
+-- 不加外鍵，與這個 schema 裡其他 asset 參照一致；
+-- 型別、上傳狀態與作品歸屬由 updateNovelCover() 驗證。
+ALTER TABLE "projects" ADD COLUMN IF NOT EXISTS "novel_cover_asset_id" uuid;

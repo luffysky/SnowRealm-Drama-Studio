@@ -290,6 +290,40 @@ function OutlineRow({
     setOpen(false)
   }
 
+  /**
+   * Saves the title alone, from the inline field on the row.
+   *
+   * Separate from `save()` so renaming an episode does not also write back
+   * whatever is sitting in the collapsed logline and synopsis state — which,
+   * if the panel was opened and abandoned, is not what is on the server.
+   */
+  async function saveTitle(next: string) {
+    const value = next.trim()
+    if (value === row.title) return
+
+    setSaving(true)
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/episodes/${row.id}/outline`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: value }),
+        }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      setTitle(value)
+      onSaved({ ...row, title: value })
+      router.refresh()
+    } catch (cause) {
+      setTitle(row.title)
+      toast.error('集名儲存失敗', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const empty = !row.logline.trim() && !row.synopsis.trim()
 
   return (
@@ -304,37 +338,39 @@ function OutlineRow({
           {label}
         </span>
 
-        <button
-          type="button"
-          onClick={() => canWrite && setOpen((value) => !value)}
-          aria-expanded={open}
-          disabled={!canWrite}
-          className="min-w-0 flex-1 text-left disabled:cursor-default"
-        >
-          <span className="flex items-center gap-2">
-            <span
-              className={cn(
-                'min-w-0 truncate text-xs',
-                row.title ? 'font-medium text-ink-100' : 'text-ink-600'
-              )}
-            >
-              {row.title || '未命名'}
-            </span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/*
+            The title edits here, not only inside the expanded panel. 集名 is
+            the field people fix in passing, and making them open a panel for
+            one word is why every episode was still 「未命名」.
+          */}
+          <div className="flex items-center gap-2">
+            <InlineTitle
+              value={row.title}
+              canWrite={canWrite}
+              saving={saving}
+              onCommit={(next) => void saveTitle(next)}
+            />
             {row.charCount > 0 && (
               <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
                 已動筆 {row.charCount.toLocaleString('en-US')} 字
               </span>
             )}
-          </span>
-          <span
+          </div>
+
+          <button
+            type="button"
+            onClick={() => canWrite && setOpen((value) => !value)}
+            aria-expanded={open}
+            disabled={!canWrite}
             className={cn(
-              'mt-0.5 line-clamp-1 block text-[11px]',
+              'mt-0.5 line-clamp-1 block text-left text-[11px] disabled:cursor-default',
               empty ? 'text-ink-700' : 'text-ink-500'
             )}
           >
             {row.logline || row.synopsis.split('\n')[0] || '尚未寫大綱'}
-          </span>
-        </button>
+          </button>
+        </div>
 
         <Link
           href={`/projects/${projectId}/episodes/${row.id}/novel`}
@@ -408,5 +444,85 @@ function OutlineRow({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * The episode title, editable where it is shown.
+ *
+ * Click to edit, Enter or blur to save, Escape to abandon. Uncontrolled and
+ * keyed on the value, so the field picks up a title changed elsewhere — by the
+ * expanded panel, or by the other member — without syncing state in an effect.
+ */
+function InlineTitle({
+  value,
+  canWrite,
+  saving,
+  onCommit,
+}: {
+  value: string
+  canWrite: boolean
+  saving: boolean
+  onCommit: (next: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+
+  if (!canWrite) {
+    return (
+      <span
+        className={cn(
+          'min-w-0 truncate text-xs',
+          value ? 'font-medium text-ink-100' : 'text-ink-600'
+        )}
+      >
+        {value || '未命名'}
+      </span>
+    )
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        title="點一下改集名"
+        className={cn(
+          'min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-stage-800',
+          value ? 'font-medium text-ink-100' : 'text-ink-600'
+        )}
+      >
+        {value || '未命名'}
+      </button>
+    )
+  }
+
+  return (
+    <input
+      key={value}
+      autoFocus
+      defaultValue={value}
+      maxLength={120}
+      disabled={saving}
+      placeholder="集名"
+      aria-label="集名"
+      onBlur={(event) => {
+        setEditing(false)
+        onCommit(event.target.value)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.currentTarget.blur()
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          // Reset before blurring, so the blur handler commits the old value
+          // and the edit is genuinely abandoned.
+          event.currentTarget.value = value
+          event.currentTarget.blur()
+        }
+      }}
+      className="min-w-0 flex-1 rounded bg-stage-850 px-1 py-0.5 text-xs font-medium text-ink-50 ring-1 ring-accent-500 outline-none"
+    />
   )
 }

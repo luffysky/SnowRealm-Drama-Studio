@@ -5,7 +5,7 @@ import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
 import { adapterForTask } from '@/lib/ai/jobs'
 import { getEditorModules, getFxRates } from '@/lib/settings'
-import { openDocument } from '@/lib/writing'
+import { novelToc, openDocument } from '@/lib/writing'
 
 export const metadata: Metadata = { title: '小說編輯器' }
 
@@ -32,8 +32,10 @@ export default async function EpisodeNovelPage({ params, searchParams }: Params)
   const requestedChapter = (await searchParams).chapter
   const chapterId = typeof requestedChapter === 'string' ? requestedChapter : null
 
-  const [document, modules, fx, provider] = await Promise.all([
+  const [document, toc, modules, fx, provider] = await Promise.all([
     openDocument(project.id, episodeId, 'NOVEL'),
+    // The rail can show the whole book, not just this episode's chapters.
+    novelToc(project.id, 'NOVEL'),
     getEditorModules('NOVEL'),
     getFxRates(),
     /*
@@ -65,6 +67,7 @@ export default async function EpisodeNovelPage({ params, searchParams }: Params)
       fx={fx}
       providerReady={provider.available}
       providerDetail={provider.detail}
+      toc={toc}
     />
   )
 }

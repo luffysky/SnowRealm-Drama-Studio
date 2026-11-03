@@ -27,3 +27,6 @@ Thumbs.db
 
 # Local RWD screenshots (scripts/shots.mjs)
 .shots/
+
+# 資料備份（含小說正文，不進版本庫）
+backups/

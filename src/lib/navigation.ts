@@ -69,6 +69,33 @@ export const NAV_SECTIONS: NavSection[] = [
     ready: true,
     design: 3,
   },
+  /*
+   * 閱覽室. Cross-project by nature — you pick a work *here*, rather than
+   * arriving with one — so it belongs in the rail rather than in
+   * `PROJECT_TABS`. Each entry opens a shelf; the reader and the players open
+   * from there.
+   */
+  {
+    key: 'read',
+    label: '看小說',
+    icon: 'BookOpen',
+    href: '/read',
+    ready: true,
+  },
+  {
+    key: 'watch',
+    label: '影片播放',
+    icon: 'PlayCircle',
+    href: '/watch',
+    ready: true,
+  },
+  {
+    key: 'listen',
+    label: '音樂播放',
+    icon: 'Headphones',
+    href: '/listen',
+    ready: true,
+  },
   {
     key: 'tasks',
     label: '跨作品任務',

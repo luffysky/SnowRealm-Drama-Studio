@@ -7,12 +7,12 @@ import {
   Coins,
   LayoutGrid,
   List,
-  Plus,
   Search,
   UserRound,
   Wrench,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { NewProjectDialog } from '@/components/studio/NewProjectDialog'
 import { ProjectCard, type ProjectCardData } from '@/components/studio/ProjectCard'
 import { EmptyState } from '@/components/ui/StateViews'
 import {
@@ -55,12 +55,15 @@ export function ProjectsBrowser({
   counts,
   currency,
   fx,
+  canCreate,
 }: {
   projects: ProjectCardData[]
   details: Record<string, ProjectDetailData>
   counts: Record<string, number>
   currency: CurrencyValue
   fx: FxRates
+  /** `project.write`; checked on the server, repeated here for the button. */
+  canCreate: boolean
 }) {
   const [status, setStatus] = useState<ProjectStatusValue | 'ALL'>('ALL')
   const [search, setSearch] = useState('')
@@ -111,16 +114,7 @@ export function ProjectsBrowser({
           </p>
         </div>
 
-        {/* 24–29 作品表單 lands in M1; disabled rather than dead (spec v2 §4). */}
-        <span
-          aria-disabled="true"
-          title="新增作品表單尚未實作，預計於 M1 階段交付"
-          className="ml-auto inline-flex shrink-0 cursor-default items-center gap-1.5 rounded-lg bg-stage-800 px-4 py-2 text-xs font-medium text-ink-600 ring-1 ring-stage-700"
-        >
-          <Plus aria-hidden className="size-4" />
-          新增作品
-          <span className="text-[10px] text-ink-700">M1</span>
-        </span>
+        <NewProjectDialog canWrite={canCreate} />
       </header>
 
       <StatusPills counts={counts} active={status} onChange={setStatus} />
@@ -141,7 +135,7 @@ export function ProjectsBrowser({
               title={projects.length === 0 ? '還沒有任何作品' : '沒有符合條件的作品'}
               description={
                 projects.length === 0
-                  ? '執行 npm run db:seed 建立《一灶見山河》，或等新增作品功能於 M1 交付。'
+                  ? '用右上角的「新增作品」建立第一部。'
                   : '試試改變狀態篩選或清除搜尋關鍵字。'
               }
             />

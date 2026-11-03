@@ -5,6 +5,7 @@ import {
   type ProjectDetailData,
 } from '@/components/studio/ProjectsBrowser'
 import type { ProjectCardData } from '@/components/studio/ProjectCard'
+import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { getProjectDetail, listProjects } from '@/lib/projects'
 import { getFxRates } from '@/lib/settings'
@@ -56,6 +57,7 @@ export default async function ProjectsPage() {
       counts={counts}
       currency={user.displayCurrency}
       fx={fx}
+      canCreate={can(user, 'project.write')}
     />
   )
 }

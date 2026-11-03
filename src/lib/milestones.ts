@@ -44,7 +44,7 @@ const EXTRA: Record<Milestone, MilestoneItem[]> = {
     { label: '缺少的視覺資產（登入背景、Logo、側欄插圖、首頁橫幅）', where: 'public/', done: false },
   ],
   M1: [
-    { label: '新增作品表單', where: '作品列表 → 新增作品', done: false },
+    { label: '新增作品表單', where: '作品列表 → 新增作品', done: true },
     { label: '作品卡的「更多操作」', where: '作品列表卡片', done: false },
     { label: '集數編輯', where: '集數管理 → 單集', done: false },
     { label: '集數詳情頁', where: '集數管理 → 單集', done: false },

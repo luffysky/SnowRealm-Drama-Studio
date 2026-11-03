@@ -252,6 +252,82 @@ export async function novelIndex(
  * rather than left to guess it, because a client that increments its own copy
  * is one race away from silently saving against the wrong revision.
  */
+/** One episode's entry in the whole-book chapter index. */
+export type NovelTocEpisode = {
+  episodeId: string
+  number: number
+  title: string
+  charCount: number
+  chapters: { id: string; sortOrder: number; title: string; charCount: number }[]
+}
+
+/**
+ * Every chapter in the book, grouped by episode.
+ *
+ * The editor's rail used to list only the open episode's chapters, which made
+ * the 章節目錄 a table of contents for one episode of a 120-episode novel —
+ * you could not see, or reach, anything you had already written elsewhere
+ * without going back out to 集數管理.
+ *
+ * Episodes with no chapters at all are dropped: an index of 120 empty rows
+ * buries the handful that have prose in them. Episodes that have chapters but
+ * no text are kept, because an empty chapter someone created deliberately is
+ * a plan for the next session.
+ */
+export async function novelToc(
+  projectId: string,
+  kind: DocumentKindValue = 'NOVEL'
+): Promise<NovelTocEpisode[]> {
+  const rows = await db
+    .select({
+      episodeId: episodes.id,
+      number: episodes.number,
+      episodeTitle: episodes.title,
+      chapterId: chapters.id,
+      sortOrder: chapters.sortOrder,
+      chapterTitle: chapters.title,
+      charCount: chapters.charCount,
+    })
+    .from(episodes)
+    .innerJoin(
+      documents,
+      and(
+        eq(documents.episodeId, episodes.id),
+        eq(documents.kind, kind),
+        isNull(documents.deletedAt)
+      )
+    )
+    .innerJoin(chapters, eq(chapters.documentId, documents.id))
+    .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt)))
+    .orderBy(asc(episodes.number), asc(chapters.sortOrder))
+
+  const byEpisode = new Map<string, NovelTocEpisode>()
+
+  for (const row of rows) {
+    let episode = byEpisode.get(row.episodeId)
+    if (!episode) {
+      episode = {
+        episodeId: row.episodeId,
+        number: row.number,
+        title: row.episodeTitle ?? '',
+        charCount: 0,
+        chapters: [],
+      }
+      byEpisode.set(row.episodeId, episode)
+    }
+
+    episode.chapters.push({
+      id: row.chapterId,
+      sortOrder: row.sortOrder,
+      title: row.chapterTitle ?? '',
+      charCount: row.charCount,
+    })
+    episode.charCount += row.charCount
+  }
+
+  return [...byEpisode.values()].sort((a, b) => a.number - b.number)
+}
+
 export async function createChapter(input: {
   documentId: string
   title: string

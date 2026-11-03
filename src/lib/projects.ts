@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, isNull, like, or, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   activities,
@@ -15,7 +15,7 @@ import {
 import { ApiError } from '@/lib/api'
 import type { ProjectSortValue, ProjectStatusValue } from '@/lib/constants'
 import { visibleProjects } from '@/lib/project-access'
-import { aggregateProgress, STAGES_PER_EPISODE } from '@/lib/production'
+import { aggregateProgress, PRODUCTION_STAGE_KEYS, STAGES_PER_EPISODE } from '@/lib/production'
 
 /**
  * Query layer for 作品列表 / 作品總覽 (designs 03 / 04).
@@ -469,4 +469,151 @@ export async function updateProject(
     })
 
   return row ?? null
+}
+
+/* -------------------------------------------------------------------------- */
+/* 新增作品 (Z63)                                                               */
+/* -------------------------------------------------------------------------- */
+
+export type NewProject = {
+  title: string
+  novelTitle?: string
+  dramaTitle?: string
+  logline?: string
+  synopsis?: string
+  tags?: string[]
+  status?: ProjectStatusValue
+  targetMinSec?: number
+  targetMaxSec?: number
+  /** 第幾部, and its name. A work is always at least one arc. */
+  arcIndex?: number
+  arcTitle?: string
+  /** How many episodes to lay out up front. 0 creates none. */
+  plannedEpisodes?: number
+}
+
+/**
+ * Creates a work, its first arc, and the episodes with their stage rows.
+ *
+ * All in one transaction, because a project with no arc cannot have episodes
+ * added to it through any screen in the app, and an episode with no
+ * `episode_production_stages` rows is invisible to every progress figure.
+ * Half of this committed is a work that looks fine on the list and is broken
+ * everywhere else.
+ *
+ * Nothing descriptive is invented: the logline, synopsis and every episode
+ * title are whatever was typed, usually empty (spec v3 §0). 120 blank episodes
+ * is the correct starting state for a short drama — the numbering is the plan,
+ * the titles are the writing.
+ */
+export async function createProject(
+  userId: string,
+  input: NewProject
+): Promise<{ id: string; slug: string; episodeCount: number }> {
+  const planned = Math.min(Math.max(input.plannedEpisodes ?? 120, 0), 999)
+  const targetMinSec = input.targetMinSec ?? 120
+  const targetMaxSec = input.targetMaxSec ?? 180
+
+  const slug = await uniqueSlug(input.title)
+
+  return db.transaction(async (tx) => {
+    const [project] = await tx
+      .insert(projects)
+      .values({
+        title: input.title,
+        slug,
+        novelTitle: input.novelTitle ?? '',
+        dramaTitle: input.dramaTitle ?? '',
+        logline: input.logline ?? '',
+        synopsis: input.synopsis ?? '',
+        tags: input.tags ?? [],
+        status: input.status ?? 'PLANNING',
+        // Never automatically: 主力作品 is a decision about where the studio's
+        // attention goes, and at most one work holds it.
+        isFlagship: false,
+        ownerId: userId,
+        targetMinSec,
+        targetMaxSec,
+      })
+      .returning({ id: projects.id, slug: projects.slug })
+
+    if (!project) throw new ApiError(500, '建立作品失敗', 'project_create_failed')
+
+    const [arc] = await tx
+      .insert(arcs)
+      .values({
+        projectId: project.id,
+        index: input.arcIndex ?? 1,
+        title: input.arcTitle?.trim() || '第一部',
+        plannedEpisodes: planned,
+      })
+      .returning({ id: arcs.id })
+
+    if (!arc) throw new ApiError(500, '建立篇章失敗', 'arc_create_failed')
+
+    if (planned === 0) {
+      return { id: project.id, slug: project.slug, episodeCount: 0 }
+    }
+
+    const inserted = await tx
+      .insert(episodes)
+      .values(
+        Array.from({ length: planned }, (_, i) => ({
+          projectId: project.id,
+          arcId: arc.id,
+          number: i + 1,
+          targetSec: Math.round((targetMinSec + targetMaxSec) / 2),
+          status: 'PLANNED' as const,
+        }))
+      )
+      .returning({ id: episodes.id })
+
+    const stageRows = inserted.flatMap((episode) =>
+      PRODUCTION_STAGE_KEYS.map((stageKey) => ({
+        projectId: project.id,
+        episodeId: episode.id,
+        stageKey,
+        status: 'not_started' as const,
+      }))
+    )
+
+    // Chunked: 120 episodes is 1,080 stage rows, past the parameter limit for
+    // a single statement.
+    for (let i = 0; i < stageRows.length; i += 500) {
+      await tx.insert(episodeProductionStages).values(stageRows.slice(i, i + 500))
+    }
+
+    return { id: project.id, slug: project.slug, episodeCount: inserted.length }
+  })
+}
+
+/**
+ * A URL-safe, unique slug.
+ *
+ * `projects.slug` is `NOT NULL UNIQUE`, so a second work called 《一灶見山河》
+ * would fail the insert with a constraint error rather than a message anyone
+ * can act on. CJK titles reduce to nothing under the usual ASCII slug rules,
+ * which is why the fallback is a date rather than an empty string.
+ */
+async function uniqueSlug(title: string): Promise<string> {
+  const base =
+    title
+      .toLowerCase()
+      .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || `work-${new Date().toISOString().slice(0, 10)}`
+
+  const taken = await db
+    .select({ slug: projects.slug })
+    .from(projects)
+    .where(like(projects.slug, `${base}%`))
+
+  if (!taken.some((row) => row.slug === base)) return base
+
+  for (let n = 2; n < 999; n += 1) {
+    const candidate = `${base}-${n}`
+    if (!taken.some((row) => row.slug === candidate)) return candidate
+  }
+
+  return `${base}-${Date.now()}`
 }

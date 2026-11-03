@@ -9,6 +9,7 @@ import {
   DOCUMENT_KINDS,
   EPISODE_STATUSES,
   MAX_UPLOAD_BYTES,
+  PROJECT_STATUSES,
   SHOT_SIZES,
   SHOT_STATUSES,
   WORLD_CATEGORIES,
@@ -278,6 +279,34 @@ export const shotReorderSchema = z.object({
  * at the bottom. `title` may not be: a work with no name is not a state worth
  * being able to save.
  */
+/**
+ * 新增作品.
+ *
+ * Only the title is required. Everything descriptive is optional and defaults
+ * to empty — a new work legitimately has nothing written yet, and the
+ * alternative is placeholder prose nobody asked for (spec v3 §0).
+ */
+export const projectCreateSchema = z
+  .object({
+    title: z.string().trim().min(1, '請輸入作品名稱').max(120),
+    novelTitle: z.string().trim().max(120).optional().default(''),
+    dramaTitle: z.string().trim().max(120).optional().default(''),
+    logline: z.string().trim().max(400).optional().default(''),
+    synopsis: z.string().trim().max(8000).optional().default(''),
+    tags: z.array(z.string().trim().min(1).max(20)).max(8).optional().default([]),
+    status: z.enum(PROJECT_STATUSES).optional().default('PLANNING'),
+    targetMinSec: z.coerce.number().int().min(10).max(3600).optional().default(120),
+    targetMaxSec: z.coerce.number().int().min(10).max(3600).optional().default(180),
+    arcIndex: z.coerce.number().int().min(1).max(99).optional().default(1),
+    arcTitle: z.string().trim().max(80).optional().default(''),
+    /** 0 lays out no episodes; they can be added later. */
+    plannedEpisodes: z.coerce.number().int().min(0).max(999).optional().default(120),
+  })
+  .refine((value) => value.targetMinSec <= value.targetMaxSec, {
+    message: '片長下限不可大於上限',
+    path: ['targetMinSec'],
+  })
+
 export const projectUpdateSchema = z
   .object({
     title: z.string().trim().min(1, '作品名稱不能空白').max(120).optional(),

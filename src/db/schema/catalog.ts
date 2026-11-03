@@ -43,6 +43,16 @@ export const projects = pgTable(
     /** 主力作品 — the one the studio is actively pushing. At most one is expected. */
     isFlagship: boolean('is_flagship').notNull().default(false),
     coverAssetId: uuid('cover_asset_id'),
+    /**
+     * 小說封面. Empty means "use the work's cover".
+     *
+     * Separate from `coverAssetId` because they are different pictures: that
+     * one is the drama's key art, this one is a book cover, and the novel can
+     * carry a different title from the drama (0010_project_titles). Sharing
+     * one column would make either the shelf or the project list show the
+     * wrong image.
+     */
+    novelCoverAssetId: uuid('novel_cover_asset_id'),
     /** 負責人 and 技術支援, shown in the detail rail. */
     ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
     techLeadId: uuid('tech_lead_id').references(() => users.id, { onDelete: 'set null' }),

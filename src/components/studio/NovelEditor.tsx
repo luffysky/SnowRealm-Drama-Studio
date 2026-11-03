@@ -60,6 +60,20 @@ export type NovelEditorProps = {
   /** Whether a provider key is configured; the AI panel explains when not. */
   providerReady: boolean
   providerDetail?: string
+  /**
+   * Every chapter in the book. The rail can show this episode's chapters or
+   * the whole novel; without it the 章節目錄 was an index of one episode out
+   * of a hundred and twenty.
+   */
+  toc: NovelTocEpisode[]
+}
+
+export type NovelTocEpisode = {
+  episodeId: string
+  number: number
+  title: string
+  charCount: number
+  chapters: { id: string; sortOrder: number; title: string; charCount: number }[]
 }
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'
@@ -82,12 +96,15 @@ export function NovelEditor({
   fx,
   providerReady,
   providerDetail,
+  toc,
 }: NovelEditorProps) {
   const toast = useToast()
   const router = useRouter()
   const [enabledModules, setEnabledModules] = useState(modules)
 
   const [chapters, setChapters] = useState(initialChapters)
+  /** 本集 or 全書 for the chapter rail. */
+  const [scope, setScope] = useState<'episode' | 'book'>('episode')
   /*
    * A search result links straight to the chapter it matched
    * (`?chapter=<id>`), so the reader lands on the prose rather than on
@@ -245,6 +262,45 @@ export function NovelEditor({
     )
   }, [chapters, filter])
 
+  /*
+   * 全書 view. The open episode's chapters come from `chapters` rather than
+   * from `toc`, so a title renamed a second ago is already right here — `toc`
+   * was rendered on the server and does not know about it.
+   */
+  const bookToc = useMemo(() => {
+    const term = filter.trim().toLowerCase()
+
+    return toc
+      .map((episode) =>
+        episode.episodeId === episodeId
+          ? {
+              ...episode,
+              chapters: chapters.map((c) => ({
+                id: c.id,
+                sortOrder: c.sortOrder,
+                title: c.title,
+                charCount: c.charCount,
+              })),
+              charCount: chapters.reduce((n, c) => n + c.charCount, 0),
+            }
+          : episode
+      )
+      .map((episode) => ({
+        ...episode,
+        chapters: term
+          ? episode.chapters.filter(
+              (c) =>
+                c.title.toLowerCase().includes(term) ||
+                String(episode.number).includes(term) ||
+                episode.title.toLowerCase().includes(term)
+            )
+          : episode.chapters,
+      }))
+      .filter((episode) => episode.chapters.length > 0)
+  }, [toc, chapters, episodeId, filter])
+
+  const bookChars = bookToc.reduce((n, e) => n + e.charCount, 0)
+
   const documentChars = chapters.reduce((n, c) => n + c.charCount, 0)
 
   return (
@@ -271,13 +327,135 @@ export function NovelEditor({
               type="search"
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
-              placeholder="搜尋章節（標題或內容）"
+              placeholder={scope === 'book' ? '搜尋全書章節' : '搜尋章節（標題或內容）'}
               aria-label="搜尋章節"
               className="h-8 w-full rounded-lg bg-stage-850 pr-2 pl-8 text-[11px] text-ink-50 ring-1 ring-inset ring-stage-700 placeholder:text-ink-600 focus:ring-2 focus:ring-accent-500 focus:outline-none"
             />
           </div>
+
+          {/*
+            本集 / 全書. The rail used to be the open episode's chapters and
+            nothing else, so a 120-episode novel had no table of contents
+            anywhere — you could not reach a chapter you had already written
+            without going back out to 集數管理.
+          */}
+          <div
+            role="tablist"
+            aria-label="章節目錄範圍"
+            className="flex rounded-lg bg-stage-850 p-0.5 ring-1 ring-stage-700"
+          >
+            {(
+              [
+                ['episode', '本集'],
+                ['book', '全書'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={scope === key}
+                onClick={() => setScope(key)}
+                className={cn(
+                  'flex-1 rounded-md px-2 py-1 text-[11px] transition-colors',
+                  scope === key
+                    ? 'bg-stage-700 font-medium text-ink-50'
+                    : 'text-ink-500 hover:text-ink-200'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
+        {scope === 'book' ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <ul className="min-h-0 flex-1 overflow-y-auto p-2">
+              {bookToc.length === 0 ? (
+                <li className="px-2 py-6 text-center text-[11px] text-ink-600">
+                  {filter.trim() ? '沒有符合的章節' : '全書還沒有章節'}
+                </li>
+              ) : (
+                bookToc.map((episode) => (
+                  <li key={episode.episodeId} className="mb-1">
+                    <p className="flex items-baseline gap-1.5 px-2.5 pt-2 pb-1 text-[10px] text-ink-600">
+                      <span className="tabular-nums">
+                        EP{String(episode.number).padStart(3, '0')}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{episode.title}</span>
+                      {episode.charCount > 0 && (
+                        <span className="shrink-0 tabular-nums">
+                          {episode.charCount.toLocaleString('en-US')}
+                        </span>
+                      )}
+                    </p>
+
+                    <ul>
+                      {episode.chapters.map((chapter) => {
+                        const here = episode.episodeId === episodeId
+                        const current = here && chapter.id === activeId
+
+                        const inner = (
+                          <>
+                            <span className="w-6 shrink-0 text-[10px] text-ink-600 tabular-nums">
+                              {String(chapter.sortOrder).padStart(2, '0')}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate">
+                              {chapter.title || <span className="text-ink-600">未命名</span>}
+                            </span>
+                            {chapter.charCount > 0 && (
+                              <Check aria-hidden className="size-3 shrink-0 text-emerald-400" />
+                            )}
+                          </>
+                        )
+
+                        const className = cn(
+                          'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors',
+                          current
+                            ? 'bg-accent-600/20 text-ink-50 ring-1 ring-inset ring-accent-500/40'
+                            : 'text-ink-400 hover:bg-stage-800 hover:text-ink-100'
+                        )
+
+                        /*
+                          A chapter in this episode switches in place; one in
+                          another episode is a navigation, because the editor
+                          holds a single episode's document and its lock
+                          revision. `?chapter=` lands on the right chapter
+                          rather than on whichever is first.
+                        */
+                        return (
+                          <li key={chapter.id}>
+                            {here ? (
+                              <button
+                                type="button"
+                                onClick={() => setActiveId(chapter.id)}
+                                className={className}
+                              >
+                                {inner}
+                              </button>
+                            ) : (
+                              <Link
+                                href={`/projects/${projectId}/episodes/${episode.episodeId}/novel?chapter=${chapter.id}`}
+                                className={className}
+                              >
+                                {inner}
+                              </Link>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </li>
+                ))
+              )}
+            </ul>
+
+            <p className="border-t border-stage-700/60 px-3 py-2 text-[10px] text-ink-600">
+              全書 {bookToc.length} 集・{bookChars.toLocaleString('en-US')} 字
+            </p>
+          </div>
+        ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto p-2">
           {visible.length === 0 ? (
             <li className="px-2 py-6 text-center text-[11px] text-ink-600">
@@ -310,6 +488,7 @@ export function NovelEditor({
             ))
           )}
         </ul>
+        )}
       </aside>
 
       {/* ---- editor ------------------------------------------------------ */}
