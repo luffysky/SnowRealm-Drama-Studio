@@ -119,6 +119,39 @@ export function buildUserMessage(task: AiTaskKind, context: AiContext): string {
 }
 
 /** Tasks whose output is parsed as JSON rather than shown as prose. */
+/**
+ * Reasoning effort per task.
+ *
+ * Every call used to run at `high`, because no caller passed one and that was
+ * the default. That is the wrong setting for most of these: 潤稿 is a local
+ * edit, and 大綱 is mostly a format-following job. Deliberation costs latency
+ * and output tokens, and on the tasks below it buys very little.
+ *
+ * Analysis tasks keep `high` — 審稿 and 一致性檢查 are exactly the cases where
+ * thinking longer finds the contradiction that a quick pass misses.
+ */
+export const TASK_EFFORT: Record<AiTaskKind, 'low' | 'medium' | 'high'> = {
+  // Creative, long-form: worth the deliberation.
+  PROJECT_PLAN: 'high',
+  NOVEL_CONTINUE: 'high',
+  NOVEL_REWRITE: 'high',
+  // Analysis: this is what high effort is actually for.
+  NOVEL_REVIEW: 'high',
+  OUTLINE_REVIEW: 'high',
+  WORLD_CONSISTENCY: 'high',
+  SCRIPT_ANALYZE: 'high',
+  // Structured output that follows a given format more than it invents.
+  OUTLINE_GENERATE: 'medium',
+  NOVEL_TO_SCRIPT: 'medium',
+  STORYBOARD_GENERATE: 'medium',
+  WORLD_GENERATE: 'medium',
+  CHARACTER_DESIGN: 'medium',
+  TASK_SUGGEST: 'medium',
+  // Local edits and prompt writing: deliberation changes almost nothing.
+  NOVEL_POLISH: 'low',
+  ASSET_GENERATE: 'low',
+}
+
 export const STRUCTURED_TASKS: ReadonlySet<AiTaskKind> = new Set<AiTaskKind>([
   'STORYBOARD_GENERATE',
   'WORLD_CONSISTENCY',

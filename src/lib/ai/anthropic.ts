@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { buildUserMessage, STRUCTURED_TASKS, SYSTEM_PROMPT } from './prompts'
+import { buildUserMessage, STRUCTURED_TASKS, SYSTEM_PROMPT, TASK_EFFORT } from './prompts'
 import {
   AiAdapterError,
   type AiAdapter,
@@ -212,8 +212,13 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
              * Opus 5.5 defaults to `medium`, one level below the previous
              * generation, so omitting it would quietly lower output quality
              * on an upgrade.
+             *
+             * Per task rather than one global `high`: 潤稿 is a local edit and
+             * 大綱 mostly follows a given format, and making either of them
+             * think hard costs latency and output tokens for no gain. The
+             * caller can still override.
              */
-            output_config: { effort: request.effort ?? 'high' },
+            output_config: { effort: request.effort ?? TASK_EFFORT[request.task] ?? 'high' },
             messages: [
               {
                 role: 'user',

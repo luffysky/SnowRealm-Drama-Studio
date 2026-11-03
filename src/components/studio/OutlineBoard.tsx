@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import type { ProjectReadiness } from '@/lib/ai/readiness'
 import type { CurrencyValue, FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
@@ -54,6 +55,7 @@ export function OutlineBoard({
   fx,
   providerReady,
   providerDetail,
+  readiness,
 }: {
   projectId: string
   episodes: OutlineEpisode[]
@@ -62,6 +64,7 @@ export function OutlineBoard({
   fx: FxRates
   providerReady: boolean
   providerDetail?: string
+  readiness: ProjectReadiness
 }) {
   const [rows, setRows] = useState(episodes)
   const [query, setQuery] = useState('')
@@ -222,6 +225,7 @@ export function OutlineBoard({
           fx={fx}
           providerReady={providerReady}
           {...(providerDetail ? { providerDetail } : {})}
+          readiness={readiness}
           onClose={() => setGenerating(false)}
           onApplied={applyMany}
         />

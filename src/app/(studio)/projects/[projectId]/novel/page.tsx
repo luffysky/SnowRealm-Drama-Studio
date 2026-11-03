@@ -10,6 +10,7 @@ import { can } from '@/lib/auth/rbac'
 import { listOutline } from '@/lib/episodes'
 import { requireProjectPage } from '@/lib/project-access'
 import { novelTitleOf } from '@/lib/project-titles'
+import type { ProjectReadiness } from '@/lib/ai/readiness'
 import { getFxRates } from '@/lib/settings'
 import { novelIndex } from '@/lib/writing'
 
@@ -37,11 +38,12 @@ export default async function NovelWorkbenchPage({ params }: Params) {
   const { projectId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const [rows, outline, fx, provider] = await Promise.all([
+  const [rows, outline, fx, provider, readiness] = await Promise.all([
     novelIndex(project.id),
     listOutline(project.id),
     getFxRates(),
     providerStatus(),
+    projectReadiness(project.id),
   ])
 
   const novelTitle = novelTitleOf(project)
@@ -128,6 +130,7 @@ export default async function NovelWorkbenchPage({ params }: Params) {
             fx={fx}
             providerReady={provider.available}
             {...(provider.detail ? { providerDetail: provider.detail } : {})}
+            readiness={readiness}
           />
 
           {written.length > 0 && <RecentlyEdited projectId={project.id} rows={written} />}
@@ -231,6 +234,56 @@ function RecentlyEdited({
       </ul>
     </section>
   )
+}
+
+/**
+ * How much the AI has to work from.
+ *
+ * Counted on the server so the generator dialog can warn *before* a run is
+ * paid for, rather than after a refusal.
+ */
+async function projectReadiness(projectId: string): Promise<ProjectReadiness> {
+  const { db } = await import('@/db')
+  const schema = await import('@/db/schema')
+  const { and, eq, isNull, sql } = await import('drizzle-orm')
+
+  const [characters] = await db
+    .select({
+      total: sql<number>`count(*)`.mapWith(Number),
+      detailed: sql<number>`count(*) filter (
+        where length(trim(personality)) > 0 or length(trim(background)) > 0
+      )`.mapWith(Number),
+    })
+    .from(schema.characters)
+    .where(and(eq(schema.characters.projectId, projectId), isNull(schema.characters.deletedAt)))
+
+  const [world] = await db
+    .select({ total: sql<number>`count(*)`.mapWith(Number) })
+    .from(schema.worldEntries)
+    .where(and(eq(schema.worldEntries.projectId, projectId), isNull(schema.worldEntries.deletedAt)))
+
+  const [episodes] = await db
+    .select({
+      outlined: sql<number>`count(*) filter (
+        where length(trim(logline)) > 0 or length(trim(synopsis)) > 0
+      )`.mapWith(Number),
+    })
+    .from(schema.episodes)
+    .where(and(eq(schema.episodes.projectId, projectId), isNull(schema.episodes.deletedAt)))
+
+  const [row] = await db
+    .select({ synopsis: schema.projects.synopsis })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .limit(1)
+
+  return {
+    characters: characters?.total ?? 0,
+    charactersWithDetail: characters?.detailed ?? 0,
+    worldEntries: world?.total ?? 0,
+    episodesWithOutline: episodes?.outlined ?? 0,
+    hasSynopsis: Boolean(row?.synopsis.trim()),
+  }
 }
 
 /** Whether a text provider is configured, and why not when it isn't. */

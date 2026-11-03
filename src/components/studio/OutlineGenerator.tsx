@@ -17,6 +17,8 @@ import {
   type OutlineDiff,
 } from '@/lib/outline'
 import type { OutlineEpisode } from '@/components/studio/OutlineBoard'
+import { checkReadiness, type ProjectReadiness } from '@/lib/ai/readiness'
+import { cn } from '@/lib/utils'
 
 /**
  * AI 分集大綱生成 (`docs/OUTLINE.md`).
@@ -52,6 +54,7 @@ export function OutlineGenerator({
   fx,
   providerReady,
   providerDetail,
+  readiness,
   onClose,
   onApplied,
 }: {
@@ -61,6 +64,8 @@ export function OutlineGenerator({
   fx: FxRates
   providerReady: boolean
   providerDetail?: string
+  /** How much the AI has to work from, checked before anything is spent. */
+  readiness: ProjectReadiness
   onClose: () => void
   onApplied: (
     updates: { episodeId: string; title?: string; logline?: string; synopsis?: string }[]
@@ -81,6 +86,14 @@ export function OutlineGenerator({
   const [error, setError] = useState<string | null>(null)
   const [diffs, setDiffs] = useState<OutlineDiff[]>([])
   const [unparsed, setUnparsed] = useState<string[]>([])
+  /**
+   * What the model actually said, kept for the case where none of it parsed.
+   *
+   * It is usually not noise. Asked for an outline with too little to go on,
+   * the model explains precisely what is missing — and throwing that away to
+   * show 「讀不出任何集數大綱」 wastes both the wait and the answer.
+   */
+  const [rawReply, setRawReply] = useState('')
   const [chosen, setChosen] = useState<Set<number>>(new Set())
   const [applying, setApplying] = useState(false)
 
@@ -94,36 +107,59 @@ export function OutlineGenerator({
 
   const inRange = episodes.filter((row) => row.number >= from && row.number <= to)
 
-  /** Everything the model needs about the range, as plain text. */
-  function sourceText(): string {
-    const lines = [
-      `請為第 ${from} 集到第 ${to} 集寫分集大綱，共 ${inRange.length} 集。`,
-      '',
-      '這個範圍目前的狀態：',
-    ]
+  /*
+   * Checked before the estimate, not after the run: the model is told not to
+   * invent settings, so with too little defined it spends the time and comes
+   * back explaining what is missing. Better to say so for free.
+   */
+  const warning = checkReadiness(readiness)
 
-    for (const row of inRange) {
-      const label = `EP${String(row.number).padStart(3, '0')}`
-      const existing = [row.title, row.logline, row.synopsis].filter(Boolean).join('｜')
-      lines.push(existing ? `${label} 已有：${existing}` : `${label} 尚未撰寫`)
-    }
+  /*
+   * Context comes from the server, not from what this component happens to
+   * hold.
+   *
+   * It used to be assembled here from each episode's `logline` / `synopsis` —
+   * which meant a project where someone had written three thousand characters
+   * of EP001 but no outline yet sent the model *nothing*. The prose was right
+   * there and never left the database. See the context route.
+   */
+  const [sourceText, setSourceText] = useState('')
+  const [writtenCount, setWrittenCount] = useState(0)
+  const [loadingContext, setLoadingContext] = useState(false)
 
-    // The episode before the range anchors continuity; without it the model
-    // restarts the story at whatever episode it was handed first.
-    const before = episodes.filter((row) => row.number < from).at(-1)
-    if (before && (before.logline || before.synopsis)) {
-      lines.push('', `前一集（EP${String(before.number).padStart(3, '0')}）的大綱，用來接續：`)
-      lines.push(before.logline, before.synopsis)
-    }
+  useEffect(() => {
+    if (to < from) return
 
-    return lines.filter(Boolean).join('\n')
-  }
+    const controller = new AbortController()
+    setLoadingContext(true)
+
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/outline/context?from=${from}&to=${to}`,
+          { signal: controller.signal }
+        )
+        if (!response.ok) throw new Error(await readApiError(response))
+
+        const body = (await response.json()) as { sourceText: string; writtenCount: number }
+        setSourceText(body.sourceText)
+        setWrittenCount(body.writtenCount)
+      } catch (cause) {
+        if (controller.signal.aborted) return
+        setError(cause instanceof Error ? cause.message : '讀取範圍資料失敗')
+      } finally {
+        if (!controller.signal.aborted) setLoadingContext(false)
+      }
+    })()
+
+    return () => controller.abort()
+  }, [projectId, from, to])
 
   function payload() {
     return {
       task: 'OUTLINE_GENERATE' as const,
       projectId,
-      sourceText: sourceText(),
+      sourceText,
       userInstruction: instruction.trim(),
       candidates: 1,
       includeWorld: true,
@@ -196,13 +232,14 @@ export function OutlineGenerator({
           setDiffs(next)
           setUnparsed(parsed.unparsed)
           setChosen(new Set(next.map((entry) => entry.number)))
+          setRawReply(parsed.entries.length === 0 ? content : '')
           setPhase('review')
 
           if (next.length === 0) {
             setError(
               parsed.entries.length > 0
                 ? '產出的大綱跟現有內容一樣，沒有要變更的地方。'
-                : '讀不出任何集數大綱。可以再跑一次，或在補充指示裡要求照格式輸出。'
+                : 'AI 沒有照大綱格式回覆。它實際說的內容在下面。'
             )
           }
           return
@@ -303,10 +340,30 @@ export function OutlineGenerator({
           </Field>
         </div>
 
+        {warning && (
+          <p
+            className={cn(
+              'flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] leading-relaxed ring-1 ring-inset',
+              warning.severity === 'blocking'
+                ? 'bg-amber-500/10 text-amber-300 ring-amber-500/30'
+                : 'bg-stage-850/60 text-ink-400 ring-stage-700/70'
+            )}
+          >
+            <AlertTriangle aria-hidden className="mt-px size-3.5 shrink-0" />
+            {warning.message}
+          </p>
+        )}
+
         <p className="rounded-lg bg-stage-850/60 px-3 py-2 text-[11px] leading-relaxed text-ink-500 ring-1 ring-inset ring-stage-700/70">
           這個範圍有 {inRange.length} 集，其中{' '}
-          {inRange.filter((row) => row.logline.trim() || row.synopsis.trim()).length} 集已經有大綱。
-          已有內容不會被直接覆蓋——產生後會逐集列出差異，你勾選才會寫入。
+          {inRange.filter((row) => row.logline.trim() || row.synopsis.trim()).length} 集已經有大綱
+          {writtenCount > 0 && (
+            <>
+              ，<span className="text-emerald-300">{writtenCount} 集已經寫了正文</span>
+              ——那幾集會改成「依已寫的內容整理大綱」，不會另外編一套劇情
+            </>
+          )}
+          。已有內容不會被直接覆蓋——產生後會逐集列出差異，你勾選才會寫入。
           作品大綱、世界觀與角色設定會一併送進去當作條件。
         </p>
 
@@ -363,6 +420,17 @@ export function OutlineGenerator({
           <p className="text-[11px] text-amber-400">
             有 {unparsed.length} 段讀不出格式（{unparsed.join('、')}），已略過。
           </p>
+        )}
+
+        {rawReply && (
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[11px] text-ink-400">
+              AI 的回覆（常見原因是作品設定還太少，模型寧可說缺什麼也不願意編造）：
+            </p>
+            <pre className="max-h-72 overflow-y-auto rounded-lg bg-stage-950 p-3 text-[11px] leading-relaxed whitespace-pre-wrap text-ink-300 ring-1 ring-inset ring-stage-700">
+              {rawReply}
+            </pre>
+          </div>
         )}
 
         {diffs.length > 0 && (
@@ -493,9 +561,9 @@ export function OutlineGenerator({
               onClick={() => void runEstimate()}
               loading={phase === 'estimating' || phase === 'running'}
               loadingText={phase === 'running' ? '產生中…' : '估算中…'}
-              disabled={inRange.length === 0 || to < from}
+              disabled={inRange.length === 0 || to < from || !sourceText || loadingContext}
             >
-              估算成本
+              {loadingContext ? '讀取範圍…' : '估算成本'}
             </Button>
           )}
         </div>

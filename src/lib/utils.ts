@@ -150,3 +150,26 @@ export function groupBy<T, K extends string | number>(
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
+
+/**
+ * Rich text as a reader sees it: markup gone, paragraph breaks kept.
+ *
+ * Block-level tags become newlines before the rest are stripped, so
+ * `<p>a</p><p>b</p>` does not silently become "ab" — which matters when the
+ * result is handed to a model as prose to continue from.
+ */
+export function stripHtmlToText(html: string): string {
+  if (!html) return ''
+
+  return html
+    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/blockquote|hr)[^>]*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
