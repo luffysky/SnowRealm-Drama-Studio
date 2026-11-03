@@ -22,7 +22,8 @@
     "db:generate": "drizzle-kit generate",
     "db:purge-uploads": "tsx scripts/purge-stale-uploads.ts",
     "account:password": "tsx scripts/set-password.ts",
-    "account:check": "tsx scripts/check-accounts.ts"
+    "account:check": "tsx scripts/check-accounts.ts",
+    "r2:check": "tsx scripts/r2-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

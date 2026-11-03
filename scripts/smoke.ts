@@ -188,12 +188,28 @@ async function main() {
     const res = await call('/api/auth/me', { jar })
     check('every response carries an x-request-id header', Boolean(res.headers.get('x-request-id')))
 
+    /*
+     * An empty identifier, not a malformed email. Since login accepts a handle
+     * as well as an address, `not-an-email` is a perfectly valid identifier —
+     * it simply matches no account, which is a 401, not a 422.
+     */
     const bad = await call('/api/auth/login', {
       method: 'POST',
       jar,
-      json: { email: 'not-an-email', password: 'x' },
+      json: { identifier: '', password: '' },
     })
-    check('validation failure returns 422', bad.status === 422)
+    check('validation failure returns 422', bad.status === 422, `status ${bad.status}`)
+
+    const unknownHandle = await call('/api/auth/login', {
+      method: 'POST',
+      jar,
+      json: { identifier: 'not-an-email', password: 'whatever' },
+    })
+    check(
+      'a non-email identifier is a credential failure, not a validation error',
+      unknownHandle.status === 401,
+      `status ${unknownHandle.status}`
+    )
     check(
       'error body contains code, message and requestId',
       typeof bad.body?.error?.code === 'string' &&

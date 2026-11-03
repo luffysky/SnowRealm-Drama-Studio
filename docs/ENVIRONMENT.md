@@ -129,6 +129,12 @@ SnowRealm Drama Studio V1 — Neon PostgreSQL + Cloudflare R2 + Vercel
 
 > ⚠️ **Secret Access Key 只會顯示這一次**，關閉視窗就再也看不到。請立刻複製到安全的地方（密碼管理器）。遺失只能重新建立 token。
 
+> ⚠️ **`R2_ENDPOINT` 結尾不可包含 bucket 名稱。** Cloudflare 介面上顯示的 S3 API 網址是
+> `https://<ACCOUNT_ID>.r2.cloudflarestorage.com/<bucket>`，直接貼進來會讓 SDK 再接一次
+> bucket，物件變成存在 `drama/drama/…` 底下。正確值是
+> `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`，或乾脆**留空**讓程式從
+> `R2_ACCOUNT_ID` 自行推導。設錯時 `src/lib/r2.ts` 會直接拋出錯誤並告訴你正確值。
+
 ### 2.4 設定 CORS（瀏覽器直接上傳必須）
 
 本系統的大型素材是由瀏覽器拿到 presigned URL 後**直接 PUT 到 R2**，不經過 Vercel（避免 serverless function 的請求大小與執行時間限制）。這屬於跨來源請求，必須在 bucket 上設定 CORS，否則上傳會被瀏覽器攔下。
@@ -165,7 +171,18 @@ SnowRealm Drama Studio V1 — Neon PostgreSQL + Cloudflare R2 + Vercel
 - Vercel 的 preview 網址每次不同。要在 preview 測上傳就暫時加 `https://*.vercel.app`，正式環境只列明確網域
 - **`AllowedOrigins` 不要寫 `*`**。CORS 擋不住有簽章的人，但 `*` 等於允許任何網站在使用者登入狀態下對你的 bucket 發請求
 
-### 2.5 Preview 環境建議用另一個 bucket
+### 2.5 驗證設定
+
+全部填好後跑一次健檢，它會真的上傳、下載、分段上傳、取消、刪除各一回，
+並對四個來源重放瀏覽器的 CORS preflight：
+
+```bash
+npm run r2:check
+```
+
+寫入的物件都在 `__healthcheck__/` 底下且會自行刪除，不會碰到任何實際素材。
+
+### 2.6 Preview 環境建議用另一個 bucket
 
 若會使用 Vercel preview 部署測試，建議再建一個 `snowrealm-drama-studio-preview`，避免測試檔案混進正式素材庫。在 Vercel 的 Preview 環境把 `R2_BUCKET` 指向它即可，其他金鑰可共用。
 
@@ -421,7 +438,8 @@ npm run test:smoke            # 對執行中的伺服器做端對端測試
 | `password authentication failed` | 連線字串的密碼被截斷，或密碼含特殊字元未做 URL encode |
 | `too many connections` | 應用程式誤用了 direct 連線。確認 `DATABASE_URL` 的 host 含 `-pooler` |
 | migration 卡住或報 advisory lock 錯誤 | `DATABASE_URL_UNPOOLED` 誤填成 pooled 字串。確認它的 host **不含** `-pooler` |
-| 上傳時瀏覽器 console 出現 CORS 錯誤 | R2 的 CORS policy 未設定，或 `AllowedOrigins` 沒有包含目前網域（注意 http/https 與連接埠要完全一致） |
+| 上傳時瀏覽器 console 出現 CORS 錯誤 | R2 的 CORS policy 未設定，或 `AllowedOrigins` 沒有包含目前網域（注意 http/https 與連接埠要完全一致，且 `localhost` 與 `127.0.0.1` 算兩個來源）。跑 `npm run r2:check` 可直接看出是哪個來源沒過 |
+| 檔案上傳成功但路徑變成 `drama/drama/…` | `R2_ENDPOINT` 結尾多了 bucket 名稱，見 2.3 節的警告 |
 | 上傳回 `SignatureDoesNotMatch` | `R2_SECRET_ACCESS_KEY` 有誤，或 `R2_ACCOUNT_ID` 與金鑰不屬於同一個 Cloudflare 帳號 |
 | 圖片顯示破圖 | presigned URL 已過期。提高 `PRESIGN_TTL_SECONDS`，或重新載入頁面取得新 URL |
 | multipart 上傳合併失敗 | CORS 的 `ExposeHeaders` 缺少 `etag` |

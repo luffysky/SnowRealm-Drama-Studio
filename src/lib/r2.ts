@@ -29,10 +29,36 @@ const MULTIPART_PART_SIZE_BYTES = 16 * 1024 * 1024 // 16 MB; R2 minimum is 5 MB
 
 let client: S3Client | null = null
 
-/** R2's S3 endpoint is derived from the account id unless overridden. */
+/**
+ * R2's S3 endpoint, derived from the account id unless overridden.
+ *
+ * It must NOT include the bucket. Cloudflare's dashboard shows the bucket's
+ * S3 URL as `https://<account>.r2.cloudflarestorage.com/<bucket>`, which is
+ * the obvious thing to paste — but the SDK appends the bucket itself, so that
+ * value silently produces keys under `<bucket>/<bucket>/…`. Fail loudly
+ * instead: a misconfiguration that still "works" is far more expensive than
+ * one that refuses to start.
+ */
 function endpoint(): string {
   const e = env()
-  return e.R2_ENDPOINT || `https://${e.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+  const configured = e.R2_ENDPOINT?.trim()
+  if (!configured) return `https://${e.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+
+  let parsed: URL
+  try {
+    parsed = new URL(configured)
+  } catch {
+    throw new Error(`R2_ENDPOINT 不是合法的網址：${configured}`)
+  }
+
+  if (parsed.pathname !== '/' && parsed.pathname !== '') {
+    throw new Error(
+      `R2_ENDPOINT 結尾不可包含 bucket 名稱或任何路徑。` +
+        `請改成 ${parsed.origin}（目前是 ${configured}）`
+    )
+  }
+
+  return parsed.origin
 }
 
 /** Throws a 503 naming the exact missing variables rather than failing obscurely. */
