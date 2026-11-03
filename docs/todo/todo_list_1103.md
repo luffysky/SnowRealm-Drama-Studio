@@ -20,11 +20,12 @@
 - `resolveLeaf()` 只是過渡相容，工作區 layout 完成後移除
 
 ### 待辦
-- [ ] 建立 `src/app/(studio)/projects/[projectId]/layout.tsx` + `ProjectWorkspaceLayout`
-- [ ] 把 04 自己畫的 Hero 與 Tab 搬進共用 layout
-- [ ] 裁減全域側欄
-- [ ] 移除 `resolveLeaf()`
-- [ ] 補路由表與導覽元件的測試
+- [x] ~~建立 `projects/[projectId]/layout.tsx` + 工作區頁首／Tab／切換作品~~ ✅ 1103
+- [x] ~~把 04 自己畫的 Hero 與 Tab 搬進共用 layout~~ ✅ 1103
+- [x] ~~裁減全域側欄成六項跨作品功能~~ ✅ 1103
+- [x] ~~移除 `resolveLeaf()`~~ ✅ 1103
+- [x] ~~補路由表與導覽元件的測試~~ ✅ 1103（`tests/navigation.test.ts` + 作品存取測試）
+- [ ] 新增作品相關 API 時記得呼叫 `requireProjectApi()`——layout 的檢查不算數
 
 ---
 

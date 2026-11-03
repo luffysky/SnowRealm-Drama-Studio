@@ -106,11 +106,35 @@
 
 ---
 
-## 7. 尚未遷移的項目
+## 7. 實作狀態
 
-| 項目 | 現況 | 待辦 |
-|---|---|---|
-| `resolveLeaf()` | 仍在 `src/lib/navigation.ts` | 作品工作區 layout 完成後移除 |
-| 全域側欄 | 仍含作品相關項目 | 依第 2 節裁減 |
-| `/projects/[id]/page.tsx` | 自己畫 Hero 與 Tab | 移進共用 layout |
-| 01 / 04 / 05 / 17 | 等 GPT 修正後的設計圖 | 收到再動 |
+### 已完成（2026-11-03）
+
+| 項目 | 位置 |
+|---|---|
+| 作品工作區 layout | `src/app/(studio)/projects/[projectId]/layout.tsx` |
+| 工作區頁首／Tab／切換作品 | `src/components/studio/ProjectWorkspaceChrome.tsx` |
+| 權限與 projectId 隔離 | `src/lib/project-access.ts` |
+| 全域側欄裁減成六項 | `src/lib/navigation.ts` |
+| `PROJECT_TABS` 單一定義 | `src/lib/navigation.ts` |
+| 移除 `resolveLeaf()` 過渡補丁 | 已刪 |
+| 04 不再自己畫 Hero 與 Tab | `ProjectOverview.tsx` 只剩內容 |
+| 測試 | `tests/navigation.test.ts`、`tests/projects.test.ts` |
+
+實測：工作區 200、未實作的 Tab 手打網址 404、`garbage` / `_` / 不存在的 UUID
+全部 404（不是 500）、側欄不再出現任何作品相關項目。
+
+**malformed uuid 必須自己擋**：Postgres 對格式錯誤的 uuid 是丟錯而不是回空集合，
+id 直接進 SQL 會讓 `/projects/garbage` 變成 500。`isProjectId()` 負責這件事，
+`tests/projects.test.ts` 有回歸測試。
+
+### 待辦
+
+| 項目 | 說明 |
+|---|---|
+| 01 / 04 / 05 / 17 版面 | 等 GPT 修正後的設計圖 |
+| 跨作品任務 `/tasks` | M4 |
+| 成本中心 `/costs` | M4 |
+| 團隊管理 `/team` | M4 |
+| 系統設定 `/settings` | M4，含匯率設定 |
+| API route 的 `requireProjectApi()` | 目前只有頁面層用到；新增作品相關 API 時必須呼叫 |

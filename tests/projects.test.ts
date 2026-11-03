@@ -151,6 +151,49 @@ describe.skipIf(!hasDb)('favourites', () => {
   })
 })
 
+describe.skipIf(!hasDb)('project access (docs/ROUTES.md §5)', () => {
+  it('resolves a project the member may open', async () => {
+    const access = await import('@/lib/project-access')
+    const project = await access.findAccessibleProject(projectId, ownerId)
+
+    expect(project).not.toBeNull()
+    expect(project!.id).toBe(projectId)
+  })
+
+  it('returns null for an id that does not exist', async () => {
+    const access = await import('@/lib/project-access')
+    const missing = await access.findAccessibleProject(
+      '11111111-1111-4111-8111-111111111111',
+      ownerId
+    )
+    expect(missing).toBeNull()
+  })
+
+  it('returns null — not a database error — for a malformed id', async () => {
+    /*
+     * Postgres rejects a malformed uuid with an error rather than an empty
+     * result, so an unguarded id straight from the URL turns /projects/garbage
+     * into a 500 instead of a 404.
+     */
+    const access = await import('@/lib/project-access')
+
+    for (const bad of ['garbage', '_', '', '1; drop table projects', '../admin']) {
+      await expect(access.findAccessibleProject(bad, ownerId)).resolves.toBeNull()
+    }
+  })
+
+  it('recognises a well-formed id without touching the database', async () => {
+    const access = await import('@/lib/project-access')
+
+    expect(access.isProjectId(projectId)).toBe(true)
+    expect(access.isProjectId('11111111-1111-4111-8111-111111111111')).toBe(true)
+    expect(access.isProjectId('garbage')).toBe(false)
+    expect(access.isProjectId(undefined)).toBe(false)
+    // Wrong version/variant nibbles.
+    expect(access.isProjectId('11111111-1111-9111-0111-111111111111')).toBe(false)
+  })
+})
+
 describe.skipIf(!hasDb)('getProjectDetail', () => {
   it('resolves the owner and tech lead to readable names', async () => {
     const detail = await projectsLib.getProjectDetail(projectId, ownerId)

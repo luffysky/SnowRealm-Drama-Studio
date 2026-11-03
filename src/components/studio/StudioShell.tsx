@@ -31,12 +31,10 @@ import {
   type CurrencyValue,
 } from '@/lib/money'
 import {
-  activeProjectId,
   activeSectionKey,
   isActiveHref,
   NAV_FOOTER,
   NAV_SECTIONS,
-  resolveLeaf,
   type NavLeaf,
   type NavSection,
 } from '@/lib/navigation'
@@ -375,14 +373,6 @@ function Rail({
   onClose: () => void
 }) {
   const pathname = usePathname()
-  const activeKey = activeSectionKey(pathname)
-  // Project-scoped entries resolve their `_` placeholder against this.
-  const projectId = activeProjectId(pathname)
-
-  // A section with children starts expanded when it contains the current page.
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(NAV_SECTIONS.map((s) => [s.key, s.key === activeKey]))
-  )
 
   return (
     <>
@@ -410,11 +400,6 @@ function Rail({
                 key={section.key}
                 section={section}
                 pathname={pathname}
-                projectId={projectId}
-                expanded={expanded[section.key] ?? false}
-                onToggle={() =>
-                  setExpanded((prev) => ({ ...prev, [section.key]: !prev[section.key] }))
-                }
                 onNavigate={onClose}
               />
             ))}
@@ -423,13 +408,7 @@ function Rail({
           <ul className="mt-2 flex flex-col gap-0.5 border-t border-stage-700/50 pt-2">
             {NAV_FOOTER.map((leaf) => (
               <li key={leaf.key}>
-                <RailLeaf
-                  leaf={leaf}
-                  pathname={pathname}
-                  projectId={projectId}
-                  onNavigate={onClose}
-                  indent={false}
-                />
+                <RailLeaf leaf={leaf} pathname={pathname} onNavigate={onClose} indent={false} />
               </li>
             ))}
           </ul>
@@ -469,23 +448,23 @@ function Brand({ onClose }: { onClose: () => void }) {
   )
 }
 
+/**
+ * One rail row.
+ *
+ * Flat: the rail holds only cross-project destinations now, so there are no
+ * child entries to expand (`docs/ROUTES.md` §2). Anything belonging to a single
+ * project lives in the workspace tab strip instead.
+ */
 function RailSection({
   section,
   pathname,
-  projectId,
-  expanded,
-  onToggle,
   onNavigate,
 }: {
   section: NavSection
   pathname: string
-  projectId: string | null
-  expanded: boolean
-  onToggle: () => void
   onNavigate: () => void
 }) {
   const Icon = ICONS[section.icon] ?? LayoutDashboard
-  const hasChildren = Boolean(section.children?.length)
   const active = section.ready && isActiveHref(pathname, section.href)
 
   // py-[13px] keeps the row 10px taller than the default, as requested.
@@ -535,37 +514,7 @@ function RailSection({
           </span>
         )}
 
-        {hasChildren && (
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={expanded}
-            aria-label={`${expanded ? '收合' : '展開'}${section.label}`}
-            className="shrink-0 rounded p-1 text-ink-600 transition-colors hover:bg-stage-800 hover:text-ink-300"
-          >
-            <ChevronDown
-              aria-hidden
-              className={cn('size-3.5 transition-transform', expanded && 'rotate-180')}
-            />
-          </button>
-        )}
       </div>
-
-      {hasChildren && expanded && (
-        <ul className="mt-0.5 flex flex-col gap-0.5">
-          {(section.children ?? []).map((leaf) => (
-            <li key={leaf.key}>
-              <RailLeaf
-                leaf={leaf}
-                pathname={pathname}
-                projectId={projectId}
-                onNavigate={onNavigate}
-                indent
-              />
-            </li>
-          ))}
-        </ul>
-      )}
     </li>
   )
 }
@@ -573,43 +522,37 @@ function RailSection({
 function RailLeaf({
   leaf,
   pathname,
-  projectId,
   onNavigate,
   indent,
 }: {
   leaf: NavLeaf
   pathname: string
-  projectId: string | null
   onNavigate: () => void
   indent: boolean
 }) {
-  const { href, enabled, reason } = resolveLeaf(leaf, projectId)
-  const active = enabled && isActiveHref(pathname, href)
+  const active = leaf.ready && isActiveHref(pathname, leaf.href)
 
   const row = cn(
     'flex items-center gap-2 rounded-lg py-2 pr-2.5 text-xs transition-all',
     indent ? 'pl-9' : 'pl-2.5'
   )
 
-  if (!enabled) {
+  if (!leaf.ready) {
     return (
       <span
         aria-disabled="true"
-        title={reason}
+        title={`「${leaf.label}」尚未實作，預計於 ${leaf.milestone} 階段交付`}
         className={cn(row, 'cursor-default text-ink-700 select-none hover:bg-stage-800/60 hover:text-ink-500')}
       >
         <span className="truncate">{leaf.label}</span>
-        {/* A ready-but-unscoped entry shows no milestone — it is built. */}
-        <span className="ml-auto shrink-0 text-[10px] text-ink-700">
-          {leaf.ready ? '需選作品' : leaf.milestone}
-        </span>
+        <span className="ml-auto shrink-0 text-[10px] text-ink-700">{leaf.milestone}</span>
       </span>
     )
   }
 
   return (
     <Link
-      href={href}
+      href={leaf.href}
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
       className={cn(

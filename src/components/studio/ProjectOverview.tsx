@@ -4,10 +4,8 @@ import {
   Boxes,
   CalendarDays,
   Check,
-  ChevronRight,
   Clock,
   Coins,
-  FileText,
   Film,
   Image as ImageIcon,
   Inbox,
@@ -19,15 +17,12 @@ import {
   Users,
   Video,
 } from 'lucide-react'
-import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { EmptyState } from '@/components/ui/StateViews'
-import { Chip, EpisodeStatusChip, MemberDot } from '@/components/ui/StatusChip'
+import { EpisodeStatusChip, MemberDot } from '@/components/ui/StatusChip'
 import {
   AI_JOB_KIND_LABEL,
   ASSET_KIND_LABEL,
-  PROJECT_STATUS_LABEL,
-  PROJECT_STATUS_STYLE,
   type AiJobKindValue,
   type AssetKindValue,
   type EpisodeStatusValue,
@@ -55,20 +50,6 @@ import { cn, formatBytes, formatRelativeZh } from '@/lib/utils'
  * zero as well as at full tilt.
  */
 
-type ProjectTab = { key: string; label: string; ready?: boolean; milestone?: string }
-
-/** The eight views of a project. Only 總覽 exists; the rest are gated. */
-const PROJECT_TABS: ProjectTab[] = [
-  { key: 'overview', label: '總覽', ready: true },
-  { key: 'script', label: '劇本', milestone: 'M2' },
-  { key: 'storyboard', label: '分鏡', milestone: 'M3' },
-  { key: 'assets', label: '素材', milestone: 'M3' },
-  { key: 'production', label: '製作', milestone: 'M3' },
-  { key: 'post', label: '後製', milestone: 'M3' },
-  { key: 'release', label: '發行', milestone: 'M4' },
-  { key: 'settings', label: '設定', milestone: 'M4' },
-]
-
 export function ProjectOverview({
   project,
   currency,
@@ -80,8 +61,7 @@ export function ProjectOverview({
 }) {
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
-      <Hero project={project} />
-      <TabStrip />
+      <Logline project={project} />
       <StatCards project={project} currency={currency} fx={fx} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1fr)]">
@@ -104,126 +84,21 @@ export function ProjectOverview({
   )
 }
 
-/* -------------------------------------------------------------------------- */
-/* Hero                                                                        */
-/* -------------------------------------------------------------------------- */
-
-function Hero({ project }: { project: ProjectOverviewData }) {
-  return (
-    <section className="panel relative overflow-hidden rounded-xl bg-stage-900 ring-1 ring-stage-700">
-      {/* Key art goes here once a cover asset exists; a wash until then. */}
-      <div aria-hidden className="art-placeholder absolute inset-0" />
-      <div
-        aria-hidden
-        className="absolute inset-0 bg-gradient-to-r from-stage-950 via-stage-950/85 to-stage-950/30"
-      />
-
-      <div className="relative flex flex-col gap-3 p-4 sm:p-5">
-        <nav aria-label="麵包屑" className="flex items-center gap-1.5 text-[11px] text-ink-500">
-          <Link href="/projects" className="transition-colors hover:text-ink-200">
-            作品列表
-          </Link>
-          <ChevronRight aria-hidden className="size-3" />
-          <span className="truncate text-ink-200">{project.title}</span>
-        </nav>
-
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl font-semibold tracking-tight text-ink-50 sm:text-2xl">
-                {project.title}
-              </h1>
-              <Chip className={PROJECT_STATUS_STYLE[project.status]}>
-                {PROJECT_STATUS_LABEL[project.status]}
-              </Chip>
-              {project.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded bg-stage-800/80 px-1.5 py-0.5 text-[10px] text-ink-300 ring-1 ring-inset ring-stage-700"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-
-            <p className="max-w-2xl text-xs leading-relaxed text-ink-400">
-              {project.logline || (
-                <span className="text-ink-600">
-                  尚未撰寫一句話簡介——待故事定稿後於「作品設定」填入。
-                </span>
-              )}
-            </p>
-          </div>
-
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <GatedButton label="編輯作品" milestone="M1" icon={<FileText className="size-3.5" />} />
-            <GatedButton
-              label="AI 企劃助手"
-              milestone="M2"
-              icon={<Sparkles className="size-3.5" />}
-            />
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
 /**
- * An action the design shows but that has no implementation yet.
+ * One-line premise.
  *
- * Spec v2 §4：「圖中按鈕必須真能操作；尚未串接的功能應禁用並顯示原因，不做空按鈕」—
- * so it renders disabled with its milestone rather than as a link to nowhere.
+ * The breadcrumb, title, status, tags, tab strip and project switcher all moved
+ * to `projects/[projectId]/layout.tsx` — the workspace chrome is shared by every
+ * tab, so drawing it again here would be two headers disagreeing with each other
+ * the moment one changed (`docs/ROUTES.md` §3).
  */
-function GatedButton({
-  label,
-  milestone,
-  icon,
-}: {
-  label: string
-  milestone: string
-  icon: ReactNode
-}) {
+function Logline({ project }: { project: ProjectOverviewData }) {
   return (
-    <span
-      aria-disabled="true"
-      title={`「${label}」尚未實作，預計於 ${milestone} 階段交付`}
-      className="inline-flex cursor-default items-center gap-1.5 rounded-lg bg-stage-800/80 px-3 py-2 text-xs font-medium text-ink-500 ring-1 ring-inset ring-stage-700 transition-colors select-none hover:text-ink-300"
-    >
-      {icon}
-      {label}
-      <span className="rounded bg-stage-900 px-1 text-[10px] text-ink-600">{milestone}</span>
-    </span>
-  )
-}
-
-function TabStrip() {
-  return (
-    <nav aria-label="作品分頁" className="-mx-1 overflow-x-auto px-1">
-      <ul className="flex min-w-max items-center gap-1 rounded-xl bg-stage-900 p-1 ring-1 ring-stage-700">
-        {PROJECT_TABS.map((tab) => (
-          <li key={tab.key}>
-            {tab.ready ? (
-              <span
-                aria-current="page"
-                className="bg-brand-gradient glow-accent-sm inline-flex items-center rounded-lg px-3.5 py-1.5 text-xs font-medium text-white"
-              >
-                {tab.label}
-              </span>
-            ) : (
-              <span
-                aria-disabled="true"
-                title={`「${tab.label}」尚未實作，預計於 ${tab.milestone} 階段交付`}
-                className="inline-flex cursor-default items-center gap-1 rounded-lg px-3.5 py-1.5 text-xs text-ink-600 transition-colors select-none hover:bg-stage-800/60 hover:text-ink-400"
-              >
-                {tab.label}
-                <span className="text-[9px] text-ink-700">{tab.milestone}</span>
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <p className="max-w-3xl text-xs leading-relaxed text-ink-400">
+      {project.logline || (
+        <span className="text-ink-600">尚未撰寫一句話簡介——待故事定稿後於「作品設定」填入。</span>
+      )}
+    </p>
   )
 }
 

@@ -1,13 +1,18 @@
 /**
- * The studio's navigation tree, transcribed from the reference art in
- * `UI Design/` (01_dashboard, 05_episodes).
+ * Navigation, in two layers that never overlap (`docs/ROUTES.md`).
  *
- * One source for both chromes: the top bar renders the sections, the sidebar
- * renders the same tree expanded. Keeping them in one place is what stops the
- * two drifting apart as pages land.
+ * 1. **The global rail** holds only what is not about one particular project:
+ *    the dashboard, the project list, cross-project tasks, costs, the team and
+ *    system settings.
+ * 2. **The project workspace tabs** hold everything that needs a projectId, and
+ *    live under `/projects/[projectId]`.
+ *
+ * The rail used to carry project-scoped entries — 小說編輯器, 分鏡工作台,
+ * 素材管理 — which could not work: clicking one from the dashboard gave the app
+ * no project to act on. That is the whole reason the split exists.
  *
  * `ready` gates whether an entry is a link at all. Spec v2 §4 is explicit —
- * 「圖中按鈕必須真能操作；尚未串接的功能應禁用並顯示原因，不做空按鈕」 — so an
+ * 「圖中按鈕必須真能操作；尚未串接的功能應禁用並顯示原因，不做空按鈕」— so an
  * unbuilt entry renders disabled with its milestone, never as a link to a 404.
  */
 
@@ -28,30 +33,26 @@ export type NavSection = {
   label: string
   /** lucide-react icon name, resolved by the shell. */
   icon: string
-  /** Where the top-bar tab points. */
   href: string
   ready: boolean
   milestone?: Milestone
   design?: number
-  children?: NavLeaf[]
 }
 
+/**
+ * The global rail. Cross-project only.
+ *
+ * Nothing requiring a projectId may be added here — it belongs in
+ * `PROJECT_TABS` instead.
+ */
 export const NAV_SECTIONS: NavSection[] = [
   {
     key: 'dashboard',
-    label: '總儀表板',
+    label: '工作室儀表板',
     icon: 'LayoutDashboard',
     href: '/dashboard',
     ready: true,
     design: 1,
-  },
-  {
-    key: 'studio',
-    label: '製片中心',
-    icon: 'Clapperboard',
-    href: '/studio',
-    ready: false,
-    milestone: 'M1',
   },
   {
     key: 'projects',
@@ -60,65 +61,19 @@ export const NAV_SECTIONS: NavSection[] = [
     href: '/projects',
     ready: true,
     design: 3,
-    children: [
-      { key: 'projects-list', label: '全部作品', href: '/projects', ready: true, design: 3 },
-      { key: 'projects-overview', label: '作品總覽', href: '/projects/_', ready: true, design: 4 },
-      { key: 'episodes', label: '集數列表', href: '/projects/_/episodes', ready: false, milestone: 'M1', design: 5 },
-      { key: 'arcs', label: '分集管理', href: '/projects/_/arcs', ready: false, milestone: 'M1' },
-      { key: 'versions', label: '版本紀錄', href: '/projects/_/versions', ready: false, milestone: 'M2', design: 8 },
-    ],
   },
   {
-    key: 'story',
-    label: '故事創作',
-    icon: 'PenLine',
-    href: '/story',
-    ready: false,
-    milestone: 'M2',
-    children: [
-      { key: 'novel', label: '小說編輯器', href: '/story/novel', ready: false, milestone: 'M2', design: 6 },
-      { key: 'script', label: '劇本編輯器', href: '/story/script', ready: false, milestone: 'M2', design: 7 },
-    ],
-  },
-  {
-    key: 'world',
-    label: '世界觀',
-    icon: 'BookOpen',
-    href: '/world',
-    ready: false,
-    milestone: 'M2',
-    children: [
-      { key: 'world-settings', label: '世界觀設定', href: '/world/settings', ready: false, milestone: 'M2', design: 9 },
-      { key: 'characters', label: '角色資料庫', href: '/world/characters', ready: false, milestone: 'M2', design: 10 },
-    ],
-  },
-  {
-    key: 'visual',
-    label: '視覺製作',
-    icon: 'Layers',
-    href: '/visual',
-    ready: false,
-    milestone: 'M3',
-    children: [
-      { key: 'storyboard', label: '分鏡工作台', href: '/visual/storyboard', ready: false, milestone: 'M3', design: 12 },
-      { key: 'assets', label: '素材管理', href: '/visual/assets', ready: false, milestone: 'M3', design: 14 },
-    ],
-  },
-  {
-    key: 'collab',
-    label: '協作管理',
-    icon: 'Users',
-    href: '/collab',
+    key: 'tasks',
+    label: '跨作品任務',
+    icon: 'ListChecks',
+    href: '/tasks',
     ready: false,
     milestone: 'M4',
-    children: [
-      { key: 'tasks', label: '任務看板', href: '/collab/tasks', ready: false, milestone: 'M4', design: 18 },
-      { key: 'reviews', label: '審核中心', href: '/collab/reviews', ready: false, milestone: 'M4', design: 58 },
-    ],
+    design: 18,
   },
   {
     key: 'costs',
-    label: '成本紀錄',
+    label: '成本中心',
     icon: 'Receipt',
     href: '/costs',
     ready: false,
@@ -126,8 +81,17 @@ export const NAV_SECTIONS: NavSection[] = [
     design: 23,
   },
   {
+    key: 'team',
+    label: '團隊管理',
+    icon: 'Users',
+    href: '/team',
+    ready: false,
+    milestone: 'M4',
+    design: 20,
+  },
+  {
     key: 'settings',
-    label: '專案設定',
+    label: '系統設定',
     icon: 'Settings',
     href: '/settings',
     ready: false,
@@ -136,75 +100,110 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 ]
 
-/** Sidebar-only entries, pinned to the foot of the tree. */
+/** Rail-only entries, pinned to the foot of the tree. */
 export const NAV_FOOTER: NavLeaf[] = [
   { key: 'profile', label: '個人設定', href: '/settings/profile', ready: false, milestone: 'M4', design: 22 },
 ]
 
-/**
- * The project id in the current pathname, or null.
- *
- * Several rail entries are per-project (`/projects/_`, `/projects/_/episodes`).
- * They can only be links once a project is open, so the shell resolves `_`
- * against this.
- */
-export function activeProjectId(pathname: string): string | null {
-  const match = /^\/projects\/([^/]+)/.exec(pathname)
-  const candidate = match?.[1]
-  if (!candidate || candidate === '_') return null
-  return candidate
-}
+/* -------------------------------------------------------------------------- */
+/* Project workspace                                                           */
+/* -------------------------------------------------------------------------- */
 
-export type ResolvedLeaf = {
-  href: string
-  enabled: boolean
-  /** Why it is not a link, when it is not. */
-  reason: string
+export type ProjectTab = {
+  key: string
+  label: string
+  /** Appended to `/projects/<id>`; empty string is the overview itself. */
+  segment: string
+  ready: boolean
+  milestone?: Milestone
+  design?: number
 }
 
 /**
- * Turns a leaf into something the rail can render.
+ * Every view of one project, in the order the tab strip shows them.
  *
- * A ready, project-scoped entry is still not clickable from, say, the
- * dashboard — there is no project to point it at. It stays disabled with a
- * reason rather than linking to `/projects/_`, which would 404.
+ * One definition drives the strip, the active-tab highlight and the route
+ * table in the docs, so a tab cannot exist in the UI without a route or the
+ * other way round.
  */
-export function resolveLeaf(leaf: NavLeaf, projectId: string | null): ResolvedLeaf {
-  if (!leaf.ready) {
-    return {
-      href: leaf.href,
-      enabled: false,
-      reason: `「${leaf.label}」尚未實作，預計於 ${leaf.milestone} 階段交付`,
-    }
-  }
+export const PROJECT_TABS: ProjectTab[] = [
+  { key: 'overview', label: '總覽', segment: '', ready: true, design: 4 },
+  { key: 'episodes', label: '集數', segment: 'episodes', ready: false, milestone: 'M1', design: 5 },
+  { key: 'script', label: '劇本', segment: 'script', ready: false, milestone: 'M2', design: 7 },
+  { key: 'world', label: '世界觀', segment: 'world', ready: false, milestone: 'M2', design: 9 },
+  {
+    key: 'characters',
+    label: '角色',
+    segment: 'characters',
+    ready: false,
+    milestone: 'M2',
+    design: 10,
+  },
+  {
+    key: 'storyboard',
+    label: '分鏡',
+    segment: 'storyboard',
+    ready: false,
+    milestone: 'M3',
+    design: 12,
+  },
+  { key: 'assets', label: '素材', segment: 'assets', ready: false, milestone: 'M3', design: 14 },
+  {
+    key: 'production',
+    label: '製作',
+    segment: 'production',
+    ready: false,
+    milestone: 'M3',
+    design: 17,
+  },
+  { key: 'reviews', label: '審核', segment: 'reviews', ready: false, milestone: 'M4', design: 57 },
+  { key: 'versions', label: '版本', segment: 'versions', ready: false, milestone: 'M2', design: 8 },
+  {
+    key: 'settings',
+    label: '設定',
+    segment: 'settings',
+    ready: false,
+    milestone: 'M4',
+    design: 21,
+  },
+]
 
-  if (!leaf.href.includes('/_')) {
-    return { href: leaf.href, enabled: true, reason: '' }
-  }
-
-  if (!projectId) {
-    return {
-      href: leaf.href,
-      enabled: false,
-      reason: `請先在「作品列表」選擇一個作品，才能開啟「${leaf.label}」`,
-    }
-  }
-
-  return { href: leaf.href.replace('/_', `/${projectId}`), enabled: true, reason: '' }
+export function projectTabHref(projectId: string, tab: ProjectTab): string {
+  return tab.segment ? `/projects/${projectId}/${tab.segment}` : `/projects/${projectId}`
 }
 
-/** The section a pathname belongs to, for highlighting the top bar. */
+/**
+ * Which tab the current pathname is in.
+ *
+ * Read from the URL, never from stored state: `docs/ROUTES.md` §4 requires a
+ * deep link, a refresh and two tabs on different projects to all work.
+ */
+export function activeProjectTabKey(pathname: string, projectId: string): string | null {
+  const base = `/projects/${projectId}`
+  if (!pathname.startsWith(base)) return null
+
+  const rest = pathname.slice(base.length).replace(/^\//, '')
+  if (rest === '') return 'overview'
+
+  const segment = rest.split('/')[0]
+  return PROJECT_TABS.find((tab) => tab.segment && tab.segment === segment)?.key ?? null
+}
+
+/* -------------------------------------------------------------------------- */
+
+/** The rail section a pathname belongs to, for highlighting. */
 export function activeSectionKey(pathname: string): string | null {
+  // Longest match wins, so `/settings/profile` does not highlight `/settings`
+  // when a more specific section exists.
+  let best: NavSection | null = null
+
   for (const section of NAV_SECTIONS) {
     if (pathname === section.href || pathname.startsWith(`${section.href}/`)) {
-      return section.key
-    }
-    for (const child of section.children ?? []) {
-      const base = child.href.split('/_')[0] ?? child.href
-      if (pathname.startsWith(base)) return section.key
+      if (!best || section.href.length > best.href.length) best = section
     }
   }
-  return null
+
+  return best?.key ?? null
 }
 
 export function isActiveHref(pathname: string, href: string): boolean {
@@ -213,10 +212,9 @@ export function isActiveHref(pathname: string, href: string): boolean {
 
 /** How many entries are still unbuilt, shown in the shell's build-status note. */
 export function unreadyCount(): number {
-  let n = 0
-  for (const section of NAV_SECTIONS) {
-    if (!section.ready) n += 1
-    for (const child of section.children ?? []) if (!child.ready) n += 1
-  }
-  return n + NAV_FOOTER.filter((f) => !f.ready).length
+  return (
+    NAV_SECTIONS.filter((s) => !s.ready).length +
+    NAV_FOOTER.filter((f) => !f.ready).length +
+    PROJECT_TABS.filter((t) => !t.ready).length
+  )
 }
