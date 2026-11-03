@@ -475,3 +475,40 @@ export const createWorldEventSchema = z.object({
   eraLabel: z.string().trim().max(60, '紀年最多 60 個字').optional(),
   revealedInEpisode: z.number().int().positive().nullable().optional(),
 })
+
+/* -------------------------------------------------------------------------- */
+/* 角色                                                                        */
+/* -------------------------------------------------------------------------- */
+
+export const createCharacterSchema = z.object({
+  name: z.string().trim().min(1, '請輸入角色名稱').max(60, '名稱最多 60 個字'),
+  alias: z.string().trim().max(120, '別名最多 120 個字').optional(),
+  tier: z.enum(CHARACTER_TIERS),
+})
+
+/** Only the fields a member may edit; ids and timestamps are not among them. */
+export const updateCharacterSchema = z.object({
+  name: z.string().trim().min(1).max(60).optional(),
+  alias: z.string().trim().max(120).optional(),
+  tier: z.enum(CHARACTER_TIERS).optional(),
+  age: z.string().trim().max(60).optional(),
+  gender: z.string().trim().max(30).optional(),
+  appearance: z.string().max(5000).optional(),
+  personality: z.string().max(5000).optional(),
+  background: z.string().max(20_000).optional(),
+  growth: z.string().max(20_000).optional(),
+  visualPrompt: z.string().max(5000).optional(),
+  negativePrompt: z.string().max(5000).optional(),
+  voiceProvider: z.string().trim().max(60).optional(),
+  voiceId: z.string().trim().max(120).optional(),
+  voiceStyle: z.string().trim().max(120).optional(),
+  voiceNote: z.string().max(2000).optional(),
+})
+
+export const createRelationshipSchema = z.object({
+  fromCharacterId: uuid,
+  toCharacterId: uuid,
+  kind: z.string().trim().min(1, '請輸入關係').max(40, '關係最多 40 個字'),
+  description: z.string().trim().max(500).optional(),
+  sentiment: z.number().int().min(-100).max(100).optional(),
+})
