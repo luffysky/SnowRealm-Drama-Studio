@@ -57,6 +57,20 @@
       "when": 1793696686041,
       "tag": "0007_episode_cover",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793710152006,
+      "tag": "0008_search_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793710517695,
+      "tag": "0009_search_parent",
+      "breakpoints": true
     }
   ]
 }

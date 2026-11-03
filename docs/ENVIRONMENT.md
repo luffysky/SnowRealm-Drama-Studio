@@ -27,6 +27,8 @@ SnowRealm Drama Studio V1 — Neon PostgreSQL + Cloudflare R2 + Vercel
 | `PRESIGN_TTL_SECONDS` | ⬜ | Presigned URL 有效秒數，預設 `300`（5 分鐘） |
 | `ANTHROPIC_API_KEY` | ⬜ | Claude API 金鑰。未設定時 AI 功能顯示「尚未啟用」，其餘功能不受影響 |
 | `AI_MAX_OUTPUT_TOKENS` | ⬜ | AI 單次輸出上限，預設 `8000`（配合 Hobby 的 60 秒限制） |
+| `VOYAGE_API_KEY` | ⬜ | Voyage AI 金鑰，供語意檢索用。未設定時搜尋退回純關鍵字（trigram），介面會明說 |
+| `VOYAGE_MODEL` | ⬜ | Embedding 模型，預設 `voyage-4`（1024 維）。更換會讓既有向量全部失效 |
 | `CRON_SECRET` | ✅ | AI 背景 worker 的憑證。未設定則 worker 停用，AI 任務會一直停在佇列 |
 | `SEED_OWNER_EMAIL` | ✅* | 初始化 Owner 帳號 |
 | `SEED_OWNER_ACCOUNT` | ✅* | Owner 的登入帳號（短名稱） |
@@ -372,6 +374,9 @@ TEST_DATABASE_URL=postgresql://srds:srds_local_dev@127.0.0.1:55432/snowrealm_dra
 
 # ---- AI（選填，未設定則 AI 功能顯示「尚未啟用」）----
 ANTHROPIC_API_KEY=
+
+# ---- 語意檢索（選填，未設定則搜尋只做關鍵字比對）----
+VOYAGE_API_KEY=
 ```
 
 填好後依序執行：

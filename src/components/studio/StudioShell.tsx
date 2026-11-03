@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Search,
   PenLine,
   Receipt,
   Settings,
@@ -23,6 +22,7 @@ import {
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
+import { CommandPalette } from '@/components/studio/CommandPalette'
 import { useToast } from '@/components/ui/Toast'
 import type { SessionUser } from '@/lib/auth/session'
 import { apiFetch } from '@/lib/client-fetch'
@@ -114,7 +114,7 @@ function TopBar({ user, onOpenRail }: { user: SessionUser; onOpenRail: () => voi
         {section?.label ?? 'Drama Studio'}
       </h1>
 
-      <GlobalSearchStub />
+      <CommandPalette />
 
       <div className="flex shrink-0 items-center gap-1">
         {/* Disabled rather than dead: spec v2 §4 forbids a button that does nothing. */}
@@ -133,27 +133,6 @@ function TopBar({ user, onOpenRail }: { user: SessionUser; onOpenRail: () => voi
         <UserChip user={user} />
       </div>
     </header>
-  )
-}
-
-/**
- * The global search box from the design.
- *
- * Rendered as a disabled field rather than omitted: it is a committed part of
- * the layout, and a search box that silently returns nothing would be worse
- * than one that says it is not built yet.
- */
-function GlobalSearchStub() {
-  return (
-    <div
-      aria-disabled="true"
-      title="全域搜尋尚未實作，預計於 M4 階段交付"
-      className="hidden h-9 w-72 cursor-default items-center gap-2 rounded-lg bg-stage-900/80 px-3 text-xs text-ink-600 ring-1 ring-inset ring-stage-700 select-none md:flex xl:w-96"
-    >
-      <Search aria-hidden className="size-3.5 shrink-0" />
-      <span className="min-w-0 flex-1 truncate">搜尋作品、集數、素材、任務…</span>
-      <kbd className="shrink-0 rounded bg-stage-800 px-1 text-[10px] text-ink-700">M4</kbd>
-    </div>
   )
 }
 

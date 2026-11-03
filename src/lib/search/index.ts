@@ -1,0 +1,632 @@
+import crypto from 'node:crypto'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { db } from '@/db'
+import {
+  characters,
+  chapters,
+  documents,
+  episodes,
+  projects,
+  scenes,
+  searchDocuments,
+  worldEntries,
+  worldEvents,
+} from '@/db/schema'
+import type { SearchHit, SearchKind, SearchResult } from '@/lib/search/view'
+import {
+  EMBEDDING_MODEL,
+  embed,
+  embedOne,
+  embeddingsConfigured,
+} from '@/lib/search/embeddings'
+
+/**
+ * 智慧語意檢索.
+ *
+ * Hybrid by design. Semantic retrieval finds 「碼頭下雨的那場戲」 when nothing
+ * in the text says 「下雨」; trigram matching finds 「EP007」 and 「沈知味」
+ * exactly, which an embedding is bad at. Running both and merging is what
+ * makes the box answer either kind of question.
+ *
+ * Trigram rather than `to_tsvector`: Postgres's built-in full-text search does
+ * not segment Chinese, so 「碼頭的訂單」 becomes one token and the index is
+ * useless for this corpus.
+ */
+
+export type { SearchKind, SearchHit, SearchResult } from '@/lib/search/view'
+export { SEARCH_KIND_LABEL, SEARCH_KINDS, MATCHED_BY_LABEL } from '@/lib/search/view'
+
+/** Chunk size in characters. Long enough for context, short enough to locate. */
+const CHUNK_CHARS = 700
+const CHUNK_OVERLAP = 100
+
+/* -------------------------------------------------------------------------- */
+/* Indexing                                                                    */
+/* -------------------------------------------------------------------------- */
+
+type Indexable = {
+  kind: SearchKind
+  refId: string
+  /** The episode this belongs to, when it belongs to one. Drives the link. */
+  parentRefId?: string
+  title: string
+  text: string
+}
+
+/**
+ * Rebuilds a project's index.
+ *
+ * Content that has not changed keeps its existing embedding — the hash check
+ * is the entire cost control, and re-embedding an unchanged 120-episode novel
+ * on every save would be the expensive mistake here.
+ */
+export async function reindexProject(projectId: string): Promise<{
+  indexed: number
+  embedded: number
+  skipped: number
+  semantic: boolean
+}> {
+  const sources = await collect(projectId)
+
+  const rows = sources.flatMap((source) =>
+    chunk(source.text).map((text, index) => ({
+      kind: source.kind,
+      refId: source.refId,
+      parentRefId: source.parentRefId ?? null,
+      chunkIndex: index,
+      title: source.title,
+      snippet: text.slice(0, 160),
+      content: text,
+      contentHash: hash(text),
+    }))
+  )
+
+  // Drop index rows whose source is gone, so a deleted chapter stops
+  // appearing in results.
+  const liveKeys = new Set(rows.map((r) => `${r.kind}:${r.refId}:${r.chunkIndex}`))
+  const existing = await db
+    .select({
+      id: searchDocuments.id,
+      kind: searchDocuments.kind,
+      refId: searchDocuments.refId,
+      chunkIndex: searchDocuments.chunkIndex,
+      contentHash: searchDocuments.contentHash,
+      embedding: searchDocuments.embedding,
+      embeddingModel: searchDocuments.embeddingModel,
+    })
+    .from(searchDocuments)
+    .where(eq(searchDocuments.projectId, projectId))
+
+  const stale = existing.filter(
+    (row) => !liveKeys.has(`${row.kind}:${row.refId}:${row.chunkIndex}`)
+  )
+  if (stale.length > 0) {
+    await db.delete(searchDocuments).where(
+      inArray(
+        searchDocuments.id,
+        stale.map((r) => r.id)
+      )
+    )
+  }
+
+  const previous = new Map(
+    existing.map((row) => [`${row.kind}:${row.refId}:${row.chunkIndex}`, row])
+  )
+
+  const needsEmbedding: typeof rows = []
+  const reusable = new Map<string, { embedding: number[]; model: string }>()
+
+  for (const row of rows) {
+    const key = `${row.kind}:${row.refId}:${row.chunkIndex}`
+    const before = previous.get(key)
+
+    if (
+      before &&
+      before.contentHash === row.contentHash &&
+      before.embedding &&
+      before.embeddingModel === EMBEDDING_MODEL
+    ) {
+      reusable.set(key, { embedding: before.embedding, model: before.embeddingModel })
+    } else {
+      needsEmbedding.push(row)
+    }
+  }
+
+  let embeddings: number[][] | null = null
+  if (embeddingsConfigured() && needsEmbedding.length > 0) {
+    embeddings = await embed(
+      needsEmbedding.map((r) => r.content),
+      'document'
+    )
+  }
+
+  const embeddingFor = new Map<string, number[]>()
+  if (embeddings) {
+    needsEmbedding.forEach((row, index) => {
+      const vector = embeddings![index]
+      if (vector) embeddingFor.set(`${row.kind}:${row.refId}:${row.chunkIndex}`, vector)
+    })
+  }
+
+  for (let i = 0; i < rows.length; i += 200) {
+    const batch = rows.slice(i, i + 200)
+
+    await db
+      .insert(searchDocuments)
+      .values(
+        batch.map((row) => {
+          const key = `${row.kind}:${row.refId}:${row.chunkIndex}`
+          const fresh = embeddingFor.get(key)
+          const kept = reusable.get(key)
+
+          return {
+            projectId,
+            kind: row.kind,
+            refId: row.refId,
+            parentRefId: row.parentRefId,
+            chunkIndex: row.chunkIndex,
+            title: row.title,
+            snippet: row.snippet,
+            content: row.content,
+            embedding: fresh ?? kept?.embedding ?? null,
+            embeddingModel: fresh ? EMBEDDING_MODEL : (kept?.model ?? ''),
+            contentHash: row.contentHash,
+            indexedAt: new Date(),
+          }
+        })
+      )
+      .onConflictDoUpdate({
+        target: [searchDocuments.kind, searchDocuments.refId, searchDocuments.chunkIndex],
+        set: {
+          parentRefId: sql`excluded.parent_ref_id`,
+          title: sql`excluded.title`,
+          snippet: sql`excluded.snippet`,
+          content: sql`excluded.content`,
+          embedding: sql`excluded.embedding`,
+          embeddingModel: sql`excluded.embedding_model`,
+          contentHash: sql`excluded.content_hash`,
+          indexedAt: sql`excluded.indexed_at`,
+        },
+      })
+  }
+
+  return {
+    indexed: rows.length,
+    embedded: embeddingFor.size,
+    skipped: reusable.size,
+    semantic: embeddingsConfigured(),
+  }
+}
+
+/** Everything in a project worth searching, flattened. */
+async function collect(projectId: string): Promise<Indexable[]> {
+  const [project, episodeRows, chapterRows, sceneRows, entryRows, eventRows, characterRows] =
+    await Promise.all([
+      db
+        .select({
+          id: projects.id,
+          title: projects.title,
+          logline: projects.logline,
+          synopsis: projects.synopsis,
+          tags: projects.tags,
+        })
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .limit(1),
+
+      db
+        .select({
+          id: episodes.id,
+          number: episodes.number,
+          title: episodes.title,
+          logline: episodes.logline,
+          synopsis: episodes.synopsis,
+          notes: episodes.notes,
+        })
+        .from(episodes)
+        .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt))),
+
+      db
+        .select({
+          id: chapters.id,
+          title: chapters.title,
+          content: chapters.content,
+          number: episodes.number,
+          episodeId: episodes.id,
+        })
+        .from(chapters)
+        .innerJoin(documents, eq(documents.id, chapters.documentId))
+        .innerJoin(episodes, eq(episodes.id, documents.episodeId))
+        .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt))),
+
+      db
+        .select({
+          id: scenes.id,
+          code: scenes.code,
+          heading: scenes.heading,
+          content: scenes.content,
+          number: episodes.number,
+          episodeId: episodes.id,
+        })
+        .from(scenes)
+        .innerJoin(documents, eq(documents.id, scenes.documentId))
+        .innerJoin(episodes, eq(episodes.id, documents.episodeId))
+        .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt))),
+
+      db
+        .select({
+          id: worldEntries.id,
+          title: worldEntries.title,
+          summary: worldEntries.summary,
+          body: worldEntries.body,
+        })
+        .from(worldEntries)
+        .where(and(eq(worldEntries.projectId, projectId), isNull(worldEntries.deletedAt))),
+
+      db
+        .select({
+          id: worldEvents.id,
+          title: worldEvents.title,
+          description: worldEvents.description,
+          eraLabel: worldEvents.eraLabel,
+        })
+        .from(worldEvents)
+        .where(and(eq(worldEvents.projectId, projectId), isNull(worldEvents.deletedAt))),
+
+      db
+        .select({
+          id: characters.id,
+          name: characters.name,
+          alias: characters.alias,
+          personality: characters.personality,
+          background: characters.background,
+          growth: characters.growth,
+          appearance: characters.appearance,
+        })
+        .from(characters)
+        .where(and(eq(characters.projectId, projectId), isNull(characters.deletedAt))),
+    ])
+
+  const out: Indexable[] = []
+
+  const row = project[0]
+  if (row) {
+    const text = [row.title, row.tags.join(' '), row.logline, row.synopsis]
+      .filter(Boolean)
+      .join('\n')
+    if (text.trim()) out.push({ kind: 'PROJECT', refId: row.id, title: row.title, text })
+  }
+
+  for (const episode of episodeRows) {
+    const label = `EP${String(episode.number).padStart(3, '0')}`
+    const text = [label, episode.title, episode.logline, episode.synopsis, episode.notes]
+      .filter(Boolean)
+      .join('\n')
+    if (text.trim()) {
+      out.push({
+        kind: 'EPISODE',
+        refId: episode.id,
+        title: `${label} ${episode.title || '未命名'}`,
+        text,
+      })
+    }
+  }
+
+  for (const chapter of chapterRows) {
+    const text = stripHtml(chapter.content)
+    if (!text.trim()) continue
+    out.push({
+      kind: 'CHAPTER',
+      refId: chapter.id,
+      parentRefId: chapter.episodeId,
+      title: `EP${String(chapter.number).padStart(3, '0')}・${chapter.title || '未命名章節'}`,
+      text: `${chapter.title}\n${text}`,
+    })
+  }
+
+  for (const scene of sceneRows) {
+    const text = stripHtml(scene.content)
+    if (!text.trim()) continue
+    out.push({
+      kind: 'SCENE',
+      refId: scene.id,
+      parentRefId: scene.episodeId,
+      title: `EP${String(scene.number).padStart(3, '0')}・${scene.code} ${scene.heading}`,
+      text: `${scene.code} ${scene.heading}\n${text}`,
+    })
+  }
+
+  for (const entry of entryRows) {
+    const text = [entry.title, entry.summary, entry.body].filter(Boolean).join('\n')
+    if (text.trim()) {
+      out.push({ kind: 'WORLD_ENTRY', refId: entry.id, title: entry.title, text })
+    }
+  }
+
+  for (const event of eventRows) {
+    const text = [event.eraLabel, event.title, event.description].filter(Boolean).join('\n')
+    if (text.trim()) {
+      out.push({ kind: 'WORLD_EVENT', refId: event.id, title: event.title, text })
+    }
+  }
+
+  for (const character of characterRows) {
+    const text = [
+      character.name,
+      character.alias,
+      character.personality,
+      character.appearance,
+      character.background,
+      character.growth,
+    ]
+      .filter(Boolean)
+      .join('\n')
+    if (text.trim()) {
+      out.push({ kind: 'CHARACTER', refId: character.id, title: character.name, text })
+    }
+  }
+
+  return out
+}
+
+/**
+ * Splits on paragraph boundaries where possible.
+ *
+ * A chunk cut mid-sentence embeds badly, and the overlap keeps a sentence that
+ * straddles a boundary findable from either side.
+ */
+function chunk(text: string): string[] {
+  const clean = text.replace(/\n{3,}/g, '\n\n').trim()
+  if (clean.length <= CHUNK_CHARS) return clean ? [clean] : []
+
+  const out: string[] = []
+  let start = 0
+
+  while (start < clean.length) {
+    let end = Math.min(start + CHUNK_CHARS, clean.length)
+
+    if (end < clean.length) {
+      const breakAt = clean.lastIndexOf('\n', end)
+      if (breakAt > start + CHUNK_CHARS / 2) end = breakAt
+    }
+
+    const piece = clean.slice(start, end).trim()
+    if (piece) out.push(piece)
+
+    if (end >= clean.length) break
+    start = Math.max(end - CHUNK_OVERLAP, start + 1)
+  }
+
+  return out
+}
+
+function hash(text: string): string {
+  return crypto.createHash('sha256').update(text).digest('hex').slice(0, 32)
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<\/(p|div|li|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<br[^>]*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/* -------------------------------------------------------------------------- */
+/* Querying                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Hybrid search over one project.
+ *
+ * Both halves run and their scores are merged. A hit found by both ranks above
+ * one found by either alone, which is the cheap and effective version of
+ * reciprocal rank fusion for a corpus this size.
+ */
+export async function search(input: {
+  /**
+   * The projects to search. A workspace search passes one; the global palette
+   * passes every project the member may see. An empty list searches nothing,
+   * which is the right answer rather than everything.
+   */
+  projectIds: string[]
+  query: string
+  limit?: number
+  kinds?: SearchKind[]
+}): Promise<SearchResult> {
+  const query = input.query.trim()
+  const limit = input.limit ?? 20
+  if (!query || input.projectIds.length === 0) {
+    return { hits: [], semantic: embeddingsConfigured(), total: 0 }
+  }
+
+  const vector = await embedOne(query, 'query').catch(() => null)
+
+  const kindFilter =
+    input.kinds && input.kinds.length > 0
+      ? sql`and d.kind = any(${sql.raw(`ARRAY[${input.kinds.map((k) => `'${k}'`).join(',')}]`)})`
+      : sql``
+
+  /*
+   * One query, both signals. `similarity()` is pg_trgm; `cosine_similarity()`
+   * is the function the migration defines. Rows with no embedding simply score
+   * 0 on the semantic side rather than being excluded.
+   */
+  const result = await db.execute<{
+    id: string
+    project_id: string
+    project_title: string
+    kind: string
+    ref_id: string
+    parent_ref_id: string | null
+    title: string
+    snippet: string
+    lexical: number
+    semantic: number
+  }>(sql`
+    select
+      d.id,
+      d.project_id,
+      p.title as project_title,
+      d.kind,
+      d.ref_id,
+      d.parent_ref_id,
+      d.title,
+      d.snippet,
+      greatest(
+        similarity(d.content, ${query}),
+        similarity(d.title, ${query})
+      ) as lexical,
+      ${
+        vector
+          ? sql`coalesce(cosine_similarity(d.embedding, ${`{${vector.join(',')}}`}::real[]), 0)`
+          : sql`0::double precision`
+      } as semantic
+    from ${searchDocuments} d
+    join ${projects} p on p.id = d.project_id
+    where d.project_id = any(${sql.raw(`ARRAY[${input.projectIds.map((id) => `'${id}'`).join(',')}]::uuid[]`)})
+      ${kindFilter}
+    order by
+      ${
+        vector
+          ? sql`(coalesce(cosine_similarity(d.embedding, ${`{${vector.join(',')}}`}::real[]), 0) * 0.65
+               + greatest(similarity(d.content, ${query}), similarity(d.title, ${query})) * 0.35)`
+          : sql`greatest(similarity(d.content, ${query}), similarity(d.title, ${query}))`
+      } desc
+    limit ${limit * 3}
+  `)
+
+  // node-postgres returns a QueryResult; the rows are on .rows.
+  const scored = result.rows
+    .map((row) => {
+      const lexical = Number(row.lexical) || 0
+      const semantic = Number(row.semantic) || 0
+
+      // Thresholds: trigram similarity is noisy below ~0.1, and cosine over
+      // unrelated Chinese text sits around 0.3-0.5, so a low bar there would
+      // return the whole corpus.
+      const lexicalHit = lexical >= 0.1
+      const semanticHit = semantic >= 0.55
+
+      return {
+        id: row.id,
+        projectId: row.project_id,
+        projectTitle: row.project_title,
+        kind: row.kind as SearchKind,
+        refId: row.ref_id,
+        parentRefId: row.parent_ref_id,
+        title: row.title,
+        snippet: row.snippet,
+        score: vector ? semantic * 0.65 + lexical * 0.35 : lexical,
+        matchedBy: (lexicalHit && semanticHit
+          ? 'both'
+          : semanticHit
+            ? 'semantic'
+            : 'lexical') as SearchHit['matchedBy'],
+        lexicalHit,
+        semanticHit,
+      }
+    })
+    .filter((row) => row.lexicalHit || row.semanticHit)
+
+  // One hit per source: several chunks of the same chapter is noise, and the
+  // best-scoring chunk is the one worth showing.
+  const best = new Map<string, (typeof scored)[number]>()
+  for (const row of scored) {
+    const key = `${row.projectId}:${row.kind}:${row.refId}`
+    const current = best.get(key)
+    if (!current || row.score > current.score) best.set(key, row)
+  }
+
+  const hits = [...best.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((row) => ({
+      id: row.id,
+      projectId: row.projectId,
+      projectTitle: row.projectTitle,
+      kind: row.kind,
+      refId: row.refId,
+      title: row.title,
+      snippet: row.snippet,
+      score: row.score,
+      matchedBy: row.matchedBy,
+      href: hrefFor(row.projectId, row.kind, row.refId, row.parentRefId),
+    }))
+
+  return { hits, semantic: Boolean(vector), total: best.size }
+}
+
+/**
+ * Where a hit takes you.
+ *
+ * Chapters and scenes live inside an episode's document, so with the episode
+ * id the result opens the editor the text is actually in. Without it (a row
+ * indexed before migration 0009) the link falls back to the list page, which
+ * is worse but not broken.
+ */
+function hrefFor(
+  projectId: string,
+  kind: SearchKind,
+  refId: string,
+  parentRefId?: string | null
+): string {
+  switch (kind) {
+    case 'PROJECT':
+      return `/projects/${projectId}`
+    case 'EPISODE':
+      return `/projects/${projectId}/episodes?ep=${refId}`
+    case 'CHAPTER':
+      return parentRefId
+        ? `/projects/${projectId}/episodes/${parentRefId}/novel?chapter=${refId}`
+        : `/projects/${projectId}/novel`
+    case 'SCENE':
+      return parentRefId
+        ? `/projects/${projectId}/episodes/${parentRefId}/script?scene=${refId}`
+        : `/projects/${projectId}/scripts`
+    case 'WORLD_ENTRY':
+    case 'WORLD_EVENT':
+      return `/projects/${projectId}/world`
+    case 'CHARACTER':
+      return `/projects/${projectId}/characters`
+  }
+}
+
+/** Index freshness, for the settings page and the search footer. */
+export async function indexStatus(projectId: string): Promise<{
+  rows: number
+  embedded: number
+  lastIndexedAt: Date | null
+  semantic: boolean
+}> {
+  const [row] = await db
+    .select({
+      rows: sql<number>`count(*)`.mapWith(Number),
+      embedded: sql<number>`count(*) filter (where ${searchDocuments.embedding} is not null)`.mapWith(
+        Number
+      ),
+      /*
+       * `.mapWith` is not optional here. A raw sql fragment bypasses the
+       * column's driver mapping, so without it node-postgres hands back the
+       * timestamp as a string while the signature promises a Date — and the
+       * caller only finds out when it calls a Date method on it.
+       */
+      last: sql<Date | null>`max(${searchDocuments.indexedAt})`.mapWith(
+        searchDocuments.indexedAt
+      ),
+    })
+    .from(searchDocuments)
+    .where(eq(searchDocuments.projectId, projectId))
+
+  return {
+    rows: Number(row?.rows ?? 0),
+    embedded: Number(row?.embedded ?? 0),
+    lastIndexedAt: row?.last ?? null,
+    semantic: embeddingsConfigured(),
+  }
+}

@@ -17,6 +17,8 @@ const PROVIDER_KEYS = [
   'OPENAI_API_KEY',
   'REPLICATE_API_TOKEN',
   'ELEVENLABS_API_KEY',
+  // Embeddings are billed per token too; the search tests run keyword-only.
+  'VOYAGE_API_KEY',
 ]
 
 /*

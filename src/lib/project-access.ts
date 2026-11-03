@@ -4,6 +4,7 @@ import { db } from '@/db'
 import { projects } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { ProjectStatusValue } from '@/lib/constants'
+import { isProjectId } from '@/lib/project-id'
 
 /**
  * The one place that decides whether a member may work on a project.
@@ -30,15 +31,8 @@ export type ProjectAccess = {
   createdAt: Date
 }
 
-/**
- * Postgres rejects a malformed uuid with an error rather than an empty result,
- * so `/projects/garbage` would 500 instead of 404 if the id reached SQL.
- */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-export function isProjectId(value: unknown): value is string {
-  return typeof value === 'string' && UUID_PATTERN.test(value)
-}
+/** Re-exported so server callers keep one import. See `@/lib/project-id`. */
+export { isProjectId }
 
 /**
  * The visibility rule, as a condition other queries can reuse.
