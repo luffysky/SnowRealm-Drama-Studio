@@ -19,22 +19,46 @@ import { useEffect, useState } from 'react'
  * paste a paragraph into a side panel by hand.
  */
 
-export type AiSelectionAction = 'NOVEL_POLISH' | 'NOVEL_REWRITE' | 'NOVEL_REVIEW'
+export type AiSelectionAction =
+  | 'NOVEL_POLISH'
+  | 'NOVEL_REWRITE'
+  | 'NOVEL_REVIEW'
+  | 'SCRIPT_ANALYZE'
 
-const ACTIONS: { kind: AiSelectionAction; label: string; title: string }[] = [
-  { kind: 'NOVEL_POLISH', label: '潤稿', title: '修語病、統一用詞、加強畫面感，不動劇情' },
-  { kind: 'NOVEL_REWRITE', label: '改寫', title: '保留事件，換一種寫法' },
-  { kind: 'NOVEL_REVIEW', label: '審稿', title: '逐條指出問題，只報告不改寫' },
-]
+type Action = { kind: AiSelectionAction; label: string; title: string }
+
+/**
+ * Which actions a surface offers.
+ *
+ * 潤稿 and 改寫 are the same operation on prose and on dialogue, so both
+ * surfaces get them. The third differs: a novel wants 審稿 (pacing, motive,
+ * canon), a script wants 片長分析 — asking a screenplay for prose notes is
+ * the wrong question, and the one thing a short drama is always fighting is
+ * the clock.
+ */
+const ACTIONS: Record<'NOVEL' | 'SCRIPT', Action[]> = {
+  NOVEL: [
+    { kind: 'NOVEL_POLISH', label: '潤稿', title: '修語病、統一用詞、加強畫面感，不動劇情' },
+    { kind: 'NOVEL_REWRITE', label: '改寫', title: '保留事件，換一種寫法' },
+    { kind: 'NOVEL_REVIEW', label: '審稿', title: '逐條指出問題，只報告不改寫' },
+  ],
+  SCRIPT: [
+    { kind: 'NOVEL_POLISH', label: '潤稿', title: '修對白語病、統一用詞，不動劇情' },
+    { kind: 'NOVEL_REWRITE', label: '改寫', title: '保留事件，換一種寫法' },
+    { kind: 'SCRIPT_ANALYZE', label: '片長分析', title: '估算這段的片長，指出過長的對白' },
+  ],
+}
 
 /** Below this a "selection" is usually a mis-drag, not a passage. */
 const MIN_CHARS = 8
 
 export function AiSelectionMenu({
   editor,
+  surface,
   onAction,
 }: {
   editor: Editor
+  surface: 'NOVEL' | 'SCRIPT'
   onAction: (action: AiSelectionAction, text: string) => void
 }) {
   const [box, setBox] = useState<{ top: number; left: number; text: string } | null>(null)
@@ -98,7 +122,7 @@ export function AiSelectionMenu({
         {box.text.length} 字
       </span>
 
-      {ACTIONS.map((action) => (
+      {ACTIONS[surface].map((action) => (
         <button
           key={action.kind}
           type="button"

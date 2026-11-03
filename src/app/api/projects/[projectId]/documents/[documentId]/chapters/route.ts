@@ -3,6 +3,7 @@ import { ApiError } from '@/lib/api'
 import { requireProjectApi } from '@/lib/project-access'
 import { createChapter, documentBelongsToProject } from '@/lib/writing'
 import { createChapterSchema } from '@/lib/validators'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -36,6 +37,10 @@ export const POST = handle(
       projectId,
       summary: `${user.name} 新增章節「${chapter.title || '未命名'}」`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ chapter, lockRevision }, { status: 201 })
   }

@@ -2,6 +2,7 @@ import { ApiError, handle, jsonOk, parseJson, requireUser } from '@/lib/api'
 import { requireProjectApi } from '@/lib/project-access'
 import { saveChapterSchema } from '@/lib/validators'
 import { chapterProjectId, saveChapter } from '@/lib/writing'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -26,6 +27,10 @@ export const PATCH = handle(
 
     const input = await parseJson(request, saveChapterSchema)
     const result = await saveChapter({ chapterId, ...input, user })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk(result)
   }

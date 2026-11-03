@@ -1,5 +1,8 @@
 # 待辦清單｜2026-11-04
 
+> **2026-11-04 晚間更新**：A 類「做到一半」已補完 A1、A3、A4、A5。
+> A2（媒體供應商 adapter）是全新開發不是補洞，A6 要你提供圖檔。詳見各節。
+
 以實際檢查為準（git status、程式碼 grep、資料庫、檔案系統），不是憑印象。
 工作區乾淨，所有已完成的都已 commit 並 push。
 
@@ -9,7 +12,15 @@
 
 這一類的危險在於**看起來像做完了**。
 
-### A1. 影片生成的輪詢：只有資料庫，沒有 worker
+### A1. 影片生成的輪詢 ✅ 已補完
+
+worker 現在認得 `AWAITING_PROVIDER`：`claimJobs()` 會撿、
+`executeJob()` 看到 `external_job_id` 有值就走輪詢而不是重送、
+輪詢不累加 `attempt_count`、超過 30 分鐘沒回應就放棄（且**不重試**，
+因為重送等於再付一次錢）。`MediaAdapter` 契約（submit / poll / cancel）已定義。
+狀態機抽成 `decideMediaStep()` 純函式並有測試。
+
+~~### A1（原始描述）~~
 
 - ✅ `ai_jobs.external_job_id` 欄位、`AWAITING_PROVIDER` 狀態（migration 0012，已上線）
 - ❌ `src/lib/ai/queue.ts` **完全沒有用到這兩個東西**
@@ -21,7 +32,9 @@
 `runDueJobs()` 看到 `external_job_id` 有值就去輪詢而不是重送、
 而且**輪詢不可以累加 `attempt_count`**（不然一支三分鐘的影片三次輪詢就耗盡重試次數）。
 
-### A2. AI 媒體供應商：一個 adapter 都沒有
+### A2. AI 媒體供應商：一個 adapter 都沒有（**仍未做**）
+
+機制已經就緒（見 A1），缺的是廠商 adapter 本身——那是全新開發，不是補洞。
 
 - ✅ enum 有 `IMAGE_GENERIC` / `VIDEO_GENERIC` / `TTS_GENERIC`
 - ✅ `adapterFor()` 回 `null`，UI 顯示「這類供應商尚未實作適配器」（誠實，不是假裝可用）
@@ -30,23 +43,45 @@
 你已經決定：圖片 aggregator ＋ Gemini 兩個都接、影片 image-to-video 與
 text-to-video 都要、Seedance 走 aggregator。**這些都還沒開始**，被 81–90 插隊。
 
-### A3. 搜尋索引不會自動更新
+### A3. 搜尋索引不會自動更新 ✅ 已補完
+
+12 條寫入路由（PATCH/POST/DELETE，**不含 GET**）會呼叫 `markSearchDirty()`。
+只標記不重建——小說編輯器每 2.5 秒自動存檔，而 embedding 按 token 計費，
+每次存檔都重建等於替「正在打字的句子」付錢。
+實際重建由 `/api/search/reindex` 處理（cron 03:30 ＋ 可由登入成員觸發），
+搜尋面板在索引落後時會顯示「內容已變更，索引尚未更新」。
+
+~~### A3（原始描述）~~
 
 只有「改作品設定」會觸發 reindex。寫小說、改大綱、改角色、改世界觀**都不會**。
 目前要手動按搜尋面板右下角的「重建索引」。
 
-### A4. AI 選取選單只接了小說編輯器
+### A4. AI 選取選單只接了小說編輯器 ✅ 已補完
+
+劇本編輯器已接上，而且動作依介面不同：小說是潤稿／改寫／審稿，
+劇本是潤稿／改寫／**片長分析**——問劇本「節奏與動機」是問錯問題，
+短劇永遠在跟時間打架。
+
+~~### A4（原始描述）~~
 
 `ScriptEditor` 沒有 `onAiAction`。劇本裡選一段字不會浮出 AI 選單，小說會。
 模組設定裡 `aiSelection` 對兩個介面都預設開啟，所以這是不一致而不是刻意。
 
-### A5. 預覽檔只做了圖片
+### A5. 預覽檔只做了圖片 ✅ 已補完
+
+依素材類型產生不同的衍生檔：圖片→壓縮版、影片→海報影格（取第 1 秒，
+不取第 0 幀，因為很多影片開頭是黑的）、音訊→波形峰值 JSON（設計 83 要用）。
+波形存 JSON 不存圖：播放器要依自己的寬度畫，而一張波形圖沒辦法重新縮放或改色。
+解碼失敗一律回 null＝「沒有波形」，退回原生播放器——**假波形比沒有波形更糟**，
+它會讓人去點一個不存在的峰值。
+
+~~### A5（原始描述）~~
 
 `useUploader` 只對 `IMAGE` / `STICKER` 產生壓縮版。
 音訊的波形（`asset_variants.kind = 'WAVEFORM'` 這個值已經存在）沒有人寫入，
 影片也沒有縮圖。83 要用到波形。
 
-### A6. 缺四個公開圖片資產
+### A6. 缺四個公開圖片資產（**要你提供**）
 
 `public/` 底下缺 `login-bg.png`、`logo-mark.png`、`rail-foot.png`、`hero-banner.png`。
 目前用漸層或 placeholder 頂著（刻意做成看起來像設計，不是破圖）。

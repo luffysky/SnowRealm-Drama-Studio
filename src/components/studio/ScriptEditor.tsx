@@ -6,10 +6,12 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { countHtmlChars } from '@/components/editor/extensions'
 import { RichTextEditor } from '@/components/editor/RichTextEditor'
+import type { AiSelectionAction } from '@/components/editor/AiSelectionMenu'
 import { AiAssistant } from '@/components/studio/AiAssistant'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import type { AiJobKindValue } from '@/lib/constants'
 import type { EditorModuleId } from '@/lib/editor/modules'
 import type { CurrencyValue, FxRates } from '@/lib/money'
 import { cn, formatDurationZh, judgeDuration } from '@/lib/utils'
@@ -88,6 +90,15 @@ export function ScriptEditor({
 
   const [scenes, setScenes] = useState(initialScenes)
   /* `?scene=<id>` from a search result; see NovelEditor for the reasoning. */
+  /*
+   * What the AI panel works on. Null means the whole scene; a selection from
+   * the editor's floating menu narrows it. See NovelEditor for the reasoning.
+   */
+  const [aiScope, setAiScope] = useState<{ text: string; nonce: number } | null>(null)
+  const [aiRequest, setAiRequest] = useState<{ task: AiJobKindValue; nonce: number } | null>(
+    null
+  )
+
   const [activeId, setActiveId] = useState(
     (initialSceneId && initialScenes.some((s) => s.id === initialSceneId)
       ? initialSceneId
@@ -308,6 +319,11 @@ export function ScriptEditor({
           onDirty={() => setState('dirty')}
           onSave={(content, heading) => save(active.id, content, heading)}
           onKeepVersion={keepVersion}
+          onAiAction={(task, text) => {
+            const nonce = Date.now()
+            setAiScope({ text, nonce })
+            setAiRequest({ task, nonce })
+          }}
         />
       ) : (
         <section className="panel flex min-h-0 min-w-0 flex-col rounded-xl bg-stage-900 ring-1 ring-stage-700">
@@ -329,14 +345,27 @@ export function ScriptEditor({
           </header>
           <div className="p-4">
             <AiAssistant
+              /* A new selection action is a new run: remount rather than
+                 sync a prop into state. */
+              key={aiRequest?.nonce ?? 'whole-scene'}
+              {...(aiRequest ? { initialTask: aiRequest.task } : {})}
               projectId={projectId}
               episodeId={episodeId}
-              sourceText={active?.content ?? ''}
+              sourceText={aiScope?.text ?? active?.content ?? ''}
               currency={currency}
               fx={fx}
               providerReady={providerReady}
               providerDetail={providerDetail}
-              onAdopted={() => router.refresh()}
+              {...(aiScope
+                ? {
+                    scopeLabel: `只處理你選取的 ${aiScope.text.length} 字，不是整場。採用時仍會與整場比對。`,
+                  }
+                : {})}
+              onAdopted={() => {
+                setAiScope(null)
+                setAiRequest(null)
+                router.refresh()
+              }}
               tasks={[
                 {
                   kind: 'NOVEL_TO_SCRIPT',
@@ -421,6 +450,7 @@ function ScenePane({
   onDirty,
   onSave,
   onKeepVersion,
+  onAiAction,
 }: {
   scene: SceneData
   state: SaveState
@@ -435,6 +465,7 @@ function ScenePane({
   onDirty: () => void
   onSave: (content: string, heading: string) => void | Promise<void>
   onKeepVersion: () => void | Promise<void>
+  onAiAction: (task: AiSelectionAction, selectedText: string) => void
 }) {
   const [content, setContent] = useState(scene.content)
   const [heading, setHeading] = useState(scene.heading)
@@ -502,6 +533,7 @@ function ScenePane({
           onDirty()
         }}
         onToggleModule={onToggleModule}
+        onAiAction={onAiAction}
       />
 
       <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stage-700/60 px-4 py-2.5 text-[11px] text-ink-500">

@@ -2,6 +2,7 @@ import { ApiError, handle, jsonOk, logActivity, parseJson, requirePermission } f
 import { updateOutline } from '@/lib/episodes'
 import { requireProjectApi } from '@/lib/project-access'
 import { outlineEditSchema } from '@/lib/validators'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -34,6 +35,10 @@ export const PATCH = handle(
       projectId,
       summary: `更新 EP${String(row.number).padStart(3, '0')} 的大綱`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk(row)
   }

@@ -5,9 +5,17 @@ import { aiJobAttempts, aiJobs, aiOutputs, expenses } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import { assertWithinBudget, recordActual, recordEstimate } from '@/lib/usage'
 import type { SessionUser } from '@/lib/auth/session'
-import { adapterFor, envOnlyAnthropicAdapter } from './registry'
+import { adapterFor, envOnlyAnthropicAdapter, loadMediaAdapter } from './registry'
 import { aiProviders } from '@/db/schema'
-import { AiAdapterError, type AiAdapter, type AiContext, type AiRunRequest, type AiTaskKind } from './types'
+import {
+  AiAdapterError,
+  type AiAdapter,
+  type AiContext,
+  type AiRunRequest,
+  type AiTaskKind,
+  type MediaAdapter,
+  type MediaResult,
+} from './types'
 
 /**
  * Durable AI job queue (spec v2 §6.6).
@@ -29,6 +37,23 @@ const BACKOFF_SECONDS = [30, 120, 480]
 
 /** A claimed job older than this is assumed abandoned and may be reclaimed. */
 const LEASE_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * How long to wait between asking a media provider whether it has finished.
+ *
+ * Polling is cheap but not free — most providers rate-limit status calls — and
+ * a video takes minutes, so asking every second buys nothing.
+ */
+const POLL_INTERVAL_SECONDS = 15
+
+/**
+ * How long a job may sit at the provider before we give up on it.
+ *
+ * Without this a provider that accepts a submission and never answers leaves
+ * the job polling forever, holding a slot and reporting 「處理中」 to someone
+ * who will eventually conclude the whole feature is broken.
+ */
+const MAX_PROVIDER_WAIT_MS = 30 * 60 * 1000
 
 export type EnqueueInput = {
   user: SessionUser
@@ -212,6 +237,11 @@ async function claimJobs(workerId: string, limit: number): Promise<AiJobRow[]> {
           or(
             // Fresh work.
             eq(aiJobs.status, 'QUEUED'),
+            /*
+             * A media job already submitted to the provider, due for its next
+             * status check. `next_attempt_at` spaces these out.
+             */
+            eq(aiJobs.status, 'AWAITING_PROVIDER'),
             // Reclaim a lease whose worker died mid-run.
             and(
               eq(aiJobs.status, 'RUNNING'),
@@ -236,7 +266,17 @@ async function claimJobs(workerId: string, limit: number): Promise<AiJobRow[]> {
         status: 'RUNNING',
         lockedAt: now,
         lockedBy: workerId,
-        attemptCount: sql`${aiJobs.attemptCount} + 1`,
+        /*
+         * A poll is not an attempt.
+         *
+         * Counting it as one would exhaust `max_attempts` in three status
+         * checks — about 45 seconds — and fail a video that was generating
+         * perfectly well. The right-hand side sees the pre-update status, so
+         * this tests what the row was before being set to RUNNING.
+         */
+        attemptCount: sql`case when ${aiJobs.status} = 'AWAITING_PROVIDER'
+                               then ${aiJobs.attemptCount}
+                               else ${aiJobs.attemptCount} + 1 end`,
         startedAt: sql`coalesce(${aiJobs.startedAt}, ${now})`,
         progress: 5,
         progressNote: '已排入執行',
@@ -283,7 +323,76 @@ export async function runDueJobs(options: { limit?: number } = {}): Promise<Work
 
 type Outcome = 'succeeded' | 'failed' | 'retrying' | 'cancelled'
 
+/* -------------------------------------------------------------------------- */
+/* 媒體任務的狀態機                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What to do next with a media job.
+ *
+ * Pulled out as a pure function so the decision can be tested without a
+ * provider, a network or a clock: the interesting cases are "already submitted"
+ * and "waited too long", and both are awkward to reach through the real path.
+ */
+export type MediaStep =
+  | { action: 'submit' }
+  | { action: 'poll'; externalId: string }
+  | { action: 'timeout'; waitedMs: number }
+
+export function decideMediaStep(
+  job: { externalJobId: string; startedAt: Date | null },
+  now: Date = new Date()
+): MediaStep {
+  /*
+   * An empty handle means nothing has been sent yet. Its presence is the only
+   * thing standing between a retry and paying twice for the same video, so it
+   * is written before anything else can interrupt.
+   */
+  if (!job.externalJobId) return { action: 'submit' }
+
+  const waitedMs = job.startedAt ? now.getTime() - job.startedAt.getTime() : 0
+  if (waitedMs > MAX_PROVIDER_WAIT_MS) return { action: 'timeout', waitedMs }
+
+  return { action: 'poll', externalId: job.externalJobId }
+}
+
+/**
+ * Parks a job until its next status check.
+ *
+ * Deliberately not a failure and not a retry: the work is proceeding at the
+ * provider, so `attempt_count` is untouched and the lease is released for the
+ * next worker tick.
+ */
+async function parkUntilNextPoll(
+  jobId: string,
+  externalId: string,
+  update: { progress?: number; note?: string }
+): Promise<void> {
+  await db
+    .update(aiJobs)
+    .set({
+      status: 'AWAITING_PROVIDER',
+      externalJobId: externalId,
+      lockedAt: null,
+      lockedBy: '',
+      nextAttemptAt: new Date(Date.now() + POLL_INTERVAL_SECONDS * 1000),
+      ...(update.progress !== undefined ? { progress: update.progress } : {}),
+      progressNote: update.note ?? '供應商處理中',
+      updatedAt: new Date(),
+    })
+    .where(eq(aiJobs.id, jobId))
+}
+
+
 async function executeJob(job: AiJobRow): Promise<Outcome> {
+  /*
+   * A media job is driven by submit/poll rather than a single call. The text
+   * path never sets an external handle, so this branch only catches media —
+   * and catching it *first* is what stops a retry from submitting the same
+   * video twice.
+   */
+  if (job.externalJobId) return advanceMediaJob(job)
+
   const request = job.request as {
     task: AiTaskKind
     context: AiContext
@@ -429,6 +538,121 @@ async function executeJob(job: AiJobRow): Promise<Outcome> {
       durationMs: Date.now() - startedAt,
     })
   }
+}
+
+/**
+ * Moves a media job one step: submit, poll, or give up waiting.
+ *
+ * Called for a fresh media job and again on every status check. The provider
+ * holds the work; this only moves the row between states.
+ */
+async function advanceMediaJob(job: AiJobRow): Promise<Outcome> {
+  const startedAt = Date.now()
+  const step = decideMediaStep(job)
+
+  if (step.action === 'timeout') {
+    return finishFailed(job, undefined, {
+      code: 'provider_timeout',
+      message:
+        `供應商超過 ${Math.round(MAX_PROVIDER_WAIT_MS / 60000)} 分鐘沒有回應` +
+        `（已等 ${Math.round(step.waitedMs / 60000)} 分鐘）。` +
+        '該次生成可能仍在供應商端執行並計費，請到供應商後台確認。',
+      // Not retryable: re-submitting would pay for the work a second time.
+      retryable: false,
+      durationMs: Date.now() - startedAt,
+    })
+  }
+
+  const adapter = await loadMediaAdapter(job.providerId)
+  if (!adapter) {
+    return finishFailed(job, undefined, {
+      code: 'not_configured',
+      message: '這類供應商尚未實作適配器。',
+      retryable: false,
+      durationMs: Date.now() - startedAt,
+    })
+  }
+
+  try {
+    if (step.action === 'poll') {
+      const result = await adapter.poll(step.externalId)
+
+      if (result.state === 'pending') {
+        await parkUntilNextPoll(job.id, step.externalId, {
+          ...(result.progress !== undefined ? { progress: result.progress } : {}),
+          ...(result.note ? { note: result.note } : {}),
+        })
+        return 'retrying'
+      }
+
+      if (result.state === 'failed') {
+        return finishFailed(job, undefined, {
+          code: 'provider_failed',
+          message: result.message,
+          retryable: result.retryable,
+          durationMs: Date.now() - startedAt,
+        })
+      }
+
+      return finishMedia(job, result.result)
+    }
+
+    const media = (job.request as { media?: unknown }).media
+    if (!media) {
+      return finishFailed(job, undefined, {
+        code: 'invalid_request',
+        message: '這個任務沒有帶媒體生成參數。',
+        retryable: false,
+        durationMs: Date.now() - startedAt,
+      })
+    }
+
+    const submission = await adapter.submit(media as Parameters<MediaAdapter['submit']>[0])
+
+    if (submission.state === 'pending') {
+      await parkUntilNextPoll(job.id, submission.externalId, {
+        progress: 20,
+        ...(submission.note ? { note: submission.note } : {}),
+      })
+      return 'retrying'
+    }
+
+    return finishMedia(job, submission.result)
+  } catch (error) {
+    const adapterError = error instanceof AiAdapterError ? error : null
+    return finishFailed(job, undefined, {
+      code: adapterError?.code ?? 'provider_error',
+      message: error instanceof Error ? error.message : String(error),
+      retryable: adapterError?.retryable ?? false,
+      durationMs: Date.now() - startedAt,
+    })
+  }
+}
+
+/**
+ * Stores a finished media result.
+ *
+ * `AWAITING_REVIEW`, never `SUCCEEDED` — same rule as the text path. The
+ * artifacts are candidates until a human accepts them.
+ */
+async function finishMedia(job: AiJobRow, result: MediaResult): Promise<Outcome> {
+  await db
+    .update(aiJobs)
+    .set({
+      status: 'AWAITING_REVIEW',
+      result: { artifacts: result.artifacts, model: result.model },
+      model: result.model || job.model,
+      ...(result.costUsd !== null ? { actualCostUsd: String(result.costUsd) } : {}),
+      lockedAt: null,
+      lockedBy: '',
+      progress: 100,
+      progressNote: '已完成，待人工確認',
+      finishedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(aiJobs.id, job.id))
+
+  return 'succeeded'
 }
 
 /**

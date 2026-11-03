@@ -282,7 +282,12 @@ export const uploadRequestSchema = z.object({
   rootAssetId: uuid.nullable().optional(),
 })
 
-/** Step 1 of a preview upload: ask for a presigned destination. */
+/**
+ * Step 1 of a derived-file upload.
+ *
+ * Covers both axes of 「衍生檔案」: an image/poster preview and a waveform
+ * peaks file. The server decides which kinds an asset may have.
+ */
 export const previewBeginSchema = z.object({
   contentType: z.string().trim().min(1).max(160),
   sizeBytes: z.coerce.number().int().min(1).max(8 * 1024 * 1024),

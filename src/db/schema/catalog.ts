@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import {
   boolean,
   index,
@@ -52,13 +52,32 @@ export const projects = pgTable(
     /** Default target duration for new episodes, in seconds. */
     targetMinSec: integer('target_min_sec').notNull().default(120),
     targetMaxSec: integer('target_max_sec').notNull().default(180),
+    /**
+     * When indexable content last changed without being re-indexed.
+     *
+     * Null means the index is current. It is set by content writes and cleared
+     * by a reindex, so the search panel can say the index is stale instead of
+     * quietly returning yesterday's results — which is indistinguishable from
+     * "that text does not exist".
+     *
+     * Marking is deliberately all this does. The novel editor autosaves every
+     * 2.5 seconds and embeddings are billed per token, so reindexing on every
+     * write would charge for a sentence being typed.
+     */
+    searchDirtyAt: timestamp('search_dirty_at', { withTimezone: true }),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     /** Soft delete (spec v2 §5「重要刪除採 soft delete」). Queries filter this out. */
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('projects_status_idx').on(t.status)]
+  (t) => [
+    index('projects_status_idx').on(t.status),
+    // Partial: only projects behind their index are ever scanned.
+    index('projects_search_dirty_idx')
+      .on(t.searchDirtyAt)
+      .where(sql`${t.searchDirtyAt} is not null`),
+  ]
 )
 
 /** 篇章 / 部 — e.g. 第一部《萬家燈火》. */

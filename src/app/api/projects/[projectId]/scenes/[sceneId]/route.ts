@@ -2,6 +2,7 @@ import { ApiError, handle, jsonOk, parseJson, requireUser } from '@/lib/api'
 import { requireProjectApi } from '@/lib/project-access'
 import { saveSceneSchema } from '@/lib/validators'
 import { saveScene, sceneProjectId } from '@/lib/writing'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -25,6 +26,8 @@ export const PATCH = handle(
     }
 
     const input = await parseJson(request, saveSceneSchema)
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+    await markSearchDirty(projectId)
     return jsonOk(await saveScene({ sceneId, ...input, user }))
   }
 )

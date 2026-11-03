@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { AssetKindValue } from '@/lib/constants'
 import { apiFetch } from '@/lib/client-fetch'
+import { captureVideoPoster, computeWaveform } from '@/lib/audio-waveform'
 import { makeImagePreview } from '@/lib/image-preview'
 
 /**
@@ -143,15 +144,13 @@ export function useUploader(options: UseUploaderOptions) {
         options.onComplete?.(begin.assetId, item.file)
 
         /*
-         * The compressed copy, after the master is safely stored
+         * The derived file, after the master is safely stored
          * (`docs/STORAGE.md`). Deliberately not awaited into the upload's
-         * status: the file is already uploaded, and a preview that fails is a
-         * slower grid, not a lost asset. Hence the swallowed error — the
-         * master is unaffected either way.
+         * status: the file is already uploaded, and a derived file that fails
+         * is a slower grid or a missing waveform, not a lost asset. Hence the
+         * swallowed error — the master is unaffected either way.
          */
-        if (item.kind === 'IMAGE' || item.kind === 'STICKER') {
-          void uploadPreview(begin.assetId, item.file).catch(() => {})
-        }
+        void uploadDerived(begin.assetId, item.kind, item.file).catch(() => {})
       } catch (error) {
         if (controller.signal.aborted) {
           patch(item.id, { status: 'cancelled' })
@@ -239,24 +238,32 @@ export function useUploader(options: UseUploaderOptions) {
 }
 
 /**
- * Builds and stores the small copy of an image.
+ * Builds and stores whatever derived file this kind of asset gets.
  *
- * Never throws to the caller: every outcome short of success is "no preview",
- * and the UI falls back to the master automatically.
+ * - image  -> a compressed copy, so grids do not pull full-size originals
+ * - video  -> a poster frame, for the same reason
+ * - audio  -> waveform peaks, so the player draws without decoding the file
+ *
+ * Never throws to the caller: every outcome short of success is "no derived
+ * file", and every reader falls back on its own.
  */
-async function uploadPreview(assetId: string, file: File): Promise<void> {
-  const preview = await makeImagePreview(file)
-  if (!preview) return
+async function uploadDerived(
+  assetId: string,
+  kind: AssetKindValue,
+  file: File
+): Promise<void> {
+  const derived = await buildDerived(kind, file)
+  if (!derived) return
 
   const begin = await apiFetch(`/api/assets/${assetId}/preview`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      contentType: preview.blob.type,
-      sizeBytes: preview.blob.size,
-      width: preview.width,
-      height: preview.height,
-      params: preview.params,
+      contentType: derived.blob.type,
+      sizeBytes: derived.blob.size,
+      ...(derived.width !== undefined ? { width: derived.width } : {}),
+      ...(derived.height !== undefined ? { height: derived.height } : {}),
+      params: derived.params,
     }),
   })
   if (!begin.ok) return
@@ -265,8 +272,8 @@ async function uploadPreview(assetId: string, file: File): Promise<void> {
 
   const put = await fetch(url, {
     method: 'PUT',
-    headers: { 'content-type': preview.blob.type },
-    body: preview.blob,
+    headers: { 'content-type': derived.blob.type },
+    body: derived.blob,
   })
   if (!put.ok) return
 
@@ -275,6 +282,56 @@ async function uploadPreview(assetId: string, file: File): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ variantId }),
   })
+}
+
+type Derived = {
+  blob: Blob
+  width?: number
+  height?: number
+  params: Record<string, unknown>
+}
+
+async function buildDerived(kind: AssetKindValue, file: File): Promise<Derived | null> {
+  if (kind === 'IMAGE' || kind === 'STICKER') {
+    const preview = await makeImagePreview(file)
+    return preview
+      ? {
+          blob: preview.blob,
+          width: preview.width,
+          height: preview.height,
+          params: preview.params,
+        }
+      : null
+  }
+
+  if (kind === 'VIDEO') {
+    const poster = await captureVideoPoster(file)
+    return poster
+      ? { blob: poster, params: { derivedFrom: 'video', sourceType: file.type } }
+      : null
+  }
+
+  if (kind === 'MUSIC' || kind === 'SFX' || kind === 'VOICE') {
+    const waveform = await computeWaveform(file)
+    if (!waveform) return null
+
+    /*
+     * Stored as JSON rather than a rendered image: the player draws it at
+     * whatever width it has, and a picture of a waveform cannot be re-scaled
+     * or re-coloured without looking wrong.
+     */
+    return {
+      blob: new Blob([JSON.stringify(waveform)], { type: 'application/json' }),
+      params: {
+        peaks: waveform.peaks.length,
+        durationSec: Number(waveform.durationSec.toFixed(3)),
+        sampleRate: waveform.sampleRate,
+        channels: waveform.channels,
+      },
+    }
+  }
+
+  return null
 }
 
 async function uploadInParts(input: {

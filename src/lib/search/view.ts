@@ -74,6 +74,8 @@ export type IndexStatus = {
   embedded: number
   lastIndexedAt: string | null
   semantic: boolean
+  /** Set when content changed after the last index. Null means current. */
+  dirtySince: string | null
 }
 
 export const MATCHED_BY_LABEL: Record<SearchHit['matchedBy'], string> = {

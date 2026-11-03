@@ -2,6 +2,7 @@ import { handle, jsonOk, logActivity, parseJson, requireUser } from '@/lib/api'
 import { requireProjectApi } from '@/lib/project-access'
 import { createWorldEntrySchema } from '@/lib/validators'
 import { createWorldEntry } from '@/lib/world'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -22,6 +23,10 @@ export const POST = handle(
       projectId,
       summary: `${user.name} 新增世界觀條目「${entry.title}」`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ entry }, { status: 201 })
   }

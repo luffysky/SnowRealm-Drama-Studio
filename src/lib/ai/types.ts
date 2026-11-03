@@ -124,3 +124,115 @@ export class AiAdapterError extends Error {
     this.name = 'AiAdapterError'
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* 媒體生成（圖片 / 影片 / 語音）                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Media generation is a different shape from text, in three ways that matter:
+ *
+ * 1. **Output is a file**, not a string. It lands in R2 as an asset.
+ * 2. **Billing is not per token.** Images are per image, video per second,
+ *    speech per character. Reporting any of them as tokens would make the cost
+ *    estimate a fiction.
+ * 3. **It can take minutes.** Longer than a serverless function may run, so a
+ *    media job is submitted, abandoned, and polled on a later tick — which is
+ *    why this contract is `submit` + `poll` rather than `run`.
+ */
+
+export type MediaKind = 'IMAGE' | 'VIDEO' | 'AUDIO'
+
+export type MediaReference = {
+  /** A URL the provider can fetch. Minted short-lived from our own bucket. */
+  url: string
+  /**
+   * What the reference is for. `first_frame` / `last_frame` drive
+   * image-to-video, which is how a 120-episode drama keeps one face across
+   * episodes — the keyframe is approved as an image first, cheaply.
+   */
+  role: 'character' | 'style' | 'first_frame' | 'last_frame' | 'audio'
+}
+
+export type MediaRequest = {
+  task: AiTaskKind
+  kind: MediaKind
+  prompt: string
+  negativePrompt?: string
+  references?: MediaReference[]
+  model?: string
+  /** How many to produce. Each one is billed. */
+  count?: number
+  aspectRatio?: string
+  /** Video only. */
+  durationSec?: number
+  /** Reusing a seed is the cheapest way to get a near-identical retry. */
+  seed?: number
+  options?: Record<string, string | number | boolean>
+}
+
+/**
+ * What a media run will cost, in the unit the provider actually bills.
+ *
+ * `unit` is part of the estimate rather than assumed, so the UI can say
+ * 「18 秒 × $0.09」 instead of inventing a token count nobody is charged for.
+ */
+export type MediaEstimate = {
+  unit: 'image' | 'second' | 'character' | 'request'
+  quantity: number
+  estimatedCostUsd: number | null
+  model: string
+}
+
+export type MediaArtifact = {
+  /** Where the provider is serving it. Fetched once and stored in R2. */
+  url: string
+  mimeType: string
+  width?: number
+  height?: number
+  durationSec?: number
+}
+
+export type MediaResult = {
+  artifacts: MediaArtifact[]
+  model: string
+  /** What it actually cost, when the provider reports it. */
+  costUsd: number | null
+}
+
+/**
+ * The outcome of submitting. Fast providers answer immediately; slow ones
+ * return a handle to poll.
+ */
+export type MediaSubmission =
+  | { state: 'pending'; externalId: string; note?: string }
+  | { state: 'done'; result: MediaResult }
+
+export type MediaPoll =
+  | { state: 'pending'; progress?: number; note?: string }
+  | { state: 'done'; result: MediaResult }
+  | { state: 'failed'; message: string; retryable: boolean }
+
+export interface MediaAdapter {
+  readonly kind: 'IMAGE_GENERIC' | 'VIDEO_GENERIC' | 'TTS_GENERIC'
+  readonly label: string
+  readonly media: readonly MediaKind[]
+  readonly supportedTasks: readonly AiTaskKind[]
+
+  status(): Promise<AiProviderStatus>
+  test(): Promise<{ ok: boolean; message: string }>
+  estimate(request: MediaRequest): Promise<MediaEstimate>
+
+  /** Starts the work. Must be safe to call once per job, never twice. */
+  submit(request: MediaRequest): Promise<MediaSubmission>
+
+  /** Asks how it is going. Called repeatedly; must not start new work. */
+  poll(externalId: string): Promise<MediaPoll>
+
+  /**
+   * Best-effort cancel at the provider. Optional because several providers
+   * have no such endpoint — and when they do not, the generation keeps running
+   * and is still billed, which the caller has to be told rather than guess.
+   */
+  cancel?(externalId: string): Promise<void>
+}

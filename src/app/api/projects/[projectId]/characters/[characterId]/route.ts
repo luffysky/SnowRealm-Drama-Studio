@@ -2,6 +2,7 @@ import { handle, jsonOk, logActivity, parseJson, requireUser } from '@/lib/api'
 import { removeCharacter, updateCharacter } from '@/lib/characters'
 import { requireProjectApi } from '@/lib/project-access'
 import { updateCharacterSchema } from '@/lib/validators'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -16,6 +17,10 @@ export const PATCH = handle(
 
     const patch = await parseJson(request, updateCharacterSchema)
     const character = await updateCharacter({ projectId, characterId, patch })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ character })
   }
@@ -41,6 +46,10 @@ export const DELETE = handle(
       projectId,
       summary: `${user.name} 移除了一個角色`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ removed: true })
   }

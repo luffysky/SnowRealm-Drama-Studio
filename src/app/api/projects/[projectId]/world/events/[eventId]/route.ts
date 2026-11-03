@@ -1,6 +1,7 @@
 import { handle, jsonOk, logActivity, requireUser } from '@/lib/api'
 import { requireProjectApi } from '@/lib/project-access'
 import { removeWorldEvent } from '@/lib/world'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -24,6 +25,10 @@ export const DELETE = handle(
       projectId,
       summary: `${user.name} 移除了一個時間線事件`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ removed: true })
   }

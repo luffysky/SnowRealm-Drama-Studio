@@ -606,8 +606,15 @@ function Footer({
       {projectId && (
         <div className="ml-auto flex items-center gap-2">
           {status && (
-            <span>
-              索引 {status.rows} 段{status.rows > 0 && `・已向量化 ${status.embedded} 段`}
+            <span className={cn(status.dirtySince && 'text-amber-400')}>
+              {/*
+                A stale index returns yesterday's results, which looks exactly
+                like the text not existing. Saying so is the whole point of
+                tracking it.
+              */}
+              {status.dirtySince
+                ? '內容已變更，索引尚未更新'
+                : `索引 ${status.rows} 段${status.rows > 0 ? `・已向量化 ${status.embedded} 段` : ''}`}
             </span>
           )}
           <button

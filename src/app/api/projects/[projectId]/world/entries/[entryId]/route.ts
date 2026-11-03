@@ -2,6 +2,7 @@ import { handle, jsonOk, logActivity, parseJson, requireUser } from '@/lib/api'
 import { requireProjectApi } from '@/lib/project-access'
 import { updateWorldEntrySchema } from '@/lib/validators'
 import { removeWorldEntry, updateWorldEntry } from '@/lib/world'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -16,6 +17,10 @@ export const PATCH = handle(
 
     const input = await parseJson(request, updateWorldEntrySchema)
     const entry = await updateWorldEntry({ entryId, projectId, ...input, user })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ entry })
   }
@@ -41,6 +46,10 @@ export const DELETE = handle(
       projectId,
       summary: `${user.name} 移除了一個世界觀條目`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ removed: true })
   }

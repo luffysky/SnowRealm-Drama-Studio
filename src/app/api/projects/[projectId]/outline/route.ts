@@ -2,6 +2,7 @@ import { handle, jsonOk, logActivity, parseJson, requirePermission } from '@/lib
 import { applyOutline, listOutline } from '@/lib/episodes'
 import { requireProjectApi } from '@/lib/project-access'
 import { outlineApplySchema } from '@/lib/validators'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -15,6 +16,7 @@ export const GET = handle(
     const url = new URL(request.url)
     const from = Number(url.searchParams.get('from'))
     const to = Number(url.searchParams.get('to'))
+
 
     return jsonOk({
       rows: await listOutline(projectId, {
@@ -48,6 +50,10 @@ export const POST = handle(
       projectId,
       summary: `採用 AI 產生的分集大綱，套用 ${result.applied} 集`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk(result)
   }

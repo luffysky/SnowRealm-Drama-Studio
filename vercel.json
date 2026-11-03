@@ -4,6 +4,10 @@
     {
       "path": "/api/ai/worker?limit=5",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/search/reindex?limit=3",
+      "schedule": "30 3 * * *"
     }
   ]
 }

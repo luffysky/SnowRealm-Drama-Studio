@@ -3,7 +3,7 @@ import { db } from '@/db'
 import { aiProviders } from '@/db/schema'
 import { decryptSecret } from '@/lib/crypto'
 import { createAnthropicAdapter } from './anthropic'
-import type { AiAdapter, AiTaskKind } from './types'
+import type { AiAdapter, AiTaskKind, MediaAdapter } from './types'
 
 /**
  * Resolves a configured provider row into a live adapter.
@@ -87,4 +87,32 @@ export async function resolveAdapterForTask(task: AiTaskKind): Promise<{
  */
 export function envOnlyAnthropicAdapter(): AiAdapter {
   return createAnthropicAdapter({})
+}
+
+/**
+ * The media adapter for a provider row, if one is implemented.
+ *
+ * Returns null for every kind today. That is the honest state: the enum
+ * values exist, the queue knows how to drive them, and no vendor has been
+ * wired up yet — so the UI says 「這類供應商尚未實作適配器」 rather than
+ * offering a button that fails.
+ *
+ * Adding one means implementing `MediaAdapter` and returning it here. No
+ * caller changes: the queue already handles submit, poll, timeout and cancel.
+ */
+export function mediaAdapterFor(row: ProviderRow): MediaAdapter | null {
+  switch (row.kind) {
+    case 'IMAGE_GENERIC':
+    case 'VIDEO_GENERIC':
+    case 'TTS_GENERIC':
+      return null
+    default:
+      return null
+  }
+}
+
+export async function loadMediaAdapter(providerId: string | null): Promise<MediaAdapter | null> {
+  if (!providerId) return null
+  const [row] = await db.select().from(aiProviders).where(eq(aiProviders.id, providerId)).limit(1)
+  return row ? mediaAdapterFor(row) : null
 }

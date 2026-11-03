@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   characters,
@@ -691,6 +691,8 @@ export async function indexStatus(projectId: string): Promise<{
   embedded: number
   lastIndexedAt: Date | null
   semantic: boolean
+  /** Set when content changed after the last index. Null means current. */
+  dirtySince: Date | null
 }> {
   const [row] = await db
     .select({
@@ -711,10 +713,81 @@ export async function indexStatus(projectId: string): Promise<{
     .from(searchDocuments)
     .where(eq(searchDocuments.projectId, projectId))
 
+  const [project] = await db
+    .select({ dirtySince: projects.searchDirtyAt })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1)
+
   return {
     rows: Number(row?.rows ?? 0),
     embedded: Number(row?.embedded ?? 0),
     lastIndexedAt: row?.last ?? null,
     semantic: embeddingsConfigured(),
+    dirtySince: project?.dirtySince ?? null,
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* 索引新鮮度                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Flags a project's index as behind the content.
+ *
+ * Called from every route that writes indexable text. It is one cheap UPDATE
+ * and nothing else — crucially **not** a reindex: the novel editor autosaves
+ * every 2.5 seconds, and embeddings are billed per token, so reindexing here
+ * would charge the studio for a sentence being typed.
+ *
+ * Never throws. A write must not fail because bookkeeping did.
+ */
+export async function markSearchDirty(projectId: string): Promise<void> {
+  try {
+    await db
+      .update(projects)
+      .set({ searchDirtyAt: new Date() })
+      .where(and(eq(projects.id, projectId), isNull(projects.searchDirtyAt)))
+  } catch {
+    // Bookkeeping only; the search panel still offers a manual rebuild.
+  }
+}
+
+/** Reindexes every project whose content has moved on. Used by the cron. */
+export async function reindexDirtyProjects(limit = 3): Promise<{
+  reindexed: { projectId: string; indexed: number; embedded: number }[]
+}> {
+  const dirty = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(isNotNull(projects.searchDirtyAt), isNull(projects.deletedAt)))
+    .orderBy(asc(projects.searchDirtyAt))
+    .limit(limit)
+
+  const reindexed: { projectId: string; indexed: number; embedded: number }[] = []
+
+  for (const row of dirty) {
+    /*
+     * Cleared *before* the work, not after. If the reindex fails halfway the
+     * flag is already down, which is the safe direction: the alternative is a
+     * project that stays dirty forever and is re-embedded on every sweep.
+     * A failed pass leaves unchanged chunks intact anyway, and the next
+     * content write raises the flag again.
+     */
+    await db
+      .update(projects)
+      .set({ searchDirtyAt: null })
+      .where(eq(projects.id, row.id))
+
+    const result = await reindexProject(row.id).catch(() => null)
+    if (result) {
+      reindexed.push({
+        projectId: row.id,
+        indexed: result.indexed,
+        embedded: result.embedded,
+      })
+    }
+  }
+
+  return { reindexed }
 }

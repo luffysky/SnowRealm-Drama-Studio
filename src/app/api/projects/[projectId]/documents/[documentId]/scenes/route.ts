@@ -2,6 +2,7 @@ import { ApiError, handle, jsonOk, logActivity, parseJson, requireUser } from '@
 import { requireProjectApi } from '@/lib/project-access'
 import { createSceneSchema } from '@/lib/validators'
 import { createScene, documentBelongsToProject } from '@/lib/writing'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -34,6 +35,10 @@ export const POST = handle(
       projectId,
       summary: `${user.name} 新增場次 ${scene.code}`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ scene, lockRevision }, { status: 201 })
   }

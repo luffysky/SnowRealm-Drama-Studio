@@ -593,7 +593,25 @@ const PREVIEW_MAX_BYTES = 8 * 1024 * 1024
 
 export type VariantRow = typeof assetVariants.$inferSelect
 
-/** Presigns a single PUT for a preview. Previews are small; no multipart. */
+/**
+ * Which derived files each asset kind may have.
+ *
+ * `asset_variants.kind` is the *derived file* axis — another rendering of the
+ * same source, which a machine can regenerate. It is not the editorial axis:
+ * an instrumental is a different recording and lives in `audio_revisions`.
+ */
+const DERIVED: Record<string, { kind: 'PREVIEW' | 'WAVEFORM'; mime: string; ext: string }[]> = {
+  IMAGE: [{ kind: 'PREVIEW', mime: 'image/', ext: '.webp' }],
+  STICKER: [{ kind: 'PREVIEW', mime: 'image/', ext: '.webp' }],
+  // A poster frame, so a grid of episode cards does not pull down the video.
+  VIDEO: [{ kind: 'PREVIEW', mime: 'image/', ext: '.webp' }],
+  // Peaks as JSON (design 83), so the player draws without decoding the file.
+  MUSIC: [{ kind: 'WAVEFORM', mime: 'application/json', ext: '.json' }],
+  SFX: [{ kind: 'WAVEFORM', mime: 'application/json', ext: '.json' }],
+  VOICE: [{ kind: 'WAVEFORM', mime: 'application/json', ext: '.json' }],
+}
+
+/** Presigns a single PUT for a derived file. These are small; no multipart. */
 export async function beginVariantUpload(input: {
   user: SessionUser
   assetId: string
@@ -607,32 +625,46 @@ export async function beginVariantUpload(input: {
 
   const asset = await loadAssetForUser(input.assetId, input.user)
 
-  if (asset.kind !== 'IMAGE' && asset.kind !== 'STICKER') {
-    throw ApiError.badRequest('只有圖片才會產生預覽檔')
+  const allowed = DERIVED[asset.kind]
+  if (!allowed) {
+    throw ApiError.badRequest('這類素材不會產生衍生檔案')
   }
-  if (!input.contentType.startsWith('image/')) {
-    throw ApiError.badRequest('預覽檔必須是圖片')
+
+  const match = allowed.find((entry) => input.contentType.startsWith(entry.mime))
+  if (!match) {
+    throw ApiError.badRequest('衍生檔案的類型不符合這類素材')
   }
+
   if (input.sizeBytes <= 0 || input.sizeBytes > PREVIEW_MAX_BYTES) {
-    throw ApiError.badRequest('預覽檔大小不合理')
+    throw ApiError.badRequest('衍生檔案大小不合理')
   }
+
   /*
-   * A "preview" larger than its master is not a preview. This happens with
+   * A "preview" larger than its master is not a preview — that happens with
    * small or already-optimised originals, and storing it would cost space to
    * make things slower.
+   *
+   * Waveforms are exempt: peaks are not a smaller copy of the audio, they are
+   * a different thing, and a short SFX can legitimately have a peaks file
+   * larger than the clip itself.
    */
-  if (asset.sizeBytes > 0 && input.sizeBytes >= asset.sizeBytes) {
+  if (
+    match.kind === 'PREVIEW' &&
+    asset.sizeBytes > 0 &&
+    input.sizeBytes >= asset.sizeBytes
+  ) {
     throw ApiError.badRequest('預覽檔沒有比原檔小，不值得存')
   }
 
-  const extension = input.contentType === 'image/avif' ? '.avif' : '.webp'
-  const objectKey = `projects/${asset.projectId}/preview/${crypto.randomUUID()}${extension}`
+  const extension = input.contentType === 'image/avif' ? '.avif' : match.ext
+  const folder = match.kind === 'WAVEFORM' ? 'waveform' : 'preview'
+  const objectKey = `projects/${asset.projectId}/${folder}/${crypto.randomUUID()}${extension}`
 
   const [variant] = await db
     .insert(assetVariants)
     .values({
       assetId: asset.id,
-      kind: 'PREVIEW',
+      kind: match.kind,
       objectKey,
       mimeType: input.contentType,
       sizeBytes: input.sizeBytes,
@@ -643,7 +675,7 @@ export async function beginVariantUpload(input: {
       createdById: input.user.id,
     })
     .onConflictDoUpdate({
-      // One preview per asset: regenerating replaces rather than piles up.
+      // One per kind per asset: regenerating replaces rather than piles up.
       target: [assetVariants.assetId, assetVariants.kind],
       set: {
         objectKey,

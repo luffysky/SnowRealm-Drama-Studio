@@ -100,6 +100,62 @@ describe.skipIf(!hasDb)('reindexProject', () => {
   })
 })
 
+describe.skipIf(!hasDb)('index freshness', () => {
+  it('marks a project behind its index, and clears it on reindex', async () => {
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+    const { markSearchDirty, reindexDirtyProjects } = await import('@/lib/search')
+
+    await markSearchDirty(projectId)
+
+    const [dirty] = await db
+      .select({ at: schema.projects.searchDirtyAt })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+    expect(dirty?.at).toBeInstanceOf(Date)
+
+    await reindexDirtyProjects(5)
+
+    const [clean] = await db
+      .select({ at: schema.projects.searchDirtyAt })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+    expect(clean?.at).toBeNull()
+  }, 120_000)
+
+  it('does not keep moving the mark while it is already set', async () => {
+    /*
+     * The flag answers "is the index behind", not "when was the last edit".
+     * Rewriting it on every keystroke would turn a cheap UPDATE into a hot
+     * row — the novel editor autosaves every 2.5 seconds.
+     */
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+    const { markSearchDirty } = await import('@/lib/search')
+
+    await markSearchDirty(projectId)
+    const [first] = await db
+      .select({ at: schema.projects.searchDirtyAt })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+
+    await markSearchDirty(projectId)
+    const [second] = await db
+      .select({ at: schema.projects.searchDirtyAt })
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+
+    expect(second?.at?.getTime()).toBe(first?.at?.getTime())
+
+    await db
+      .update(schema.projects)
+      .set({ searchDirtyAt: null })
+      .where(eq(schema.projects.id, projectId))
+  })
+})
+
 describe.skipIf(!hasDb)('search', () => {
   it('finds the project by its own title', async () => {
     const result = await search({ projectIds: [projectId], query: projectTitle })

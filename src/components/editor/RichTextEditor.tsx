@@ -151,7 +151,7 @@ export function RichTextEditor({
       </div>
 
       {enabled.has('aiSelection') && onAiAction && (
-        <AiSelectionMenu editor={editor} onAction={onAiAction} />
+        <AiSelectionMenu editor={editor} surface={surface} onAction={onAiAction} />
       )}
     </div>
   )

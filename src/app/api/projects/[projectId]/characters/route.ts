@@ -2,6 +2,7 @@ import { handle, jsonOk, logActivity, parseJson, requireUser } from '@/lib/api'
 import { createCharacter } from '@/lib/characters'
 import { requireProjectApi } from '@/lib/project-access'
 import { createCharacterSchema } from '@/lib/validators'
+import { markSearchDirty } from '@/lib/search'
 
 export const runtime = 'nodejs'
 
@@ -22,6 +23,10 @@ export const POST = handle(
       projectId,
       summary: `${user.name} 新增角色「${character.name}」`,
     })
+
+    // 內容變了，索引就落後了（只標記，不重建——見 markSearchDirty）
+
+    await markSearchDirty(projectId)
 
     return jsonOk({ character }, { status: 201 })
   }
