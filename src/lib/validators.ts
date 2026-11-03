@@ -401,3 +401,27 @@ export function confirmNameSchema(expected: string) {
 export const displayCurrencySchema = z.object({
   currency: z.enum(CURRENCIES, { message: '不支援的幣別' }),
 })
+
+/* -------------------------------------------------------------------------- */
+/* 小說 / 劇本                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export const createChapterSchema = z.object({
+  title: z.string().trim().max(120, '章節標題最多 120 個字').default(''),
+})
+
+/**
+ * `expectedRevision` is the document revision the editor was opened on. The
+ * server refuses a save based on a stale one, so the other member's writing is
+ * never silently overwritten.
+ */
+export const saveChapterSchema = z.object({
+  title: z.string().trim().max(120, '章節標題最多 120 個字').optional(),
+  summary: z.string().max(2000, '章節摘要最多 2000 個字').optional(),
+  content: z.string().max(200_000, '單一章節最多 200,000 個字元'),
+  expectedRevision: z.number().int().nonnegative(),
+})
+
+export const snapshotVersionSchema = z.object({
+  label: z.string().trim().max(120, '版本備註最多 120 個字').default(''),
+})
