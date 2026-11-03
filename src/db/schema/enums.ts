@@ -217,6 +217,14 @@ export const aiJobKindEnum = pgEnum('ai_job_kind', [
 export const aiJobStatusEnum = pgEnum('ai_job_status', [
   'QUEUED',
   'RUNNING',
+  /**
+   * Submitted to the provider, waiting for it to finish.
+   *
+   * Image generation returns in seconds and never reaches this state. Video
+   * takes minutes, which is longer than a serverless function may run, so the
+   * job records the provider's handle, exits, and is polled on a later tick.
+   */
+  'AWAITING_PROVIDER',
   'SUCCEEDED',
   'FAILED',
   'CANCELLED',

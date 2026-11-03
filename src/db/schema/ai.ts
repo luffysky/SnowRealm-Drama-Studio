@@ -108,6 +108,14 @@ export const aiJobs = pgTable(
     lockedAt: timestamp('locked_at', { withTimezone: true }),
     /** Opaque id of the worker invocation holding the lease. */
     lockedBy: text('locked_by').notNull().default(''),
+    /**
+     * The provider's own handle for an in-flight generation.
+     *
+     * Set when a media job has been submitted but not finished. Its presence
+     * is what tells the worker to poll rather than submit again — paying twice
+     * for the same video is the mistake this prevents.
+     */
+    externalJobId: text('external_job_id').notNull().default(''),
     attemptCount: integer('attempt_count').notNull().default(0),
     maxAttempts: integer('max_attempts').notNull().default(3),
     /** Exponential backoff gate; the worker ignores jobs scheduled later. */

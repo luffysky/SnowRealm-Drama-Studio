@@ -414,6 +414,8 @@ export const AI_JOB_KIND_LABEL: Record<AiJobKindValue, string> = {
 export const AI_JOB_STATUSES = [
   'QUEUED',
   'RUNNING',
+  /** Submitted to the provider; waiting for it. Only media jobs reach this. */
+  'AWAITING_PROVIDER',
   'SUCCEEDED',
   'FAILED',
   'CANCELLED',
@@ -423,6 +425,7 @@ export type AiJobStatusValue = (typeof AI_JOB_STATUSES)[number]
 
 export const AI_JOB_STATUS_LABEL: Record<AiJobStatusValue, string> = {
   QUEUED: '等待中',
+  AWAITING_PROVIDER: '供應商處理中',
   RUNNING: '執行中',
   SUCCEEDED: '已套用',
   FAILED: '失敗',
@@ -433,6 +436,7 @@ export const AI_JOB_STATUS_LABEL: Record<AiJobStatusValue, string> = {
 export const AI_JOB_STATUS_STYLE: Record<AiJobStatusValue, string> = {
   QUEUED: 'bg-stage-800 text-ink-400 ring-stage-700',
   RUNNING: 'bg-sky-950 text-sky-300 ring-sky-800',
+  AWAITING_PROVIDER: 'bg-sky-950 text-sky-300 ring-sky-800',
   SUCCEEDED: 'bg-emerald-950 text-emerald-300 ring-emerald-800',
   FAILED: 'bg-rose-950 text-rose-300 ring-rose-800',
   CANCELLED: 'bg-stage-850 text-ink-500 ring-stage-700',
