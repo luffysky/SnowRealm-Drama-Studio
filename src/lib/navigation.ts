@@ -157,7 +157,7 @@ export const PROJECT_TABS: ProjectTab[] = [
   { key: 'characters', label: '角色設定', segment: 'characters', ready: false, milestone: 'M2', design: 10 },
   { key: 'storyboard', label: '分鏡工作台', segment: 'storyboard', ready: false, milestone: 'M3', design: 12 },
   { key: 'assets', label: '素材管理', segment: 'assets', ready: false, milestone: 'M3', design: 14 },
-  { key: 'production', label: '製作流程', segment: 'production', ready: false, milestone: 'M1', design: 17 },
+  { key: 'production', label: '製作流程', segment: 'production', ready: true, design: 17 },
   { key: 'reviews', label: '審核發布', segment: 'reviews', ready: false, milestone: 'M4', design: 58 },
   { key: 'versions', label: '版本紀錄', segment: 'versions', ready: false, milestone: 'M2', design: 8 },
 ]

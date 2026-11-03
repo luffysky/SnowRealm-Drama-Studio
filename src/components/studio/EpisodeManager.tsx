@@ -53,6 +53,8 @@ export type EpisodeManagerProps = {
   status: EpisodeStatusValue | ''
   stage: string
   sort: string
+  /** 17 製作進度 reuses this table under its own heading. */
+  heading?: string
 }
 
 /** Dates cross into a Client Component, so they travel as ISO strings. */
@@ -72,6 +74,7 @@ export function EpisodeManager({
   status,
   stage,
   sort,
+  heading = '集數管理',
 }: EpisodeManagerProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -104,7 +107,7 @@ export function EpisodeManager({
     <div className="flex min-w-0 flex-col gap-4 p-3 sm:p-4 lg:p-6">
       <header className="flex flex-wrap items-center gap-3">
         <h2 className="text-sm font-semibold text-ink-100">
-          集數管理
+          {heading}
           <span className="ml-1.5 text-[11px] font-normal text-ink-500">
             （共 {stats.total} 集）
           </span>

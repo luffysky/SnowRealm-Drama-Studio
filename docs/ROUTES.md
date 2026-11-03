@@ -27,14 +27,15 @@
 
 只保留這六項：
 
-| 項目 | 路由 | 說明 |
-|---|---|---|
-| 工作室儀表板 | `/dashboard` | 跨作品 KPI 與摘要 |
-| 作品列表 | `/projects` | 全部作品 |
-| 跨作品任務 | `/tasks` | 不分作品的任務總覽 |
-| 成本中心 | `/costs` | 跨作品成本 |
-| 團隊管理 | `/team` | 成員與權限 |
-| 系統設定 | `/settings` | 含匯率、AI 供應商、帳號安全 |
+| 項目 | 路由 | 說明 | 狀態 |
+|---|---|---|---|
+| 工作室儀表板 | `/dashboard` | 跨作品 KPI 與摘要 | ✅ |
+| 作品列表 | `/projects` | 全部作品 | ✅ |
+| 跨作品任務 | `/tasks` | 不分作品的任務總覽 | M4 |
+| 成本中心 | `/costs` | 跨作品成本 | M4 |
+| 團隊管理 | `/team` | 成員與權限 | M4 |
+| AI 製片中心 | `/ai` | **只因為是跨作品佇列與供應商監控才留在側欄**；單一作品的生成流程屬於作品工作區 | M3 |
+| 系統設定 | `/settings` | 含匯率、AI 供應商、帳號安全 | M4 |
 
 **全域側欄不得再出現任何需要 projectId 的項目。**
 
@@ -51,19 +52,24 @@
 
 ### Tab 與路由
 
-| Tab | 路由 | 對應設計圖 |
-|---|---|---|
-| 總覽 | `/projects/[id]` | 04 |
-| 集數 | `/projects/[id]/episodes` | 05 |
-| 劇本 | `/projects/[id]/script` | 06, 07 |
-| 世界觀 | `/projects/[id]/world` | 09 |
-| 角色 | `/projects/[id]/characters` | 10, 11 |
-| 分鏡 | `/projects/[id]/storyboard` | 12, 13 |
-| 素材 | `/projects/[id]/assets` | 14, 15, 16 |
-| 製作 | `/projects/[id]/production` | 17 |
-| 審核 | `/projects/[id]/reviews` | 57, 58 |
-| 版本 | `/projects/[id]/versions` | 08 |
-| 設定 | `/projects/[id]/settings` | 21 |
+依 spec v3 §11.1 的十一個 Tab：
+
+| Tab | 路由 | 設計圖 | 狀態 |
+|---|---|---|---|
+| 總覽 | `/projects/[id]` | 04 | ✅ |
+| 集數管理 | `/projects/[id]/episodes` | 05 | ✅ |
+| 小說編輯 | `/projects/[id]/novel` | 06 | M2 |
+| 劇本工坊 | `/projects/[id]/scripts` | 07 | M2 |
+| 世界觀 | `/projects/[id]/world` | 09 | M2 |
+| 角色設定 | `/projects/[id]/characters` | 10, 11 | M2 |
+| 分鏡工作台 | `/projects/[id]/storyboard` | 12, 13 | M3 |
+| 素材管理 | `/projects/[id]/assets` | 14, 15, 16 | M3 |
+| 製作流程 | `/projects/[id]/production` | 17 | ✅ |
+| 審核發布 | `/projects/[id]/reviews` | 57, 58 | M4 |
+| 版本紀錄 | `/projects/[id]/versions` | 08 | M2 |
+
+不是 Tab 但存在的作品級路由：`/projects/[id]/tasks`（由製作頁進入）、
+`/projects/[id]/episodes/[episodeId]/novel`（單集小說編輯器）。
 
 ---
 
