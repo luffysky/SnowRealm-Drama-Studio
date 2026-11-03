@@ -47,6 +47,8 @@ export type ScriptEditorProps = {
   episodeNumber: number
   episodeTitle: string
   initialScenes: SceneData[]
+  /** From `?scene=` — which scene a search result wants opened. */
+  initialSceneId?: string | null
   initialRevision: number
   lastEditorName: string | null
   /** The project's per-episode runtime window, in seconds. */
@@ -70,6 +72,7 @@ export function ScriptEditor({
   episodeNumber,
   episodeTitle,
   initialScenes,
+  initialSceneId,
   initialRevision,
   lastEditorName,
   targetMinSec,
@@ -84,7 +87,12 @@ export function ScriptEditor({
   const router = useRouter()
 
   const [scenes, setScenes] = useState(initialScenes)
-  const [activeId, setActiveId] = useState(initialScenes[0]?.id ?? null)
+  /* `?scene=<id>` from a search result; see NovelEditor for the reasoning. */
+  const [activeId, setActiveId] = useState(
+    (initialSceneId && initialScenes.some((s) => s.id === initialSceneId)
+      ? initialSceneId
+      : initialScenes[0]?.id) ?? null
+  )
   const [revision, setRevision] = useState(initialRevision)
   const [state, setState] = useState<SaveState>('idle')
   const [savedAt, setSavedAt] = useState<string | null>(null)

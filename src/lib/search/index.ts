@@ -12,6 +12,7 @@ import {
   worldEntries,
   worldEvents,
 } from '@/db/schema'
+import { searchableTitles } from '@/lib/project-titles'
 import type { SearchHit, SearchKind, SearchResult } from '@/lib/search/view'
 import {
   EMBEDDING_MODEL,
@@ -206,6 +207,8 @@ async function collect(projectId: string): Promise<Indexable[]> {
         .select({
           id: projects.id,
           title: projects.title,
+          novelTitle: projects.novelTitle,
+          dramaTitle: projects.dramaTitle,
           logline: projects.logline,
           synopsis: projects.synopsis,
           tags: projects.tags,
@@ -291,7 +294,11 @@ async function collect(projectId: string): Promise<Indexable[]> {
 
   const row = project[0]
   if (row) {
-    const text = [row.title, row.tags.join(' '), row.logline, row.synopsis]
+    /*
+     * All three names, so a member who only remembers the drama's release
+     * title still finds the work (`@/lib/project-titles`).
+     */
+    const text = [...searchableTitles(row), row.tags.join(' '), row.logline, row.synopsis]
       .filter(Boolean)
       .join('\n')
     if (text.trim()) out.push({ kind: 'PROJECT', refId: row.id, title: row.title, text })
@@ -453,9 +460,37 @@ export async function search(input: {
       : sql``
 
   /*
-   * One query, both signals. `similarity()` is pg_trgm; `cosine_similarity()`
-   * is the function the migration defines. Rows with no embedding simply score
-   * 0 on the semantic side rather than being excluded.
+   * Containment, then fuzzy — in that order, and the order matters.
+   *
+   * `similarity(content, query)` compares two strings as wholes: a ten-character
+   * query against a 700-character chunk shares almost none of its trigrams, so
+   * it scores near zero even when the chunk contains the query verbatim. On its
+   * own it finds titles and nothing else.
+   *
+   * `word_similarity()` is the usual fix, but it works on word extents, and
+   * pg_trgm sees an unspaced Chinese sentence as one enormous word — so it
+   * degrades back to the same comparison.
+   *
+   * What does work for this corpus is ILIKE containment, which the GIN trigram
+   * index accelerates. An exact hit scores 1; anything else falls back to the
+   * fuzzy comparison, which still catches a near-miss in a title.
+   */
+  const contains = `%${query.replace(/[%_\\]/g, (char) => `\\${char}`)}%`
+
+  const lexical = sql`(
+    case
+      when d.content ilike ${contains} or d.title ilike ${contains} then 1.0
+      else greatest(similarity(d.content, ${query}), similarity(d.title, ${query}))::double precision
+    end
+  )`
+
+  const semantic = vector
+    ? sql`coalesce(cosine_similarity(d.embedding, ${`{${vector.join(',')}}`}::real[]), 0)`
+    : sql`0::double precision`
+
+  /*
+   * One query, both signals. Rows with no embedding simply score 0 on the
+   * semantic side rather than being excluded.
    */
   const result = await db.execute<{
     id: string
@@ -478,26 +513,13 @@ export async function search(input: {
       d.parent_ref_id,
       d.title,
       d.snippet,
-      greatest(
-        similarity(d.content, ${query}),
-        similarity(d.title, ${query})
-      ) as lexical,
-      ${
-        vector
-          ? sql`coalesce(cosine_similarity(d.embedding, ${`{${vector.join(',')}}`}::real[]), 0)`
-          : sql`0::double precision`
-      } as semantic
+      ${lexical} as lexical,
+      ${semantic} as semantic
     from ${searchDocuments} d
     join ${projects} p on p.id = d.project_id
     where d.project_id = any(${sql.raw(`ARRAY[${input.projectIds.map((id) => `'${id}'`).join(',')}]::uuid[]`)})
       ${kindFilter}
-    order by
-      ${
-        vector
-          ? sql`(coalesce(cosine_similarity(d.embedding, ${`{${vector.join(',')}}`}::real[]), 0) * 0.65
-               + greatest(similarity(d.content, ${query}), similarity(d.title, ${query})) * 0.35)`
-          : sql`greatest(similarity(d.content, ${query}), similarity(d.title, ${query}))`
-      } desc
+    order by ${vector ? sql`(${semantic} * 0.65 + ${lexical} * 0.35)` : lexical} desc
     limit ${limit * 3}
   `)
 

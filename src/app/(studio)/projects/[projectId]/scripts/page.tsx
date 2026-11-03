@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { EmptyState } from '@/components/ui/StateViews'
 import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
+import { dramaTitleOf } from '@/lib/project-titles'
 import { novelIndex } from '@/lib/writing'
 import { cn, formatDurationZh, formatRelativeZh } from '@/lib/utils'
 
@@ -26,6 +27,7 @@ export default async function ScriptsIndexPage({ params }: Params) {
   const project = await requireProjectPage(projectId, user.id)
 
   const rows = await novelIndex(project.id, 'SCRIPT')
+  const dramaTitle = dramaTitleOf(project)
 
   const started = rows.filter((row) => row.sceneCount > 0)
   const totalScenes = rows.reduce((n, row) => n + row.sceneCount, 0)
@@ -38,6 +40,15 @@ export default async function ScriptsIndexPage({ params }: Params) {
           <Clapperboard aria-hidden className="size-4 text-accent-400" />
           劇本工坊
         </h2>
+        {/*
+          The short drama is released under its own name, which can differ
+          from the work's and from the novel's (`@/lib/project-titles`).
+        */}
+        {dramaTitle !== project.title && (
+          <p className="text-[11px] text-ink-400">
+            劇名<span className="ml-1 text-ink-200">{dramaTitle}</span>
+          </p>
+        )}
         <p className="text-[11px] text-ink-500">
           共 {rows.length} 集・已開工 {started.length} 集・{totalScenes} 場
           {totalSeconds > 0 && `・累計約 ${formatDurationZh(totalSeconds)}`}

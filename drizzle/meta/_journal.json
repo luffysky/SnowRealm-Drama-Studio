@@ -71,6 +71,13 @@
       "when": 1793710517695,
       "tag": "0009_search_parent",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793711259299,
+      "tag": "0010_project_titles",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,17 @@ export const projects = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     title: text('title').notNull(),
+    /**
+     * 小說與短劇可以各有書名。
+     *
+     * One production, two products: the novel is published under one name and
+     * the short drama released under another, which is normal practice. Empty
+     * means "same as `title`" rather than being backfilled with a copy —
+     * a copy would silently stop following the work's name when it changed.
+     * Read them through `@/lib/project-titles`, never directly.
+     */
+    novelTitle: text('novel_title').notNull().default(''),
+    dramaTitle: text('drama_title').notNull().default(''),
     slug: text('slug').notNull().unique(),
     logline: text('logline').notNull().default(''),
     synopsis: text('synopsis').notNull().default(''),

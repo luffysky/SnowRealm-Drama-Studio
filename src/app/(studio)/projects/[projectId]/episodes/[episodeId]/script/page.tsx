@@ -12,7 +12,11 @@ import { openDocument } from '@/lib/writing'
 
 export const metadata: Metadata = { title: '劇本編輯器' }
 
-type Params = { params: Promise<{ projectId: string; episodeId: string }> }
+type Params = {
+  params: Promise<{ projectId: string; episodeId: string }>
+  /** `?scene=<id>` — a search result opening the scene it matched. */
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
 
 /**
  * 07 劇本編輯器 — one episode's script, scene by scene.
@@ -20,12 +24,15 @@ type Params = { params: Promise<{ projectId: string; episodeId: string }> }
  * The runtime window comes from the project rather than a constant: 120–180
  * seconds is this show's setting, not a property of the software.
  */
-export default async function EpisodeScriptPage({ params }: Params) {
+export default async function EpisodeScriptPage({ params, searchParams }: Params) {
   const user = await getSessionUser()
   if (!user) redirect('/login')
 
   const { projectId, episodeId } = await params
   const project = await requireProjectPage(projectId, user.id)
+
+  const requestedScene = (await searchParams).scene
+  const sceneId = typeof requestedScene === 'string' ? requestedScene : null
 
   const [document, modules, settings, fx, provider] = await Promise.all([
     openDocument(project.id, episodeId, 'SCRIPT'),
@@ -52,6 +59,7 @@ export default async function EpisodeScriptPage({ params }: Params) {
         ...scene,
         updatedAt: scene.updatedAt.toISOString(),
       }))}
+      initialSceneId={sceneId}
       initialRevision={document.lockRevision}
       lastEditorName={document.lastEditorName}
       targetMinSec={settings[0]?.min ?? 120}

@@ -4,6 +4,8 @@ import { Check, ChevronDown, ChevronRight, Film } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
+import { ProjectSettingsDialog } from '@/components/studio/ProjectSettingsDialog'
+import { dramaTitleOf, novelTitleOf } from '@/lib/project-titles'
 import {
   activeProjectTabKey,
   PROJECT_TABS,
@@ -27,6 +29,9 @@ import { cn } from '@/lib/utils'
 export type WorkspaceProject = {
   id: string
   title: string
+  /** Empty = same as `title`; resolved through `@/lib/project-titles`. */
+  novelTitle?: string
+  dramaTitle?: string
   isFlagship: boolean
   coverAssetId: string | null
   /** Shown in the switcher under each title, e.g.「製作中 · 120 集」. */
@@ -40,6 +45,7 @@ export function ProjectWorkspaceChrome({
   statusClassName,
   tags,
   logline,
+  canWrite,
 }: {
   project: WorkspaceProject
   /** Every project this member may open, for the switcher. */
@@ -48,6 +54,8 @@ export function ProjectWorkspaceChrome({
   statusClassName: string
   tags: string[]
   logline: string
+  /** Whether this member may open 作品設定. */
+  canWrite: boolean
 }) {
   const pathname = usePathname()
   const activeKey = activeProjectTabKey(pathname, project.id) ?? 'overview'
@@ -98,7 +106,23 @@ export function ProjectWorkspaceChrome({
             {tags.length > 0 && (
               <span className="truncate text-[11px] text-ink-500">{tags.join(' × ')}</span>
             )}
+
+            <span className="ml-auto shrink-0">
+              <ProjectSettingsDialog
+                project={{
+                  id: project.id,
+                  title: project.title,
+                  novelTitle: project.novelTitle ?? '',
+                  dramaTitle: project.dramaTitle ?? '',
+                  logline,
+                  coverAssetId: project.coverAssetId,
+                }}
+                canWrite={canWrite}
+              />
+            </span>
           </div>
+
+          <TitleLine project={project} />
 
           <p className="line-clamp-2 max-w-3xl text-xs leading-relaxed text-ink-400">
             {logline || (
@@ -112,6 +136,41 @@ export function ProjectWorkspaceChrome({
 
       <TabStrip projectId={project.id} activeKey={activeKey} />
     </header>
+  )
+}
+
+/**
+ * 小說書名 / 短劇劇名, shown only when they differ from the work's name.
+ *
+ * On a project where all three match, printing the same name three times is
+ * noise — so this renders nothing rather than three identical rows.
+ */
+function TitleLine({ project }: { project: WorkspaceProject }) {
+  const names = {
+    title: project.title,
+    novelTitle: project.novelTitle ?? '',
+    dramaTitle: project.dramaTitle ?? '',
+  }
+
+  const novel = novelTitleOf(names)
+  const drama = dramaTitleOf(names)
+  if (novel === project.title && drama === project.title) return null
+
+  return (
+    <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-[11px] text-ink-500">
+      {novel !== project.title && (
+        <div className="flex gap-1">
+          <dt>小說</dt>
+          <dd className="text-ink-300">{novel}</dd>
+        </div>
+      )}
+      {drama !== project.title && (
+        <div className="flex gap-1">
+          <dt>短劇</dt>
+          <dd className="text-ink-300">{drama}</dd>
+        </div>
+      )}
+    </dl>
   )
 }
 

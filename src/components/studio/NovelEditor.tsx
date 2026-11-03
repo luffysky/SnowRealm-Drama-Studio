@@ -45,6 +45,8 @@ export type NovelEditorProps = {
   episodeNumber: number
   episodeTitle: string
   initialChapters: ChapterData[]
+  /** From `?chapter=` — which chapter a search result wants opened. */
+  initialChapterId?: string | null
   initialRevision: number
   lastEditorName: string | null
   /** Target characters per episode, from the project's settings. */
@@ -69,6 +71,7 @@ export function NovelEditor({
   episodeNumber,
   episodeTitle,
   initialChapters,
+  initialChapterId,
   initialRevision,
   lastEditorName,
   targetChars,
@@ -83,7 +86,16 @@ export function NovelEditor({
   const [enabledModules, setEnabledModules] = useState(modules)
 
   const [chapters, setChapters] = useState(initialChapters)
-  const [activeId, setActiveId] = useState(initialChapters[0]?.id ?? null)
+  /*
+   * A search result links straight to the chapter it matched
+   * (`?chapter=<id>`), so the reader lands on the prose rather than on
+   * whichever chapter happens to be first.
+   */
+  const [activeId, setActiveId] = useState(
+    (initialChapterId && initialChapters.some((c) => c.id === initialChapterId)
+      ? initialChapterId
+      : initialChapters[0]?.id) ?? null
+  )
   const [revision, setRevision] = useState(initialRevision)
   const [state, setState] = useState<SaveState>('idle')
   const [savedAt, setSavedAt] = useState<string | null>(null)

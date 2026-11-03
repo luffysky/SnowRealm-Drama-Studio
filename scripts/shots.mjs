@@ -2,6 +2,7 @@
  * Screenshots the running app at phone, tablet and desktop widths.
  *
  *   node scripts/shots.mjs --base http://127.0.0.1:3400 --out .shots /dashboard /projects
+ *   node scripts/shots.mjs --click 作品設定 /projects/<id>     # 開啟對話框再截圖
  *
  * Why this exists: "手機也要順" cannot be verified by reading Tailwind class
  * names. This drives a real Chrome over the DevTools Protocol, signs in the way
@@ -225,6 +226,14 @@ async function main() {
   const outDir = arg('out', '.shots')
   const targets = paths()
 
+  /*
+   * `--click "作品設定"` clicks the first button or link whose visible text
+   * contains that string, then screenshots what opened. Without it a dialog
+   * can only be verified by reading its class names, which is exactly the
+   * thing this script exists to stop doing.
+   */
+  const clickText = arg('click', null)
+
   const cookies = await signIn(base)
   console.log('  已登入\n')
 
@@ -272,6 +281,28 @@ async function main() {
         // Let fonts settle and any entry animation finish.
         await new Promise((resolve) => setTimeout(resolve, 700))
 
+        if (clickText) {
+          const { result } = await client.send(
+            'Runtime.evaluate',
+            {
+              expression: `(() => {
+                const wanted = ${JSON.stringify(clickText)}
+                const nodes = [...document.querySelectorAll('button, a, [role="button"]')]
+                const hit = nodes.find((node) => (node.innerText || '').includes(wanted))
+                if (!hit) return 'not-found'
+                hit.click()
+                return 'clicked'
+              })()`,
+              returnByValue: true,
+            },
+            sessionId
+          )
+          if (result.value !== 'clicked') {
+            console.log(`  ! 找不到「${clickText}」，${path} ${view.name} 照原樣截圖`)
+          }
+          await new Promise((resolve) => setTimeout(resolve, 600))
+        }
+
         const { data } = await client.send(
           'Page.captureScreenshot',
           { format: 'png', captureBeyondViewport: true },
@@ -279,7 +310,10 @@ async function main() {
         )
 
         const slug = path.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'root'
-        const file = join(outDir, `${slug}.${view.name}.png`)
+        // Only strip what a filename cannot hold; collapsing CJK to "_" made
+        // every --click run overwrite the same three files.
+        const suffix = clickText ? `.${clickText.replace(/[\/:*?"<>|\s]+/g, '_')}` : ''
+        const file = join(outDir, `${slug}${suffix}.${view.name}.png`)
         await writeFile(file, Buffer.from(data, 'base64'))
         console.log(`  ${file}`)
       }

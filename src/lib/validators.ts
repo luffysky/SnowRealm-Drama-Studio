@@ -204,6 +204,29 @@ export const shotReorderSchema = z.object({
   shotIds: z.array(uuid).min(1).max(999),
 })
 
+/**
+ * 作品設定 (rename + cover).
+ *
+ * Every field is optional, but at least one must be present: an empty PATCH
+ * would otherwise bump `updated_at` and log an activity for nothing.
+ *
+ * `novelTitle` and `dramaTitle` may legitimately be empty strings — that is
+ * how「跟作品名稱相同」is stored — so they are trimmed but not length-checked
+ * at the bottom. `title` may not be: a work with no name is not a state worth
+ * being able to save.
+ */
+export const projectUpdateSchema = z
+  .object({
+    title: z.string().trim().min(1, '作品名稱不能空白').max(120).optional(),
+    novelTitle: z.string().trim().max(120).optional(),
+    dramaTitle: z.string().trim().max(120).optional(),
+    logline: z.string().trim().max(400).optional(),
+    synopsis: z.string().trim().max(8000).optional(),
+    /** null clears the cover. */
+    coverAssetId: uuid.nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: '沒有要變更的欄位' })
+
 /** Step 1 of an upload: ask the server for a presigned destination. */
 export const uploadRequestSchema = z.object({
   projectId: uuid,

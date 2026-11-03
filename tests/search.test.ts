@@ -133,6 +133,41 @@ describe.skipIf(!hasDb)('search', () => {
     expect(result.hits.every((hit) => hit.matchedBy === 'lexical')).toBe(true)
   })
 
+  it('finds a short phrase inside a long chunk', async () => {
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+
+    /*
+     * The regression this guards: `similarity(content, query)` compares two
+     * strings as wholes, so a ten-character query against a 700-character
+     * chunk scored near zero even when the chunk contained it verbatim —
+     * lexical search found titles and nothing else.
+     */
+    const refId = crypto.randomUUID()
+    const needle = '沈知味把那口舊灶擦了三遍'
+    const content = `${'她在碼頭等了一整夜，天亮前才動身。'.repeat(20)}${needle}${'攤子支起來的時候，巷子還是黑的。'.repeat(20)}`
+
+    await db.insert(schema.searchDocuments).values({
+      projectId,
+      kind: 'CHAPTER',
+      refId,
+      chunkIndex: 0,
+      title: '測試章節',
+      snippet: needle,
+      content,
+      contentHash: 'test',
+    })
+
+    try {
+      const result = await search({ projectIds: [projectId], query: needle, limit: 10 })
+
+      expect(result.hits.some((hit) => hit.refId === refId)).toBe(true)
+    } finally {
+      await db.delete(schema.searchDocuments).where(eq(schema.searchDocuments.refId, refId))
+    }
+  })
+
   it('links a chapter hit to the episode it is written in', async () => {
     const { db } = await import('@/db')
     const schema = await import('@/db/schema')

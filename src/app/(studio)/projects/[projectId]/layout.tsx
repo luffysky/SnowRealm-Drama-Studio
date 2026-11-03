@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
 import { ProjectWorkspaceChrome } from '@/components/studio/ProjectWorkspaceChrome'
+import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_STYLE } from '@/lib/constants'
 import { requireProjectPage } from '@/lib/project-access'
@@ -43,6 +44,8 @@ export default async function ProjectWorkspaceLayout({
         project={{
           id: project.id,
           title: project.title,
+          novelTitle: project.novelTitle,
+          dramaTitle: project.dramaTitle,
           isFlagship: project.isFlagship,
           coverAssetId: project.coverAssetId,
         }}
@@ -63,6 +66,7 @@ export default async function ProjectWorkspaceLayout({
         statusClassName={PROJECT_STATUS_STYLE[project.status]}
         tags={project.tags}
         logline={project.logline}
+        canWrite={can(user, 'project.write')}
       />
 
       <div className="min-w-0 flex-1">{children}</div>

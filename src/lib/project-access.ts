@@ -22,6 +22,9 @@ import { isProjectId } from '@/lib/project-id'
 export type ProjectAccess = {
   id: string
   title: string
+  /** Empty means「與作品名稱相同」. Read via `@/lib/project-titles`. */
+  novelTitle: string
+  dramaTitle: string
   slug: string
   status: ProjectStatusValue
   tags: string[]
@@ -63,6 +66,8 @@ export async function findAccessibleProject(
     .select({
       id: projects.id,
       title: projects.title,
+      novelTitle: projects.novelTitle,
+      dramaTitle: projects.dramaTitle,
       slug: projects.slug,
       status: projects.status,
       tags: projects.tags,

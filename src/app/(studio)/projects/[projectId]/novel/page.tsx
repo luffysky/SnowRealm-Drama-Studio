@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { EmptyState } from '@/components/ui/StateViews'
 import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
+import { novelTitleOf } from '@/lib/project-titles'
 import { novelIndex } from '@/lib/writing'
 import { cn, formatRelativeZh } from '@/lib/utils'
 
@@ -27,6 +28,7 @@ export default async function NovelIndexPage({ params }: Params) {
   const project = await requireProjectPage(projectId, user.id)
 
   const rows = await novelIndex(project.id)
+  const novelTitle = novelTitleOf(project)
 
   const written = rows.filter((row) => row.charCount > 0)
   const totalChars = rows.reduce((n, row) => n + row.charCount, 0)
@@ -38,6 +40,16 @@ export default async function NovelIndexPage({ params }: Params) {
           <PenLine aria-hidden className="size-4 text-accent-400" />
           小說編輯
         </h2>
+        {/*
+          The novel can be published under a different name from the work and
+          the short drama (`@/lib/project-titles`); this is the page where that
+          name belongs. Shown only when it actually differs.
+        */}
+        {novelTitle !== project.title && (
+          <p className="text-[11px] text-ink-400">
+            書名<span className="ml-1 text-ink-200">{novelTitle}</span>
+          </p>
+        )}
         <p className="text-[11px] text-ink-500">
           共 {rows.length} 集・已動筆 {written.length} 集・總字數{' '}
           {totalChars.toLocaleString('en-US')} 字

@@ -9,7 +9,11 @@ import { openDocument } from '@/lib/writing'
 
 export const metadata: Metadata = { title: '小說編輯器' }
 
-type Params = { params: Promise<{ projectId: string; episodeId: string }> }
+type Params = {
+  params: Promise<{ projectId: string; episodeId: string }>
+  /** `?chapter=<id>` — a search result opening the chapter it matched. */
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
 
 /**
  * 06 小說編輯器 — one episode's novel.
@@ -18,12 +22,15 @@ type Params = { params: Promise<{ projectId: string; episodeId: string }> }
  * lives here, one document per episode, so there is never a second copy to
  * reconcile.
  */
-export default async function EpisodeNovelPage({ params }: Params) {
+export default async function EpisodeNovelPage({ params, searchParams }: Params) {
   const user = await getSessionUser()
   if (!user) redirect('/login')
 
   const { projectId, episodeId } = await params
   const project = await requireProjectPage(projectId, user.id)
+
+  const requestedChapter = (await searchParams).chapter
+  const chapterId = typeof requestedChapter === 'string' ? requestedChapter : null
 
   const [document, modules, fx, provider] = await Promise.all([
     openDocument(project.id, episodeId, 'NOVEL'),
@@ -48,6 +55,7 @@ export default async function EpisodeNovelPage({ params }: Params) {
         ...chapter,
         updatedAt: chapter.updatedAt.toISOString(),
       }))}
+      initialChapterId={chapterId}
       initialRevision={document.lockRevision}
       lastEditorName={document.lastEditorName}
       /* A 120–180 second episode is roughly this much prose. */

@@ -3,6 +3,7 @@ import { db } from '@/db'
 import {
   activities,
   arcs,
+  assets,
   budgets,
   episodeProductionStages,
   episodes,
@@ -11,7 +12,9 @@ import {
   usageLedger,
   users,
 } from '@/db/schema'
+import { ApiError } from '@/lib/api'
 import type { ProjectSortValue, ProjectStatusValue } from '@/lib/constants'
+import { visibleProjects } from '@/lib/project-access'
 import { aggregateProgress, STAGES_PER_EPISODE } from '@/lib/production'
 
 /**
@@ -374,4 +377,88 @@ export async function toggleFavourite(
     .onConflictDoNothing()
 
   return { isFavourite: true }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Editing                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export type ProjectEdit = {
+  title?: string
+  novelTitle?: string
+  dramaTitle?: string
+  logline?: string
+  synopsis?: string
+  /** An asset id to use as the cover, or null to clear it. */
+  coverAssetId?: string | null
+}
+
+/**
+ * 作品設定: renames and the cover.
+ *
+ * The cover is checked rather than trusted. `cover_asset_id` has no foreign
+ * key (it predates this function), so an id from another project — or one that
+ * never finished uploading — would be accepted by the database and then render
+ * as a broken image, or worse, read across the project boundary.
+ *
+ * Returns null when the project is not visible to this member, so the caller
+ * answers 404 rather than distinguishing "forbidden" from "no such project".
+ */
+export async function updateProject(
+  projectId: string,
+  userId: string,
+  edit: ProjectEdit
+): Promise<{ id: string; title: string; novelTitle: string; dramaTitle: string; coverAssetId: string | null } | null> {
+  /*
+   * Visibility goes through `visibleProjects()` rather than being spelled out
+   * again here, so narrowing who may edit what stays one edit in one file
+   * (`docs/ROUTES.md` §5).
+   */
+  const [existing] = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), visibleProjects(userId)))
+    .limit(1)
+
+  if (!existing) return null
+
+  if (edit.coverAssetId) {
+    const [asset] = await db
+      .select({ id: assets.id, kind: assets.kind, status: assets.uploadStatus })
+      .from(assets)
+      .where(and(eq(assets.id, edit.coverAssetId), eq(assets.projectId, projectId)))
+      .limit(1)
+
+    if (!asset) {
+      throw new ApiError(400, '找不到這個檔案，或它不屬於這部作品', 'cover_not_found')
+    }
+    if (asset.status !== 'COMPLETED') {
+      throw new ApiError(409, '這個檔案還沒上傳完成', 'cover_incomplete')
+    }
+    if (asset.kind !== 'IMAGE' && asset.kind !== 'STICKER') {
+      throw new ApiError(400, '封面必須是圖片', 'cover_not_image')
+    }
+  }
+
+  const [row] = await db
+    .update(projects)
+    .set({
+      ...(edit.title !== undefined ? { title: edit.title } : {}),
+      ...(edit.novelTitle !== undefined ? { novelTitle: edit.novelTitle } : {}),
+      ...(edit.dramaTitle !== undefined ? { dramaTitle: edit.dramaTitle } : {}),
+      ...(edit.logline !== undefined ? { logline: edit.logline } : {}),
+      ...(edit.synopsis !== undefined ? { synopsis: edit.synopsis } : {}),
+      ...(edit.coverAssetId !== undefined ? { coverAssetId: edit.coverAssetId } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(projects.id, projectId))
+    .returning({
+      id: projects.id,
+      title: projects.title,
+      novelTitle: projects.novelTitle,
+      dramaTitle: projects.dramaTitle,
+      coverAssetId: projects.coverAssetId,
+    })
+
+  return row ?? null
 }
