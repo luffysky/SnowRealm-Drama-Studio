@@ -249,6 +249,21 @@ export function ChatRoom({
 
   /* --------------------------------------------------------------- actions */
 
+  async function edit(message: ChannelMessage, body: string) {
+    try {
+      const response = await apiFetch(`/api/chat/messages/${message.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body }),
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+      const payload = (await response.json()) as { message: ChannelMessage }
+      replace(payload.message)
+    } catch (cause) {
+      toast.error('編輯失敗', cause instanceof Error ? cause.message : undefined)
+    }
+  }
+
   async function recall(message: ChannelMessage) {
     try {
       const response = await apiFetch(`/api/chat/messages/${message.id}`, { method: 'DELETE' })
@@ -466,6 +481,7 @@ export function ChatRoom({
                     setResults(null)
                   }}
                   onRecall={() => void recall(message)}
+                  onEdit={(body) => edit(message, body)}
                 />
               ))}
             </section>

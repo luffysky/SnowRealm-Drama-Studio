@@ -1,6 +1,16 @@
 'use client'
 
-import { Check, CheckCheck, Copy, CornerUpLeft, Download, FileText, Phone, Trash2 } from 'lucide-react'
+import {
+  Check,
+  CheckCheck,
+  Copy,
+  CornerUpLeft,
+  Download,
+  FileText,
+  Pencil,
+  Phone,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ChannelMessage } from '@/components/chat/useChatChannel'
 import { assetDownloadUrl, assetPreviewUrl, assetUrl } from '@/lib/asset-url'
@@ -20,6 +30,7 @@ export function MessageBubble({
   read,
   onReply,
   onRecall,
+  onEdit,
 }: {
   message: ChannelMessage
   mine: boolean
@@ -27,8 +38,12 @@ export function MessageBubble({
   read: boolean
   onReply: () => void
   onRecall: () => void
+  /** Omitted where editing is not offered, e.g. the compact widget. */
+  onEdit?: (body: string) => Promise<void> | void
 }) {
   const [menu, setMenu] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(message.body)
   const holdTimer = useRef<number | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -123,6 +138,64 @@ export function MessageBubble({
         >
           {recalled ? (
             '訊息已收回'
+          ) : editing ? (
+            /*
+              Edited in place rather than in a dialog: the bubble is where the
+              text is, and a modal would hide the conversation it belongs to.
+            */
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                const next = draft.trim()
+                setEditing(false)
+                if (next && next !== message.body) void onEdit?.(next)
+              }}
+              className="flex flex-col gap-1.5"
+            >
+              <label className="sr-only" htmlFor={`edit-${message.id}`}>
+                編輯訊息
+              </label>
+              <textarea
+                id={`edit-${message.id}`}
+                autoFocus
+                rows={2}
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    event.currentTarget.form?.requestSubmit()
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    setDraft(message.body)
+                    setEditing(false)
+                  }
+                }}
+                className={cn(
+                  'min-w-48 resize-none rounded-lg px-2 py-1 text-xs outline-none',
+                  mine
+                    ? 'bg-accent-700/60 text-white ring-1 ring-white/30'
+                    : 'bg-stage-900 text-ink-50 ring-1 ring-accent-500'
+                )}
+              />
+              <span className="flex items-center gap-2 text-[10px] opacity-70">
+                <button type="submit" className="underline underline-offset-2">
+                  儲存
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(message.body)
+                    setEditing(false)
+                  }}
+                  className="underline underline-offset-2"
+                >
+                  取消
+                </button>
+                <span>Enter 儲存・Esc 取消</span>
+              </span>
+            </form>
           ) : (
             <Content message={message} mine={mine} />
           )}
@@ -196,6 +269,20 @@ export function MessageBubble({
               <Download aria-hidden className="size-3.5" />
               下載檔案
             </a>
+          )}
+
+          {/* Only your own, only text: an image is replaced, not reworded. */}
+          {mine && onEdit && message.kind === 'TEXT' && (
+            <MenuItem
+              onClick={() => {
+                setDraft(message.body)
+                setEditing(true)
+                setMenu(false)
+              }}
+            >
+              <Pencil aria-hidden className="size-3.5" />
+              編輯
+            </MenuItem>
           )}
 
           {mine && (

@@ -29,9 +29,18 @@ export const GET = handle(async (request: Request) => {
   const since = params.get('since')
   if (since !== null) {
     const cursor = Number(since)
+    // `changedAfter` carries recalls and edits, which never move `seq`.
+    const changedAfter = params.get('changedAfter')
+    const changed = changedAfter ? new Date(changedAfter) : undefined
+
     return jsonOk({
       conversationId,
-      messages: await messagesSince(conversationId, Number.isFinite(cursor) ? cursor : 0),
+      at: new Date().toISOString(),
+      messages: await messagesSince(
+        conversationId,
+        Number.isFinite(cursor) ? cursor : 0,
+        changed && !Number.isNaN(changed.getTime()) ? changed : undefined
+      ),
     })
   }
 

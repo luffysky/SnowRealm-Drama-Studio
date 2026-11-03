@@ -44,6 +44,16 @@ export async function GET(request: Request) {
   let cursor = Number(url.searchParams.get('since') ?? 0)
   if (!Number.isFinite(cursor) || cursor < 0) cursor = 0
 
+  /*
+   * A second cursor, for messages that changed rather than arrived — a
+   * recall or an edit does not move `seq`, so the sequence cursor alone
+   * never carried them and the other side had to reload.
+   *
+   * Starts a few seconds back so a reconnect does not miss a change made
+   * during the gap.
+   */
+  let changedSince = new Date(Date.now() - 10_000)
+
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream<Uint8Array>({
@@ -77,11 +87,16 @@ export async function GET(request: Request) {
       const fast = async () => {
         if (closed) return
         try {
-          const fresh = await messagesSince(conversationId, cursor)
+          const askedAt = new Date()
+          const fresh = await messagesSince(conversationId, cursor, changedSince)
+
           if (fresh.length > 0) {
-            cursor = fresh[fresh.length - 1]?.seq ?? cursor
+            // `seq` only moves forward for genuinely new messages; a recall
+            // replayed from the past must not drag the cursor backwards.
+            cursor = Math.max(cursor, ...fresh.map((m) => m.seq))
             send('messages', fresh)
           }
+          changedSince = askedAt
 
           /*
            * The call handshake rides the same channel. A second transport for

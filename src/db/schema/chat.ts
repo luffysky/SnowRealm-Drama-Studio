@@ -86,9 +86,19 @@ export const messages = pgTable(
     recalledAt: timestamp('recalled_at', { withTimezone: true }),
     editedAt: timestamp('edited_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Bumped by a recall or an edit.
+     *
+     * The live protocol asks for everything above a sequence number, which
+     * only ever carries *new* messages. A recall does not change `seq` — it
+     * must not, or the message would jump to the bottom of the thread — so
+     * without this the other side never heard about it and had to reload.
+     */
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique('messages_conversation_seq').on(t.conversationId, t.seq),
+    index('messages_conversation_updated_idx').on(t.conversationId, t.updatedAt),
     index('messages_conversation_created_idx').on(t.conversationId, t.createdAt),
     // History search runs over `body`; pg_trgm is already installed.
     index('messages_body_idx').using('gin', t.body),

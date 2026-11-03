@@ -86,6 +86,15 @@ export function useChatChannel({
   // Refs, not state: the stream callbacks close over these and must see the
   // current value without the effect being torn down and rebuilt each time.
   const cursorRef = useRef(initialSeq)
+  /**
+   * Recalls and edits do not move `seq`; this is how they are picked up.
+   *
+   * Seeded with the epoch rather than `Date.now()` — reading the clock during
+   * render is impure, and the first poll overwrites it with the server's own
+   * timestamp anyway, which is the one that matters when the two clocks
+   * disagree.
+   */
+  const changedRef = useRef('1970-01-01T00:00:00.000Z')
   const failuresRef = useRef(0)
   const signalsRef = useRef(onSignals)
 
@@ -108,6 +117,7 @@ export function useChatChannel({
       return [...byId.values()].sort((a, b) => a.seq - b.seq)
     })
 
+    // Never backwards: a recall replayed from the past carries an old `seq`.
     const highest = incoming.reduce((max, m) => (m.seq > max ? m.seq : max), cursorRef.current)
     cursorRef.current = highest
   }, [])
@@ -129,12 +139,14 @@ export function useChatChannel({
       if (cancelled) return
       try {
         const response = await apiFetch(
-          `/api/chat/messages?conversation=${conversationId}&since=${cursorRef.current}`
+          `/api/chat/messages?conversation=${conversationId}` +
+            `&since=${cursorRef.current}&changedAfter=${encodeURIComponent(changedRef.current)}`
         )
         if (!response.ok) throw new Error(String(response.status))
 
-        const body = (await response.json()) as { messages: ChannelMessage[] }
+        const body = (await response.json()) as { messages: ChannelMessage[]; at?: string }
         absorb(body.messages)
+        if (body.at) changedRef.current = body.at
         setStatus('polling')
       } catch {
         setStatus('offline')

@@ -45,6 +45,7 @@ export type ChatMessage = {
   recalledAt: Date | null
   editedAt: Date | null
   createdAt: Date
+  updatedAt: Date
 }
 
 /* -------------------------------------------------------------------------- */
@@ -127,6 +128,7 @@ const SELECT = {
   recalledAt: messages.recalledAt,
   editedAt: messages.editedAt,
   createdAt: messages.createdAt,
+  updatedAt: messages.updatedAt,
 }
 
 function hydrate(
@@ -240,13 +242,29 @@ export async function listMessages(input: {
   return hydrate(rows, await quotesFor(rows)).reverse()
 }
 
-/** Everything above `afterSeq`, oldest first. The live channel's only read. */
+/**
+ * Everything the client has not seen: new messages, and old ones that changed.
+ *
+ * The second half is why `updated_at` exists. A recall does not move `seq` —
+ * it must not, or the message would jump to the bottom of the thread — so a
+ * sequence cursor alone never carried it, and the other side had to reload to
+ * see that something had been taken back.
+ *
+ * Passing `since` as well as `afterSeq` keeps both in one query and one round
+ * trip; the client merges by id, so a message delivered twice lands once.
+ */
 export async function messagesSince(
   conversationId: string,
-  afterSeq: number
+  afterSeq: number,
+  since?: Date
 ): Promise<ChatMessage[]> {
+  const fresh = gt(messages.seq, afterSeq)
+  const changed = since ? gt(messages.updatedAt, since) : undefined
+
+  const scope = changed ? or(fresh, changed) : fresh
+
   const rows = await selectMessages()
-    .where(and(eq(messages.conversationId, conversationId), gt(messages.seq, afterSeq)))
+    .where(and(eq(messages.conversationId, conversationId), scope))
     .orderBy(asc(messages.seq))
     .limit(200)
 
@@ -376,7 +394,7 @@ export async function recallMessage(messageId: string, userId: string): Promise<
 
   await db
     .update(messages)
-    .set({ body: '', assetId: null, durationSec: null, recalledAt: new Date() })
+    .set({ body: '', assetId: null, durationSec: null, recalledAt: new Date(), updatedAt: new Date() })
     .where(eq(messages.id, messageId))
 
   const message = await byId(messageId)
@@ -404,7 +422,10 @@ export async function editMessage(
   if (existing.recalledAt) throw ApiError.badRequest('已收回的訊息不能編輯')
   if (existing.kind !== 'TEXT') throw ApiError.badRequest('只有文字訊息可以編輯')
 
-  await db.update(messages).set({ body: next, editedAt: new Date() }).where(eq(messages.id, messageId))
+  await db
+    .update(messages)
+    .set({ body: next, editedAt: new Date(), updatedAt: new Date() })
+    .where(eq(messages.id, messageId))
 
   const message = await byId(messageId)
   if (!message) throw new ApiError(500, '編輯後讀不回來', 'message_read_failed')

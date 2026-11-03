@@ -1,6 +1,6 @@
 'use client'
 
-import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff } from 'lucide-react'
+import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff, Volume1, Volume2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import type { ChannelCall, ChannelSignal } from '@/components/chat/useChatChannel'
 import { useToast } from '@/components/ui/Toast'
@@ -56,8 +56,16 @@ export function CallPanel({
   const [cameraOff, setCameraOff] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [problem, setProblem] = useState<string | null>(null)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const [volume, setVolume] = useState(1)
+  const [speaker, setSpeaker] = useState(false)
+  const [outputs, setOutputs] = useState<MediaDeviceInfo[]>([])
 
   const peerRef = useRef<RTCPeerConnection | null>(null)
+  /** Set by the signalling effect; called once a peer exists. */
+  const replayRef = useRef<(() => void) | null>(null)
+  const remoteStreamRef = useRef<MediaStream | null>(null)
   const localRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -79,6 +87,11 @@ export function CallPanel({
 
     callIdRef.current = null
     pendingIce.current = []
+    remoteStreamRef.current = null
+    setLocalStream(null)
+    setRemoteStream(null)
+    setSpeaker(false)
+    setVolume(1)
     setPhase('idle')
     setElapsed(0)
     setMuted(false)
@@ -104,11 +117,23 @@ export function CallPanel({
       localRef.current = media
       for (const track of media.getTracks()) peer.addTrack(track, media)
 
-      if (localVideoRef.current) localVideoRef.current.srcObject = media
+      /*
+       * The streams are kept in refs and attached by an effect, not here.
+       *
+       * This ran while the phase was still 'ringing', when the preview
+       * element had not been rendered yet — so `localVideoRef.current` was
+       * null and the camera light came on with nothing on screen. Same for
+       * the remote stream, which can arrive before the panel switches to
+       * 'active'.
+       */
+      setLocalStream(media)
 
       peer.ontrack = (event) => {
         const [stream] = event.streams
-        if (stream && remoteVideoRef.current) remoteVideoRef.current.srcObject = stream
+        if (stream) {
+          remoteStreamRef.current = stream
+          setRemoteStream(stream)
+        }
       }
 
       peer.onicecandidate = (event) => {
@@ -130,12 +155,18 @@ export function CallPanel({
         }
       }
 
+      // Anything that arrived while there was no peer to apply it to.
+      replayRef.current?.()
+
       return peer
     },
     [sendSignal]
   )
 
   /* ------------------------------------------------------------ signalling */
+
+  /** Signals that arrived before `peerRef` existed. Replayed by `buildPeer`. */
+  const parked = useRef<ChannelSignal[]>([])
 
   useEffect(() => {
     const drain = window.setInterval(() => {
@@ -148,7 +179,20 @@ export function CallPanel({
 
     async function handle(signal: ChannelSignal) {
       const peer = peerRef.current
-      if (!peer) return
+
+      /*
+       * The callee has no peer connection until they press answer, but the
+       * caller's offer arrives the moment they dial — and `drainSignals`
+       * deletes it on delivery. Dropping it here meant the handshake never
+       * started: the call rang, was answered, and sat at 「連線中」 forever
+       * with nothing in any log.
+       *
+       * Park it instead, and replay once there is something to apply it to.
+       */
+      if (!peer) {
+        parked.current.push(signal)
+        return
+      }
 
       try {
         const payload = JSON.parse(signal.payload)
@@ -175,6 +219,12 @@ export function CallPanel({
         // A malformed or out-of-order envelope must not take the call down;
         // ICE retries, and a genuinely broken handshake ends in `failed`.
       }
+    }
+
+    replayRef.current = () => {
+      const queued = parked.current
+      parked.current = []
+      for (const signal of queued) void handle(signal)
     }
 
     return () => window.clearInterval(drain)
@@ -212,6 +262,67 @@ export function CallPanel({
 
     return () => window.clearTimeout(timer)
   }, [call, meId, teardown])
+
+  /* --------------------------------------------------------- media binding */
+
+  /*
+   * Attach the streams whenever both the stream and its element exist.
+   *
+   * Doing it inside `buildPeer` could not work: that runs before the phase
+   * change that renders the elements. The camera would be on, the track
+   * flowing, and the preview blank.
+   */
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream
+    }
+  }, [localStream, phase, withVideo])
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream
+      // Autoplay with sound needs an explicit play() after a user gesture,
+      // which answering or dialling already was.
+      void remoteVideoRef.current.play().catch(() => {})
+    }
+  }, [remoteStream, phase, withVideo])
+
+  /** The other side's volume. Local tracks are muted at the element anyway. */
+  useEffect(() => {
+    if (remoteVideoRef.current) remoteVideoRef.current.volume = volume
+  }, [volume, remoteStream, phase])
+
+  /*
+   * 擴音. `setSinkId` is behind a permissions prompt in some browsers and
+   * missing entirely in Safari, so the control only appears when the browser
+   * can actually honour it.
+   */
+  useEffect(() => {
+    if (phase === 'idle') return
+
+    void navigator.mediaDevices
+      ?.enumerateDevices()
+      .then((devices) => setOutputs(devices.filter((d) => d.kind === 'audiooutput')))
+      .catch(() => setOutputs([]))
+  }, [phase])
+
+  useEffect(() => {
+    const el = remoteVideoRef.current as (HTMLVideoElement & {
+      setSinkId?: (id: string) => Promise<void>
+    }) | null
+    if (!el?.setSinkId || outputs.length === 0) return
+
+    /*
+     * There is no "loudspeaker" device id on the web. The closest honest
+     * thing is: speakerphone means the default output, and off means whatever
+     * else is attached (a headset). With only one output the toggle is hidden.
+     */
+    const target = speaker
+      ? outputs.find((d) => d.deviceId === 'default') ?? outputs[0]
+      : outputs.find((d) => d.deviceId !== 'default') ?? outputs[0]
+
+    if (target) void el.setSinkId(target.deviceId).catch(() => {})
+  }, [speaker, outputs, remoteStream])
 
   /* ------------------------------------------------------------- the clock */
 
@@ -343,32 +454,72 @@ export function CallPanel({
               </span>
             </div>
 
-            {withVideo && (phase === 'active' || phase === 'connecting') && (
-              <div className="relative overflow-hidden rounded-xl bg-black">
-                { }
-                <video
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  className="aspect-video w-full object-cover"
-                />
-                {/* `muted` on the local preview, or you hear yourself. */}
-                { }
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="absolute right-2 bottom-2 w-20 rounded-lg ring-1 ring-white/20"
-                />
-              </div>
-            )}
+            {/*
+              Rendered from the moment the panel opens, not only once the call
+              is active. The element has to exist before `srcObject` is set,
+              and binding it later is why the camera came on with a blank
+              preview.
+            */}
+            <div
+              className={cn(
+                'relative overflow-hidden rounded-xl bg-black',
+                !withVideo && 'hidden'
+              )}
+            >
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="aspect-video w-full object-cover"
+              >
+                <track kind="captions" />
+              </video>
+
+              {/* `muted` on your own preview, or you hear yourself. */}
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute right-2 bottom-2 w-20 rounded-lg ring-1 ring-white/20"
+              >
+                <track kind="captions" />
+              </video>
+
+              {phase !== 'active' && (
+                <span className="absolute inset-x-0 top-2 text-center text-[10px] text-white/70">
+                  {phase === 'ringing' ? 'ç­å°æ¹æ¥èµ·â¯' : 'é£ç·ä¸­â¯'}
+                </span>
+              )}
+            </div>
 
             {!withVideo && (
-              // The audio still needs an element to play through, even with
-              // nothing to look at.
-               
-              <video ref={remoteVideoRef} autoPlay playsInline className="hidden" />
+              <video ref={remoteVideoRef} autoPlay playsInline className="hidden">
+                <track kind="captions" />
+              </video>
+            )}
+
+            {/* ---- volume ------------------------------------------------ */}
+            {phase !== 'incoming' && (
+              <div className="flex items-center gap-2">
+                <Volume2 aria-hidden className="size-3.5 shrink-0 text-ink-500" />
+                <label className="sr-only" htmlFor="call-volume">
+                  éè©±é³é
+                </label>
+                <input
+                  id="call-volume"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={volume}
+                  onChange={(event) => setVolume(Number(event.target.value))}
+                  className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-stage-700 accent-accent-500"
+                />
+                <span className="w-8 shrink-0 text-right text-[10px] text-ink-600 tabular-nums">
+                  {Math.round(volume * 100)}%
+                </span>
+              </div>
             )}
 
             {problem && (
@@ -406,6 +557,25 @@ export function CallPanel({
                       <Mic aria-hidden className="size-4" />
                     )}
                   </CallButton>
+
+                  {/*
+                    Only when the browser can actually switch output and there
+                    is more than one to switch to — a button that silently
+                    does nothing is worse than no button.
+                  */}
+                  {outputs.length > 1 && 'setSinkId' in HTMLMediaElement.prototype && (
+                    <CallButton
+                      label={speaker ? '關閉擴音' : '擴音'}
+                      active={speaker}
+                      onClick={() => setSpeaker((on) => !on)}
+                    >
+                      {speaker ? (
+                        <Volume2 aria-hidden className="size-4" />
+                      ) : (
+                        <Volume1 aria-hidden className="size-4" />
+                      )}
+                    </CallButton>
+                  )}
 
                   {withVideo && (
                     <CallButton
