@@ -316,3 +316,69 @@ export const notificationKindEnum = pgEnum('notification_kind', [
   'MENTION',
   'SYSTEM',
 ])
+
+/* -------------------------------------------------------------------------- */
+/* 音訊素材 (designs 81–90)                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 音訊變體 — a *different recording* of the same track.
+ *
+ * Deliberately a separate enum from `assetVariantKindEnum`. That one lists
+ * derived files (thumbnail, preview, waveform, transcode): different renderings
+ * of one recording, which a machine can regenerate. These are editorial
+ * choices: an instrumental is not a rendering of the vocal take, it is another
+ * take, with its own duration, its own checksum and potentially its own
+ * licence. Folding the two axes into one enum would make 「波形」 and 「伴奏」
+ * the same kind of thing, and there would be no way to ask for the waveform
+ * *of* the instrumental.
+ */
+export const audioVariantEnum = pgEnum('audio_variant', [
+  'FULL',
+  'INSTRUMENTAL',
+  'SHORT',
+  'VOCAL',
+])
+
+/** 音訊用途分類 (designs 82 / 86 / 87). */
+export const audioCategoryEnum = pgEnum('audio_category', [
+  // 音樂
+  'OP',
+  'ED',
+  'BGM',
+  'INSERT',
+  'CHARACTER_SONG',
+  // 音效
+  'AMBIENCE',
+  'ACTION',
+  'FOLEY',
+  'TRANSITION',
+  'EFFECT',
+  // 配音
+  'DIALOGUE',
+  'NARRATION',
+  'OTHER',
+])
+
+/**
+ * 授權狀態 (design 88).
+ *
+ * `PENDING_REVIEW` is the default for anything newly uploaded: an asset is not
+ * licensed because someone uploaded it, and the UI must never show 已授權 for
+ * a row nobody confirmed.
+ */
+export const licenseStatusEnum = pgEnum('license_status', [
+  'PENDING_REVIEW',
+  'APPROVED',
+  'RESTRICTED',
+  'EXPIRED',
+  'REJECTED',
+])
+
+/** 音訊版本的審核狀態 (designs 85 / 87). */
+export const audioReviewStatusEnum = pgEnum('audio_review_status', [
+  'DRAFT',
+  'NEEDS_REVIEW',
+  'APPROVED',
+  'ARCHIVED',
+])

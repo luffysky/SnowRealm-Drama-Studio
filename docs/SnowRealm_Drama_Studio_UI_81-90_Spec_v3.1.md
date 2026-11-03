@@ -82,6 +82,30 @@
 
 ## 3. Neon邏輯資料模型
 
+> **2026-11-04 修訂｜本節的 `asset_files` 拆分方案已被取代。**
+>
+> 原表格同時要求「`assets` 與 `asset_files` 分離」與「不得建立兩套重複素材系統」，
+> 這兩句互相牴觸。正式決策採後者：
+>
+> - **保留現有 `assets` 為檔案本體**，`object_key` / `version` / `root_asset_id` 不動，
+>   既有 30 處指向 `assets.id` 的參照（封面、角色定裝、分鏡的圖／影片／配音、費用收據⋯⋯）全部不動。
+>   照原方案拆檔案等於要改那 30 處，而且會多出「asset 沒有檔案」這個中間狀態。
+> - **不新增 `asset_files`。** 下表的 `file_id` 一律讀作 `file_asset_id`，直接指向 `assets.id`。
+> - **`audio_revisions` 改為 (revision × variant) 的格子**，掛在該軌的代表 asset 上；
+>   代表 asset 自己也有一列（`file_asset_id = asset_id`），不特例處理。
+> - **`assets.scope` 暫不新增**，理由見下方「尚未實作」。
+>
+> 已實作：migration `0013_audio_assets.sql`、schema `src/db/schema/audio.ts`。
+>
+> **尚未實作（P1 再做）**：`assets.scope`（project / studio）。
+> 現行 `assets.project_id` 是 NOT NULL，而且 `loadAssetForUser()` 的權限檢查、
+> R2 的 `projects/<projectId>/...` 物件路徑、刪除與參照查詢全都經過它。
+> 加一個目前只能是 `project` 的欄位，等於放一個「設成 studio 就繞過權限檢查」的洞在那裡。
+> 86 工作室共用音效屬 P1，屆時連同權限路徑一起改。
+>
+> 其餘 `audio_segments`、`project_audio_defaults`、`episode_audio_overrides`、
+> `episode_audio_cues`、`voice_line_links`、`soundtrack_*` 依原規劃於 P1 新增。
+
 **先檢查既有Schema，優先擴充現有assets/asset_versions，不得建立兩套重複素材系統。**
 
 |實體|關鍵欄位與約束|

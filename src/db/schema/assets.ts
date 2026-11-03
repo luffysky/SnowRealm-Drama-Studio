@@ -30,8 +30,16 @@ export const assets = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     episodeId: uuid('episode_id').references(() => episodes.id, { onDelete: 'set null' }),
     kind: assetKindEnum('kind').notNull(),
-    /** Display name; the original filename as uploaded. */
+    /** Display name; the original filename as uploaded. Never edited. */
     name: text('name').notNull(),
+    /**
+     * Editable display name, e.g. 《一灶見山河》主題曲.
+     *
+     * Empty means「用 `name`」rather than being backfilled with a copy of it:
+     * a copy would stop following the filename for assets nobody has renamed,
+     * and `name` is still what a download is saved as.
+     */
+    title: text('title').notNull().default(''),
     /** R2 object key. UUID-based, e.g. `projects/<uuid>/image/<uuid>.png`. */
     objectKey: text('object_key').notNull().unique(),
     mimeType: text('mime_type').notNull().default(''),
