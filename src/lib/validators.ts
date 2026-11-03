@@ -131,6 +131,33 @@ export const outlineEditSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, { message: '沒有要變更的欄位' })
 
+/**
+ * 音樂素材的資訊 (design 84).
+ *
+ * `bpm` is nullable rather than defaulting to 0: an unknown tempo is not zero,
+ * and storing zero would put a wrong number into a filter instead of leaving
+ * it out of one.
+ */
+export const musicUpdateSchema = z.object({
+  title: z.string().trim().min(1, '請輸入曲名').max(120),
+  category: z.enum(['OP', 'ED', 'BGM', 'INSERT', 'CHARACTER_SONG', 'OTHER']),
+  genreTags: z.array(z.string().trim().max(24)).max(12).optional().default([]),
+  moodTags: z.array(z.string().trim().max(24)).max(12).optional().default([]),
+  language: z.string().trim().max(40).optional().default(''),
+  artist: z.string().trim().max(120).optional().default(''),
+  bpm: z.coerce.number().int().min(20).max(400).nullable().optional().default(null),
+  musicalKey: z.string().trim().max(20).optional().default(''),
+  sourcePlatform: z.string().trim().max(80).optional().default(''),
+  description: z.string().trim().max(2000).optional().default(''),
+  /** Read from the file in the browser; the upload pipeline does not decode. */
+  durationSec: z.coerce.number().min(0).max(86_400).nullable().optional().default(null),
+})
+
+/** 新增時還要帶已上傳完成的 asset id。 */
+export const musicSchema = musicUpdateSchema.extend({
+  assetId: uuid,
+})
+
 /** 集數成片：指定哪一個 asset 是成片，null 代表移除。 */
 export const finalCutSchema = z.object({
   assetId: uuid.nullable(),

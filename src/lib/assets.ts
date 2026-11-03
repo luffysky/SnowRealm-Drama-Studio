@@ -34,6 +34,7 @@ import {
   startMultipart,
   type CompletedPart,
 } from '@/lib/r2'
+import { resolveMimeType } from '@/lib/media-types'
 import type { SessionUser } from '@/lib/auth/session'
 
 /**
@@ -79,6 +80,8 @@ export function validateUpload(input: {
   kind: AssetKindValue
   contentType: string
   sizeBytes: number
+  /** Used to recover a type the browser could not supply. */
+  filename?: string
 }): void {
   if (input.sizeBytes <= 0) {
     throw ApiError.badRequest('檔案大小必須大於 0')
@@ -89,10 +92,18 @@ export function validateUpload(input: {
     )
   }
 
-  const type = input.contentType.toLowerCase()
+  /*
+   * `File.type` cannot be trusted for media. It comes from the OS registry,
+   * so on Windows a .mkv, .flac or .avi commonly arrives as
+   * `application/octet-stream` — or empty — purely because no application
+   * claimed the extension. Rejecting those turns an ordinary video into
+   * 「不支援的檔案類型」 with nothing on screen to explain why, so the
+   * extension gets a say before anything is refused.
+   */
+  const type = resolveMimeType(input.filename ?? '', input.contentType)
 
-  // An empty content type is tolerated; R2 stores octet-stream and the kind
-  // still constrains what the UI will render.
+  // Still unknown after both: stored as octet-stream, and the kind continues
+  // to constrain what the UI renders.
   if (!type) return
 
   const globallyAllowed =
@@ -174,7 +185,12 @@ export async function beginUpload(input: {
         kind: input.kind,
         name: input.filename,
         objectKey,
-        mimeType: input.contentType,
+        /*
+         * The resolved type, not what the browser claimed. Storing
+         * `application/octet-stream` for an .mkv would make the library show a
+         * generic file where a video belongs, long after the upload.
+         */
+        mimeType: resolveMimeType(input.filename, input.contentType),
         sizeBytes: input.sizeBytes,
         version,
         rootAssetId: input.rootAssetId ?? null,
@@ -364,7 +380,13 @@ export async function finishUpload(input: {
       .set({
         uploadStatus: 'COMPLETED',
         sizeBytes: head.sizeBytes,
-        mimeType: head.mimeType || undefined,
+        /*
+         * R2 echoes back whatever the browser PUT, so a useless type must not
+         * overwrite the one resolved at the start.
+         */
+        ...(head.mimeType && head.mimeType !== 'application/octet-stream'
+          ? { mimeType: head.mimeType }
+          : {}),
         checksum: head.etag,
         updatedAt: new Date(),
       })

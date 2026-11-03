@@ -9,6 +9,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Field, Input, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import { acceptFor, familyOf, resolveMimeType } from '@/lib/media-types'
 import { cn } from '@/lib/utils'
 import { assetPreviewUrl } from '@/lib/asset-url'
 
@@ -290,7 +291,9 @@ function CoverPicker({
 
     // Checked here as well as on the server: telling the user immediately
     // beats uploading 12 MB and then being refused.
-    if (!file.type.startsWith('image/')) {
+    // Same resolution the server uses; `file.type` alone rejects formats the
+    // OS has no registry entry for.
+    if (familyOf(resolveMimeType(file.name, file.type)) !== 'image') {
       setRejected(`「${file.name}」不是圖片檔`)
       return
     }
@@ -424,7 +427,7 @@ function CoverPicker({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept={acceptFor('image')}
         className="hidden"
         onChange={(event) => {
           accept(event.target.files)

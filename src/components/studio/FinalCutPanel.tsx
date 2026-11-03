@@ -7,6 +7,7 @@ import { useUploader } from '@/components/studio/useUploader'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import { assetUrl } from '@/lib/asset-url'
+import { acceptFor, familyOf, resolveMimeType } from '@/lib/media-types'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { cn, formatDurationZh } from '@/lib/utils'
 
@@ -126,9 +127,12 @@ export function FinalCutPanel({
     const file = Array.from(files ?? [])[0]
     if (!file) return
 
-    // Checked here as well as on the server: telling the user now beats
-    // uploading a gigabyte and then being refused.
-    if (!file.type.startsWith('video/')) {
+    /*
+     * Resolved the same way the server does. Checking `file.type` alone would
+     * reject a .mkv or .avi that Windows reports as octet-stream — the file is
+     * fine, the operating system simply did not know what it was.
+     */
+    if (familyOf(resolveMimeType(file.name, file.type)) !== 'video') {
       setRejected(`「${file.name}」不是影片檔`)
       return
     }
@@ -279,7 +283,7 @@ export function FinalCutPanel({
       <input
         ref={inputRef}
         type="file"
-        accept="video/*"
+        accept={acceptFor('video')}
         className="hidden"
         onChange={(event) => {
           accept(event.target.files)

@@ -23,6 +23,7 @@ import {
   ASSET_KIND_LABEL,
   type AssetKindValue,
 } from '@/lib/constants'
+import { acceptAnyMedia } from '@/lib/media-types'
 import { cn, formatDurationZh } from '@/lib/utils'
 
 /**
@@ -243,6 +244,7 @@ export function EpisodeAssetBrowser({
         ref={inputRef}
         type="file"
         multiple
+        accept={acceptAnyMedia()}
         className="hidden"
         onChange={(event) => {
           accept(event.target.files)
