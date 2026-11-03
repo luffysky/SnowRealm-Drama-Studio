@@ -17,6 +17,7 @@ import Typography from '@tiptap/extension-typography'
 import Underline from '@tiptap/extension-underline'
 import type { Extensions } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import { Screenplay } from '@/components/editor/screenplay'
 import type { EditorModuleId } from '@/lib/editor/modules'
 
 /**
@@ -95,6 +96,10 @@ export function buildExtensions(input: {
 
   if (enabled.has('typography')) {
     extensions.push(Typography)
+  }
+
+  if (enabled.has('screenplay')) {
+    extensions.push(Screenplay)
   }
 
   if (enabled.has('focus')) {

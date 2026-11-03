@@ -362,3 +362,47 @@
     transition: opacity 150ms;
   }
 }
+
+/**
+ * Screenplay blocks.
+ *
+ * Centred character cues and indented dialogue are the convention readers
+ * expect; the point is that a scene can be skimmed for who speaks without
+ * reading it.
+ */
+@layer components {
+  .prose-editor :where(p[data-script='character']) {
+    margin-block: 1em 0.2em;
+    text-align: center;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--color-accent-200, var(--color-accent-300));
+  }
+
+  .prose-editor :where(p[data-script='dialogue']) {
+    margin-block: 0.2em;
+    margin-inline: auto;
+    max-width: 32em;
+    color: var(--color-ink-100);
+  }
+
+  .prose-editor :where(p[data-script='parenthetical']) {
+    margin-block: 0.1em;
+    margin-inline: auto;
+    max-width: 26em;
+    text-align: center;
+    font-size: 0.92em;
+    color: var(--color-ink-400);
+  }
+
+  .prose-editor :where(p[data-script='transition']) {
+    margin-block: 1em;
+    text-align: end;
+    letter-spacing: 0.12em;
+    color: var(--color-gilt-300);
+  }
+
+  .prose-editor :where(p[data-script='action']) {
+    color: var(--color-ink-200);
+  }
+}

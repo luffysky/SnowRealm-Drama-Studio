@@ -432,3 +432,15 @@ export const editorModulesSchema = z.object({
   surface: z.enum(EDITOR_SURFACES),
   modules: z.array(z.string()).max(64),
 })
+
+export const createSceneSchema = z.object({
+  heading: z.string().trim().max(120, '場次標題最多 120 個字').default(''),
+})
+
+export const saveSceneSchema = z.object({
+  heading: z.string().trim().max(120, '場次標題最多 120 個字').optional(),
+  location: z.string().trim().max(120, '場景最多 120 個字').optional(),
+  timeOfDay: z.string().trim().max(40, '時間最多 40 個字').optional(),
+  content: z.string().max(200_000, '單一場次最多 200,000 個字元'),
+  expectedRevision: z.number().int().nonnegative(),
+})

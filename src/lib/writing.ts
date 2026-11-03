@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { chapters, documents, episodes, users, versions } from '@/db/schema'
+import { chapters, documents, episodes, scenes, users, versions } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import type { DocumentKindValue } from '@/lib/constants'
@@ -42,6 +42,19 @@ export type NovelDocument = {
   lastEditorName: string | null
   updatedAt: Date
   chapters: ChapterRow[]
+  scenes: SceneRow[]
+}
+
+export type SceneRow = {
+  id: string
+  sortOrder: number
+  code: string
+  heading: string
+  location: string
+  timeOfDay: string
+  content: string
+  estimatedSec: number
+  updatedAt: Date
 }
 
 /** Episode-level summary for the project's novel index. */
@@ -52,6 +65,9 @@ export type NovelIndexRow = {
   documentId: string | null
   charCount: number
   chapterCount: number
+  /** Scenes and estimated runtime, for the script index. */
+  sceneCount: number
+  estimatedSec: number
   lastEditorName: string | null
   updatedAt: Date | null
 }
@@ -114,7 +130,7 @@ export async function openDocument(
 
   if (!document) throw new Error('Failed to open document')
 
-  const [rows, editor] = await Promise.all([
+  const [rows, sceneRows, editor] = await Promise.all([
     db
       .select({
         id: chapters.id,
@@ -128,6 +144,22 @@ export async function openDocument(
       .from(chapters)
       .where(eq(chapters.documentId, document.id))
       .orderBy(asc(chapters.sortOrder)),
+
+    db
+      .select({
+        id: scenes.id,
+        sortOrder: scenes.sortOrder,
+        code: scenes.code,
+        heading: scenes.heading,
+        location: scenes.location,
+        timeOfDay: scenes.timeOfDay,
+        content: scenes.content,
+        estimatedSec: scenes.estimatedSec,
+        updatedAt: scenes.updatedAt,
+      })
+      .from(scenes)
+      .where(eq(scenes.documentId, document.id))
+      .orderBy(asc(scenes.sortOrder)),
 
     document.lastEditorId
       ? db
@@ -151,6 +183,7 @@ export async function openDocument(
     lastEditorName: editor[0]?.name ?? null,
     updatedAt: document.updatedAt,
     chapters: rows,
+    scenes: sceneRows,
   }
 }
 
@@ -170,6 +203,13 @@ export async function novelIndex(
       lastEditorId: documents.lastEditorId,
       chapterCount: sql<number>`(
         select count(*) from ${chapters} where ${chapters}.document_id = ${documents.id}
+      )`.mapWith(Number),
+      sceneCount: sql<number>`(
+        select count(*) from ${scenes} where ${scenes}.document_id = ${documents.id}
+      )`.mapWith(Number),
+      seconds: sql<number>`(
+        select coalesce(sum(estimated_sec), 0) from ${scenes}
+         where ${scenes}.document_id = ${documents.id}
       )`.mapWith(Number),
     })
     .from(episodes)
@@ -197,6 +237,8 @@ export async function novelIndex(
     documentId: row.documentId,
     charCount: row.charCount ?? 0,
     chapterCount: row.documentId ? row.chapterCount : 0,
+    sceneCount: row.documentId ? row.sceneCount : 0,
+    estimatedSec: row.documentId ? row.seconds : 0,
     lastEditorName: row.lastEditorId ? (nameOf.get(row.lastEditorId) ?? null) : null,
     updatedAt: row.updatedAt,
   }))
@@ -247,6 +289,179 @@ export async function createChapter(input: {
     },
     lockRevision,
   }
+}
+
+/**
+ * Adds a scene. The code (`S01`) comes from its position rather than being
+ * typed, so renumbering after a reorder is one update instead of a manual pass.
+ */
+export async function createScene(input: {
+  documentId: string
+  heading: string
+  user: SessionUser
+}): Promise<{ scene: SceneRow; lockRevision: number }> {
+  const [last] = await db
+    .select({ sortOrder: scenes.sortOrder })
+    .from(scenes)
+    .where(eq(scenes.documentId, input.documentId))
+    .orderBy(desc(scenes.sortOrder))
+    .limit(1)
+
+  const sortOrder = (last?.sortOrder ?? 0) + 1
+
+  const [created] = await db
+    .insert(scenes)
+    .values({
+      documentId: input.documentId,
+      sortOrder,
+      code: `S${String(sortOrder).padStart(2, '0')}`,
+      heading: input.heading.trim(),
+    })
+    .returning()
+
+  if (!created) throw new Error('Failed to create scene')
+
+  const lockRevision = await touchDocument(input.documentId, input.user.id)
+
+  return {
+    scene: {
+      id: created.id,
+      sortOrder: created.sortOrder,
+      code: created.code,
+      heading: created.heading,
+      location: created.location,
+      timeOfDay: created.timeOfDay,
+      content: created.content,
+      estimatedSec: created.estimatedSec,
+      updatedAt: created.updatedAt,
+    },
+    lockRevision,
+  }
+}
+
+export type SceneSaveResult = {
+  scene: SceneRow
+  documentCharCount: number
+  /** Sum of the episode's scene estimates, in seconds. */
+  documentSeconds: number
+  lockRevision: number
+  savedAt: Date
+}
+
+/**
+ * Saves one scene, under the same optimistic lock as a chapter.
+ *
+ * The runtime estimate is recomputed here rather than taken from the client:
+ * it decides whether an episode fits the 120-180 second target, and a figure
+ * the browser could set is a figure that can be wished into range.
+ */
+export async function saveScene(input: {
+  sceneId: string
+  heading?: string
+  location?: string
+  timeOfDay?: string
+  content: string
+  expectedRevision: number
+  user: SessionUser
+}): Promise<SceneSaveResult> {
+  const [scene] = await db
+    .select({ id: scenes.id, documentId: scenes.documentId })
+    .from(scenes)
+    .where(eq(scenes.id, input.sceneId))
+    .limit(1)
+
+  if (!scene) throw ApiError.notFound('找不到這個場次')
+
+  const estimatedSec = estimateSceneSeconds(input.content)
+
+  return db.transaction(async (tx) => {
+    const bumped = await tx
+      .update(documents)
+      .set({
+        lockRevision: sql`${documents.lockRevision} + 1`,
+        lastEditorId: input.user.id,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(documents.id, scene.documentId),
+          eq(documents.lockRevision, input.expectedRevision)
+        )
+      )
+      .returning({ lockRevision: documents.lockRevision })
+
+    if (bumped.length === 0) throw await staleRevisionError(scene.documentId)
+
+    const [updated] = await tx
+      .update(scenes)
+      .set({
+        ...(input.heading !== undefined ? { heading: input.heading } : {}),
+        ...(input.location !== undefined ? { location: input.location } : {}),
+        ...(input.timeOfDay !== undefined ? { timeOfDay: input.timeOfDay } : {}),
+        content: input.content,
+        estimatedSec,
+        updatedAt: new Date(),
+      })
+      .where(eq(scenes.id, input.sceneId))
+      .returning()
+
+    if (!updated) throw new Error('Failed to save scene')
+
+    const all = await tx
+      .select({ content: scenes.content, estimatedSec: scenes.estimatedSec })
+      .from(scenes)
+      .where(eq(scenes.documentId, scene.documentId))
+
+    const documentCharCount = all.reduce((n, row) => n + countRichTextChars(row.content), 0)
+    const documentSeconds = all.reduce((n, row) => n + row.estimatedSec, 0)
+
+    await tx
+      .update(documents)
+      .set({ charCount: documentCharCount })
+      .where(eq(documents.id, scene.documentId))
+
+    return {
+      scene: {
+        id: updated.id,
+        sortOrder: updated.sortOrder,
+        code: updated.code,
+        heading: updated.heading,
+        location: updated.location,
+        timeOfDay: updated.timeOfDay,
+        content: updated.content,
+        estimatedSec: updated.estimatedSec,
+        updatedAt: updated.updatedAt,
+      },
+      documentCharCount,
+      documentSeconds,
+      lockRevision: bumped[0]!.lockRevision,
+      savedAt: updated.updatedAt,
+    }
+  })
+}
+
+/**
+ * Rough runtime for one scene.
+ *
+ * Dialogue is read aloud and costs far more per character than an action line,
+ * which is only acted. Text inside Chinese quotation marks counts as dialogue;
+ * everything else is action. Deliberately crude, and recomputed on the server:
+ * its job is to warn when an episode drifts out of the 120-180 second window,
+ * not to be exact.
+ */
+export function estimateSceneSeconds(html: string): number {
+  const text = html.replace(/<[^>]*>/g, ' ')
+
+  let dialogue = 0
+  for (const match of text.matchAll(/[\u300c\u300e]([^\u300d\u300f]*)[\u300d\u300f]/g)) {
+    dialogue += countRichTextChars(match[1] ?? '')
+  }
+
+  const total = countRichTextChars(text)
+  const action = Math.max(total - dialogue, 0)
+
+  // ~5 spoken characters a second; action reads about three times faster.
+  return Math.round(dialogue / 5 + action / 15)
 }
 
 export type SaveResult = {
@@ -300,28 +515,7 @@ export async function saveChapter(input: {
       )
       .returning({ lockRevision: documents.lockRevision })
 
-    if (bumped.length === 0) {
-      const [current] = await tx
-        .select({ lockRevision: documents.lockRevision, lastEditorId: documents.lastEditorId })
-        .from(documents)
-        .where(eq(documents.id, chapter.documentId))
-        .limit(1)
-
-      const [editor] = current?.lastEditorId
-        ? await tx
-            .select({ name: users.name })
-            .from(users)
-            .where(eq(users.id, current.lastEditorId))
-            .limit(1)
-        : []
-
-      throw new ApiError(
-        409,
-        `這份稿子已被${editor?.name ?? '另一位成員'}修改，請重新載入後再編輯，避免覆蓋對方的內容。`,
-        'stale_revision',
-        { currentRevision: current?.lockRevision ?? null }
-      )
-    }
+    if (bumped.length === 0) throw await staleRevisionError(chapter.documentId)
 
     const [updated] = await tx
       .update(chapters)
@@ -395,6 +589,20 @@ export async function snapshotDocument(input: {
       .where(eq(chapters.documentId, input.documentId))
       .orderBy(asc(chapters.sortOrder))
 
+    const sceneSnapshot = await tx
+      .select({
+        id: scenes.id,
+        sortOrder: scenes.sortOrder,
+        code: scenes.code,
+        heading: scenes.heading,
+        location: scenes.location,
+        timeOfDay: scenes.timeOfDay,
+        content: scenes.content,
+      })
+      .from(scenes)
+      .where(eq(scenes.documentId, input.documentId))
+      .orderBy(asc(scenes.sortOrder))
+
     const [previous] = await tx
       .select({ id: versions.id })
       .from(versions)
@@ -411,6 +619,7 @@ export async function snapshotDocument(input: {
       parentVersionId: previous?.id ?? null,
       snapshot: {
         kind: document.kind,
+        scenes: sceneSnapshot,
         chapters: rows.map((row) => ({
           id: row.id,
           sortOrder: row.sortOrder,
@@ -434,6 +643,35 @@ export async function snapshotDocument(input: {
   })
 }
 
+/**
+ * The 409 a stale save gets, naming whoever moved the document on.
+ *
+ * Shared by chapters and scenes: both are edited by two people at once, and a
+ * different message for each would be a different bug for each.
+ */
+async function staleRevisionError(documentId: string): Promise<ApiError> {
+  const [current] = await db
+    .select({ lockRevision: documents.lockRevision, lastEditorId: documents.lastEditorId })
+    .from(documents)
+    .where(eq(documents.id, documentId))
+    .limit(1)
+
+  const [editor] = current?.lastEditorId
+    ? await db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, current.lastEditorId))
+        .limit(1)
+    : []
+
+  return new ApiError(
+    409,
+    `這份稿子已被${editor?.name ?? '另一位成員'}修改，請重新載入後再編輯，避免覆蓋對方的內容。`,
+    'stale_revision',
+    { currentRevision: current?.lockRevision ?? null }
+  )
+}
+
 /** Confirms a document belongs to the project before anything touches it. */
 export async function documentBelongsToProject(
   documentId: string,
@@ -447,6 +685,19 @@ export async function documentBelongsToProject(
     .limit(1)
 
   return Boolean(row)
+}
+
+/** Same check, starting from a scene. */
+export async function sceneProjectId(sceneId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ projectId: episodes.projectId })
+    .from(scenes)
+    .innerJoin(documents, eq(documents.id, scenes.documentId))
+    .innerJoin(episodes, eq(episodes.id, documents.episodeId))
+    .where(eq(scenes.id, sceneId))
+    .limit(1)
+
+  return row?.projectId ?? null
 }
 
 /** Same check, starting from a chapter. */

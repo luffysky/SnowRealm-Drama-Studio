@@ -27,6 +27,11 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { buildExtensions } from '@/components/editor/extensions'
 import {
+  SCRIPT_BLOCK_LABEL,
+  SCRIPT_BLOCK_SHORTCUT,
+  SCRIPT_BLOCKS,
+} from '@/components/editor/screenplay'
+import {
   EDITOR_SURFACE_LABEL,
   modulesFor,
   type EditorModuleId,
@@ -280,6 +285,29 @@ function Toolbar({
             >
               <Icon className="size-3.5" />
             </Button>
+          ))}
+        </>
+      )}
+
+      {enabled.has('screenplay') && (
+        <>
+          <Divider />
+          {SCRIPT_BLOCKS.map((block) => (
+            <button
+              key={block}
+              type="button"
+              title={`${SCRIPT_BLOCK_LABEL[block]}\uff08${SCRIPT_BLOCK_SHORTCUT[block]}\uff09`}
+              aria-pressed={editor.isActive('paragraph', { scriptBlock: block })}
+              onClick={() => editor.chain().focus().toggleScriptBlock(block).run()}
+              className={cn(
+                'rounded-md px-1.5 py-1 text-[10px] whitespace-nowrap transition-colors',
+                editor.isActive('paragraph', { scriptBlock: block })
+                  ? 'bg-accent-600/25 text-ink-50 ring-1 ring-inset ring-accent-500/50'
+                  : 'text-ink-400 hover:bg-stage-800 hover:text-ink-100'
+              )}
+            >
+              {SCRIPT_BLOCK_LABEL[block]}
+            </button>
           ))}
         </>
       )}
