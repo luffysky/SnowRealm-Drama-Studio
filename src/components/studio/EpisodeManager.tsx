@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronLeft, ChevronRight, Pencil, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Package, Pencil, Search } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
@@ -687,6 +687,15 @@ function DetailRail({
       </div>
 
       <FinalCutPanel projectId={projectId} episodeId={episode.id} canWrite={canWrite} />
+
+      <Link
+        href={`/projects/${projectId}/episodes/${episode.id}/assets`}
+        className="flex items-center gap-1.5 rounded-lg bg-stage-850 px-3 py-2 text-[11px] text-ink-300 ring-1 ring-inset ring-stage-700 transition-colors hover:text-ink-50 hover:ring-stage-600"
+      >
+        <Package aria-hidden className="size-3.5 text-accent-400" />
+        本集素材
+        <ChevronRight aria-hidden className="ml-auto size-3 text-ink-600" />
+      </Link>
 
       <div className="flex flex-col gap-2">
         <h4 className="text-[11px] font-medium text-ink-400">

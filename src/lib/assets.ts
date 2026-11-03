@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   assetLinks,
@@ -8,12 +8,14 @@ import {
   projects,
   shots,
   uploadSessions,
+  users,
 } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import {
   ACCEPTED_MIME_EXACT,
   ACCEPTED_MIME_PREFIXES,
   ASSET_KIND_ACCEPT,
+  ASSET_KINDS,
   MAX_UPLOAD_BYTES,
   type AssetKindValue,
 } from '@/lib/constants'
@@ -734,4 +736,137 @@ export async function finishVariantUpload(input: {
 
   if (!updated) throw ApiError.notFound('找不到這個預覽檔')
   return updated
+}
+
+/* -------------------------------------------------------------------------- */
+/* 各集素材 (Z2)                                                                */
+/* -------------------------------------------------------------------------- */
+
+export type EpisodeAsset = {
+  id: string
+  kind: AssetKindValue
+  /** Editable display name; empty means use `name`. */
+  title: string
+  name: string
+  mimeType: string
+  sizeBytes: number
+  durationSec: number | null
+  width: number | null
+  height: number | null
+  version: number
+  uploadedByName: string | null
+  createdAt: Date
+  /** Whether a compressed copy or waveform exists, so the grid knows. */
+  hasPreview: boolean
+  hasWaveform: boolean
+  /** Set when this is the episode's finished cut. */
+  isFinalCut: boolean
+}
+
+export type EpisodeAssetGroup = {
+  kind: AssetKindValue
+  items: EpisodeAsset[]
+  sizeBytes: number
+}
+
+/**
+ * Everything attached to one episode, grouped by kind (Z2).
+ *
+ * `assets.episode_id` has carried this since the beginning — what was missing
+ * was anywhere to look at it. Before this, a file uploaded against an episode
+ * was reachable only by whatever record happened to reference it, so anything
+ * uploaded and not yet used was invisible.
+ *
+ * Variants are reported as flags rather than joined rows: the grid needs to
+ * know a preview exists, not what it is, and `/api/files/[id]?variant=preview`
+ * already falls back on its own.
+ */
+export async function episodeAssets(
+  projectId: string,
+  episodeId: string
+): Promise<{ groups: EpisodeAssetGroup[]; total: number; sizeBytes: number }> {
+  const rows = await db
+    .select({
+      id: assets.id,
+      kind: assets.kind,
+      title: assets.title,
+      name: assets.name,
+      mimeType: assets.mimeType,
+      sizeBytes: assets.sizeBytes,
+      durationSec: assets.durationSec,
+      width: assets.width,
+      height: assets.height,
+      version: assets.version,
+      createdAt: assets.createdAt,
+      uploadedByName: users.name,
+      finalAssetId: episodes.finalAssetId,
+      hasPreview: sql<boolean>`exists (
+        select 1 from asset_variants v
+         where v.asset_id = assets.id and v.kind = 'PREVIEW'
+           and v.upload_status = 'COMPLETED'
+      )`,
+      hasWaveform: sql<boolean>`exists (
+        select 1 from asset_variants v
+         where v.asset_id = assets.id and v.kind = 'WAVEFORM'
+           and v.upload_status = 'COMPLETED'
+      )`,
+    })
+    .from(assets)
+    .leftJoin(users, eq(users.id, assets.uploadedById))
+    .leftJoin(episodes, eq(episodes.id, assets.episodeId))
+    .where(
+      and(
+        eq(assets.projectId, projectId),
+        eq(assets.episodeId, episodeId),
+        // Only finished uploads: a PENDING row has no bytes behind it yet.
+        eq(assets.uploadStatus, 'COMPLETED'),
+        isNull(assets.deletedAt)
+      )
+    )
+    .orderBy(desc(assets.createdAt))
+
+  const byKind = new Map<AssetKindValue, EpisodeAsset[]>()
+
+  for (const row of rows) {
+    const item: EpisodeAsset = {
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      name: row.name,
+      mimeType: row.mimeType,
+      sizeBytes: row.sizeBytes,
+      durationSec: row.durationSec,
+      width: row.width,
+      height: row.height,
+      version: row.version,
+      uploadedByName: row.uploadedByName,
+      createdAt: row.createdAt,
+      hasPreview: Boolean(row.hasPreview),
+      hasWaveform: Boolean(row.hasWaveform),
+      isFinalCut: row.finalAssetId === row.id,
+    }
+
+    byKind.set(row.kind, [...(byKind.get(row.kind) ?? []), item])
+  }
+
+  /*
+   * Kind order comes from `ASSET_KINDS`, not from what happens to exist, so
+   * the page does not reshuffle itself as files are added.
+   */
+  const groups: EpisodeAssetGroup[] = ASSET_KINDS.filter((kind) => byKind.has(kind)).map(
+    (kind) => {
+      const items = byKind.get(kind) ?? []
+      return {
+        kind,
+        items,
+        sizeBytes: items.reduce((sum, item) => sum + item.sizeBytes, 0),
+      }
+    }
+  )
+
+  return {
+    groups,
+    total: rows.length,
+    sizeBytes: rows.reduce((sum, row) => sum + row.sizeBytes, 0),
+  }
 }
