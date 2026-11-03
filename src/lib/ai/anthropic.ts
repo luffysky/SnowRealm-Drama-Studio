@@ -17,7 +17,7 @@ import {
  * adapter never fabricates output.
  */
 
-export const DEFAULT_MODEL = 'claude-opus-5'
+export const DEFAULT_MODEL = 'claude-opus-5-5'
 
 /**
  * Default output ceiling for one generation.
@@ -33,14 +33,29 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = Number(
   process.env.AI_MAX_OUTPUT_TOKENS ?? 8000
 )
 
+/** What the model picker offers. Current generation only. */
 export const AVAILABLE_MODELS = [
-  'claude-opus-5',
-  'claude-sonnet-5',
-  'claude-haiku-4-5',
+  'claude-opus-5-5',
+  'claude-sonnet-5-5',
+  'claude-haiku-5-5',
 ] as const
 
-/** USD per million tokens, used for the cost estimate shown before a run. */
+/**
+ * USD per million tokens, for the estimate shown before a run and the actual
+ * cost recorded after one.
+ *
+ * Superseded models stay in the table even though the picker no longer offers
+ * them: a job run last month was priced at that model's rate, and re-pricing
+ * history to whatever is current would quietly rewrite the cost ledger.
+ */
 const PRICING: Record<string, { input: number; output: number; cacheRead: number }> = {
+  'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2 },
+  'claude-sonnet-5-5': { input: 2, output: 10, cacheRead: 0.2 },
+  // Cache read is not published separately for Haiku 5.5; the usual ~0.1x of
+  // input is used, and it is a floor on the estimate rather than a claim.
+  'claude-haiku-5-5': { input: 0.1, output: 0.5, cacheRead: 0.01 },
+
+  // --- superseded, kept for historical cost records -----------------------
   'claude-opus-5': { input: 5, output: 25, cacheRead: 0.5 },
   'claude-sonnet-5': { input: 2, output: 10, cacheRead: 0.2 },
   'claude-haiku-4-5': { input: 1, output: 5, cacheRead: 0.1 },
@@ -190,6 +205,12 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
             max_tokens: maxTokens,
             system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
             thinking: { type: 'adaptive' },
+            /*
+             * Effort is set explicitly rather than left to the model: Claude
+             * Opus 5.5 defaults to `medium`, one level below the previous
+             * generation, so omitting it would quietly lower output quality
+             * on an upgrade.
+             */
             output_config: { effort: request.effort ?? 'high' },
             messages: [
               {
