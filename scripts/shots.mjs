@@ -4,6 +4,7 @@
  *   node scripts/shots.mjs --base http://127.0.0.1:3400 --out .shots /dashboard /projects
  *   node scripts/shots.mjs --click 作品設定 /projects/<id>     # 開啟對話框再截圖
  *   node scripts/shots.mjs --viewport /path                    # 只截可見範圍
+ *   node scripts/shots.mjs --anon /login                       # 不登入（看登入頁）
  *
  * Why this exists: "手機也要順" cannot be verified by reading Tailwind class
  * names. This drives a real Chrome over the DevTools Protocol, signs in the way
@@ -49,7 +50,7 @@ function arg(name, fallback) {
  * both are accepted.
  */
 /** Flags that stand alone; everything else with `--` consumes the next arg. */
-const BOOLEAN_FLAGS = new Set(['--viewport'])
+const BOOLEAN_FLAGS = new Set(['--viewport', '--anon'])
 
 function paths() {
   const out = []
@@ -248,8 +249,15 @@ async function main() {
    */
   const viewportOnly = process.argv.includes('--viewport')
 
-  const cookies = await signIn(base)
-  console.log('  已登入\n')
+  /*
+   * `--anon` skips the sign-in. The login page is the one screen that cannot
+   * be checked while signed in — it redirects — so without this flag its
+   * layout could only ever be verified by reading class names.
+   */
+  const anon = process.argv.includes('--anon')
+
+  const cookies = anon ? {} : await signIn(base)
+  console.log(anon ? '  未登入（--anon）\n' : '  已登入\n')
 
   await mkdir(outDir, { recursive: true })
 

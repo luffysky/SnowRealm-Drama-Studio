@@ -200,6 +200,70 @@
       ),
       linear-gradient(160deg, var(--color-stage-800), var(--color-stage-950));
   }
+
+  /*
+   * Scrims for the brand artwork in `public/brand/`.
+   *
+   * `docs/NEEDED_FROM_YOU.md` C2-C4 asked for dark zones where text would sit;
+   * the supplied masters are bright there instead. The darkening is applied
+   * here rather than baked into the files so each surface can be tuned
+   * separately and the artwork stays reusable.
+   */
+
+  /* 問候橫幅：左側壓到能疊字，右半留畫面。 */
+  .scrim-hero {
+    background-image: linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-stage-950) 94%, transparent) 0%,
+      color-mix(in oklab, var(--color-stage-950) 86%, transparent) 30%,
+      color-mix(in oklab, var(--color-stage-950) 55%, transparent) 58%,
+      color-mix(in oklab, var(--color-stage-950) 25%, transparent) 82%,
+      transparent 100%
+    );
+  }
+
+  /* 登入背景：卡片正中間，所以中央壓最暗。 */
+  .scrim-login {
+    background-image:
+      radial-gradient(
+        ellipse 58% 52% at 50% 48%,
+        color-mix(in oklab, var(--color-stage-950) 86%, transparent) 0%,
+        color-mix(in oklab, var(--color-stage-950) 68%, transparent) 55%,
+        color-mix(in oklab, var(--color-stage-950) 38%, transparent) 100%
+      ),
+      /*
+       * The two layers multiply, so these numbers are deliberately low: at 72%
+       * this one took the centre down to 2% of the artwork and the background
+       * read as flat black.
+       */
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--color-stage-950) 18%, transparent),
+        color-mix(in oklab, var(--color-stage-950) 30%, transparent)
+      );
+  }
+
+  /*
+   * 側欄底部：母片沒有做上緣與左右淡出，所以用側欄底色疊回去。
+   * 用疊色而不是 mask，是因為 mask-composite 在 Safari 要另一套前綴，
+   * 而側欄背景本來就是實色，疊色的結果一樣。
+   */
+  .scrim-rail-foot {
+    background-image:
+      linear-gradient(
+        to bottom,
+        var(--color-stage-900) 0%,
+        color-mix(in oklab, var(--color-stage-900) 72%, transparent) 60%,
+        color-mix(in oklab, var(--color-stage-900) 84%, transparent) 100%
+      ),
+      linear-gradient(
+        to right,
+        var(--color-stage-900) 0%,
+        transparent 24%,
+        transparent 76%,
+        var(--color-stage-900) 100%
+      );
+  }
 }
 
 @keyframes srds-fade-in {

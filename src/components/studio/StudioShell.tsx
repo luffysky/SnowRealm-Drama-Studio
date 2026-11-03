@@ -394,13 +394,21 @@ function Rail({
 function Brand({ onClose }: { onClose: () => void }) {
   return (
     <div className="flex h-16 shrink-0 items-center gap-2.5 border-b border-stage-700/70 px-4">
-      {/* Placeholder mark until the snowflake logo asset is supplied. */}
-      <span
+      {/*
+        The supplied master is the full lockup with wordmark; at 32px the type
+        would be noise, so `scripts/brand-assets.sh` cuts the snowflake out of
+        it and this shows only that glyph. The wordmark sits next to it as live
+        text instead, which stays legible and searchable.
+      */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/mark.webp"
+        alt=""
         aria-hidden
-        className="bg-brand-gradient glow-accent-sm flex size-8 shrink-0 items-center justify-center rounded-lg text-sm"
-      >
-        ❄
-      </span>
+        width={32}
+        height={32}
+        className="glow-accent-sm size-8 shrink-0 rounded-lg"
+      />
       <div className="flex min-w-0 flex-col leading-tight">
         <span className="text-brand-gradient truncate text-[13px] font-semibold">
           SnowRealm Drama Studio
@@ -545,9 +553,13 @@ function RailLeaf({
 }
 
 /**
- * Foot of the rail. The reference art has a lantern illustration here; until
- * that asset exists this is a gradient wash, which reads as deliberate rather
- * than as a missing image.
+ * Foot of the rail.
+ *
+ * The brief (`docs/NEEDED_FROM_YOU.md` C2) asked for a dark illustration that
+ * fades out at the top and sides. The supplied master is a brightly lit studio
+ * with hard edges, so the fade and the dimming are done here with
+ * `.scrim-rail-foot` — the artwork is decoration behind the user's own name,
+ * and the name has to stay readable.
  */
 function RailFoot({ user }: { user: SessionUser }) {
   return (
@@ -555,7 +567,16 @@ function RailFoot({ user }: { user: SessionUser }) {
       className="relative shrink-0 overflow-hidden border-t border-stage-700/50"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      <div aria-hidden className="art-placeholder absolute inset-0 opacity-40" />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/rail-foot.webp"
+        alt=""
+        aria-hidden
+        loading="lazy"
+        decoding="async"
+        className="absolute inset-0 size-full object-cover opacity-55"
+      />
+      <div aria-hidden className="scrim-rail-foot absolute inset-0" />
       <div className="relative flex items-center gap-2.5 px-4 py-3">
         <Avatar user={user} />
         <div className="flex min-w-0 flex-col leading-tight">

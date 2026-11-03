@@ -67,6 +67,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
+      <GreetingHero name={user.name} data={data} />
       <KpiRow data={data} />
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
@@ -83,6 +84,97 @@ export default async function DashboardPage() {
       <ActivityPanel data={data} />
     </div>
   )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The greeting banner (`docs/NEEDED_FROM_YOU.md` C3).
+ *
+ * The brief asked for artwork whose left 40% was dark enough to carry text.
+ * The supplied master is bright there — blossom and a lit lamp — so
+ * `.scrim-hero` lays the darkness over it instead of relying on the file.
+ *
+ * The figures beside the greeting are the same ones the tiles below show; they
+ * are repeated here because this strip is what gets read first, and an empty
+ * studio never reaches this component at all.
+ */
+function GreetingHero({ name, data }: { name: string; data: DashboardData }) {
+  return (
+    <section className="panel relative isolate overflow-hidden rounded-xl ring-1 ring-stage-700">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/hero.webp"
+        alt=""
+        aria-hidden
+        fetchPriority="high"
+        // `object-right` keeps the castle and moon in frame as the strip
+        // narrows, and pushes the busy left edge out from under the text.
+        className="absolute inset-0 -z-10 size-full object-cover object-right"
+      />
+      <div aria-hidden className="scrim-hero absolute inset-0 -z-10" />
+      {/*
+        Below `sm` the greeting wraps and the second line runs out over the
+        waterfall, where the left-to-right scrim has already faded out. A flat
+        dim across the whole strip covers that; above `sm` the text stays in
+        the dark third and this would only mute the artwork for nothing.
+      */}
+      <div aria-hidden className="absolute inset-0 -z-10 bg-stage-950/45 sm:hidden" />
+
+      <div className="flex flex-col gap-1 px-5 py-6 sm:py-8 lg:px-7 lg:py-10">
+        <p className="text-lg font-semibold tracking-tight text-ink-50 sm:text-xl">
+          {greetingZh()}，{name}
+        </p>
+        {/*
+          Each figure is its own nowrap span. Left to itself the line broke
+          inside a phrase on a phone — 「整體完 / 成 0.0%」 — so the separators
+          are the only places a break is allowed.
+        */}
+        <p className="flex flex-wrap items-baseline text-[11px] leading-relaxed text-ink-300 sm:text-xs">
+          <span className="whitespace-nowrap">{data.activeProjects} 部進行中</span>
+          <Dot />
+          <span className="whitespace-nowrap">
+            共 {data.totalEpisodes.toLocaleString('en-US')} 集
+          </span>
+          <Dot />
+          <span className="whitespace-nowrap">
+            整體完成 {(data.overallProgress * 100).toFixed(1)}%
+          </span>
+        </p>
+      </div>
+    </section>
+  )
+}
+
+function Dot() {
+  return (
+    <span aria-hidden className="mx-1.5 text-ink-600">
+      ·
+    </span>
+  )
+}
+
+/**
+ * Time-of-day greeting, fixed to Asia/Taipei.
+ *
+ * This renders on the server, where the clock is UTC — reading the raw hour
+ * would wish someone a good morning at eight in the evening. `h23` rather than
+ * `hour12: false`, because the latter reports midnight as hour 24.
+ */
+export function greetingZh(now = new Date()): string {
+  const hour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Taipei',
+      hour: 'numeric',
+      hourCycle: 'h23',
+    }).format(now)
+  )
+
+  if (hour < 5) return '夜深了'
+  if (hour < 11) return '早安'
+  if (hour < 14) return '午安'
+  if (hour < 18) return '午後好'
+  return '晚安'
 }
 
 /* -------------------------------------------------------------------------- */
