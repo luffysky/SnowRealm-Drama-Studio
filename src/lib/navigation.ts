@@ -97,6 +97,13 @@ export const NAV_SECTIONS: NavSection[] = [
     ready: true,
   },
   {
+    key: 'chat',
+    label: '訊息',
+    icon: 'MessageSquare',
+    href: '/chat',
+    ready: true,
+  },
+  {
     key: 'tasks',
     label: '跨作品任務',
     icon: 'ListChecks',

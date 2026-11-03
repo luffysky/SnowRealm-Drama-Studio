@@ -382,3 +382,24 @@ export const audioReviewStatusEnum = pgEnum('audio_review_status', [
   'APPROVED',
   'ARCHIVED',
 ])
+
+/** What a chat message carries (Z99). */
+export const messageKindEnum = pgEnum('message_kind', [
+  'TEXT',
+  'IMAGE',
+  'VIDEO',
+  'AUDIO',
+  /** A recorded voice note, as opposed to an uploaded audio file. */
+  'VOICE',
+  'FILE',
+  /** A system line: 「通話 3 分 12 秒」, 「未接來電」. */
+  'CALL',
+])
+
+export const callStateEnum = pgEnum('call_state', [
+  'RINGING',
+  'ACTIVE',
+  'ENDED',
+  'MISSED',
+  'DECLINED',
+])

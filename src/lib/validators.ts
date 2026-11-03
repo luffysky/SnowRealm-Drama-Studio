@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MESSAGE_KINDS } from '@/lib/chat-view'
 import { EDITOR_SURFACES } from '@/lib/editor/modules'
 import { CURRENCIES } from '@/lib/money'
 import { PRODUCTION_STAGE_KEYS, PRODUCTION_STAGE_STATUSES } from '@/lib/production'
@@ -675,4 +676,52 @@ export const createRelationshipSchema = z.object({
   kind: z.string().trim().min(1, '請輸入關係').max(40, '關係最多 40 個字'),
   description: z.string().trim().max(500).optional(),
   sentiment: z.number().int().min(-100).max(100).optional(),
+})
+
+/* -------------------------------------------------------------------------- */
+/* 即時對話 (Z99)                                                               */
+/* -------------------------------------------------------------------------- */
+
+export const chatSendSchema = z
+  .object({
+    conversationId: uuid.optional(),
+    kind: z.enum(MESSAGE_KINDS).optional().default('TEXT'),
+    body: z.string().max(8000).optional().default(''),
+    assetId: uuid.nullable().optional(),
+    durationSec: z.coerce.number().int().min(0).max(36_000).nullable().optional(),
+    replyToId: uuid.nullable().optional(),
+  })
+  .refine((value) => value.kind !== 'TEXT' || value.body.trim().length > 0, {
+    message: '訊息不能是空的',
+    path: ['body'],
+  })
+
+export const chatEditSchema = z.object({
+  body: z.string().trim().min(1, '訊息不能是空的').max(8000),
+})
+
+export const chatReadSchema = z.object({
+  conversationId: uuid.optional(),
+  seq: z.coerce.number().int().min(0),
+})
+
+export const chatPresenceSchema = z.object({
+  conversationId: uuid.optional(),
+  typing: z.boolean().optional().default(false),
+})
+
+export const callStartSchema = z.object({
+  conversationId: uuid.optional(),
+  video: z.boolean().optional().default(false),
+})
+
+export const callSignalSchema = z.object({
+  callId: uuid,
+  kind: z.enum(['offer', 'answer', 'ice']),
+  /** Opaque SDP or ICE JSON; the server never parses it. */
+  payload: z.string().max(60_000),
+})
+
+export const callStateSchema = z.object({
+  state: z.enum(['ACTIVE', 'ENDED', 'DECLINED', 'MISSED']),
 })
