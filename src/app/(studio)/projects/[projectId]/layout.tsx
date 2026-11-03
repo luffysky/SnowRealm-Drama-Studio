@@ -78,6 +78,7 @@ export default async function ProjectWorkspaceLayout({
           targetMinSec: project.targetMinSec,
           targetMaxSec: project.targetMaxSec,
           coverAssetId: project.coverAssetId,
+          novelCoverAssetId: project.novelCoverAssetId,
         }}
         canWrite={can(user, 'project.write')}
       />

@@ -226,3 +226,39 @@ describe.skipIf(!hasDb)('updateProject', () => {
     expect(missing).toBeNull()
   })
 })
+
+/**
+ * PATCH 角色時，zod 會把 schema 沒列的欄位靜默丟掉。
+ *
+ * `keyVisualAssetId` 原本不在 `updateCharacterSchema` 裡：上傳定妝照會回
+ * 200、畫面會跳「定妝照已更新」，而欄位始終是 null。這組測試讓欄位再被
+ * 漏掉就會失敗。
+ */
+describe('updateCharacterSchema 的素材欄位', () => {
+  it('留得住定妝照與語音樣本的 id', async () => {
+    const { updateCharacterSchema } = await import('@/lib/validators')
+    const id = '11111111-1111-4111-8111-111111111111'
+
+    const parsed = updateCharacterSchema.parse({
+      keyVisualAssetId: id,
+      voiceSampleAssetId: id,
+    })
+
+    expect(parsed.keyVisualAssetId).toBe(id)
+    expect(parsed.voiceSampleAssetId).toBe(id)
+  })
+
+  it('接受 null，那是清掉欄位的方式', async () => {
+    const { updateCharacterSchema } = await import('@/lib/validators')
+
+    const parsed = updateCharacterSchema.parse({ keyVisualAssetId: null })
+
+    expect(parsed.keyVisualAssetId).toBeNull()
+  })
+
+  it('擋掉不是 uuid 的值', async () => {
+    const { updateCharacterSchema } = await import('@/lib/validators')
+
+    expect(() => updateCharacterSchema.parse({ keyVisualAssetId: 'not-a-uuid' })).toThrow()
+  })
+})

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { CharacterBrowser } from '@/components/studio/CharacterBrowser'
+import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { getCharacters } from '@/lib/characters'
 import { requireProjectPage } from '@/lib/project-access'
@@ -35,6 +36,7 @@ export default async function CharactersPage({ params }: Params) {
       relationships={data.relationships}
       countsByTier={data.countsByTier}
       total={data.total}
+      canWrite={can(user, 'character.write')}
     />
   )
 }

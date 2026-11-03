@@ -1,6 +1,6 @@
 import { and, asc, count, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { characterRelationships, characters, episodeCharacters, episodes } from '@/db/schema'
+import { assets, characterRelationships, characters, episodeCharacters, episodes } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import type { CharacterTierValue } from '@/lib/constants'
@@ -234,6 +234,14 @@ export type CharacterPatch = Partial<
     | 'voiceId'
     | 'voiceStyle'
     | 'voiceNote'
+    /*
+     * These two were missing, so `keyVisualAssetId` was in the validator and
+     * in the row and rendered by `Portrait` — but a PATCH carrying one was
+     * silently dropped here. There was no way to give a character a portrait
+     * at all.
+     */
+    | 'keyVisualAssetId'
+    | 'voiceSampleAssetId'
   >
 >
 
@@ -242,6 +250,18 @@ export async function updateCharacter(input: {
   characterId: string
   patch: CharacterPatch
 }): Promise<CharacterRow> {
+  /*
+   * The asset references are checked, not trusted.
+   *
+   * `key_visual_asset_id` and `voice_sample_asset_id` carry no foreign key —
+   * like every other asset reference in this schema — so the database would
+   * accept an id from another project, or one whose upload never finished. The
+   * first reads across the project boundary; the second renders as a broken
+   * image.
+   */
+  await assertAssetUsable(input.projectId, input.patch.keyVisualAssetId, 'IMAGE')
+  await assertAssetUsable(input.projectId, input.patch.voiceSampleAssetId, 'AUDIO')
+
   const [updated] = await db
     .update(characters)
     .set({ ...input.patch, updatedAt: new Date() })
@@ -354,4 +374,43 @@ export async function removeRelationship(input: {
 function clampSentiment(value: number): number {
   if (!Number.isFinite(value)) return 0
   return Math.round(Math.min(Math.max(value, -100), 100))
+}
+
+/**
+ * Refuses an asset that is not this project's, is not finished, or is the
+ * wrong kind. A null or undefined id is fine — that is how the field is
+ * cleared.
+ */
+async function assertAssetUsable(
+  projectId: string,
+  assetId: string | null | undefined,
+  want: 'IMAGE' | 'AUDIO'
+): Promise<void> {
+  if (!assetId) return
+
+  const [asset] = await db
+    .select({ id: assets.id, kind: assets.kind, status: assets.uploadStatus })
+    .from(assets)
+    .where(and(eq(assets.id, assetId), eq(assets.projectId, projectId)))
+    .limit(1)
+
+  if (!asset) {
+    throw new ApiError(400, '找不到這個檔案，或它不屬於這部作品', 'asset_not_found')
+  }
+  if (asset.status !== 'COMPLETED') {
+    throw new ApiError(409, '這個檔案還沒上傳完成', 'asset_incomplete')
+  }
+
+  const ok =
+    want === 'IMAGE'
+      ? asset.kind === 'IMAGE' || asset.kind === 'STICKER'
+      : asset.kind === 'VOICE' || asset.kind === 'MUSIC' || asset.kind === 'SFX'
+
+  if (!ok) {
+    throw new ApiError(
+      400,
+      want === 'IMAGE' ? '定妝照必須是圖片' : '語音樣本必須是音訊檔',
+      'asset_wrong_kind'
+    )
+  }
 }

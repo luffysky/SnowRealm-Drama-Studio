@@ -657,6 +657,16 @@ export const updateCharacterSchema = z.object({
   voiceId: z.string().trim().max(120).optional(),
   voiceStyle: z.string().trim().max(120).optional(),
   voiceNote: z.string().max(2000).optional(),
+  /*
+   * These two were missing, and zod strips unknown keys silently — so a PATCH
+   * carrying a portrait was accepted, answered 200, and wrote nothing. The
+   * screen said 「定妝照已更新」 and the column stayed null.
+   *
+   * null clears the field; `updateCharacter` checks that a non-null id is an
+   * image belonging to this project and finished uploading.
+   */
+  keyVisualAssetId: uuid.nullable().optional(),
+  voiceSampleAssetId: uuid.nullable().optional(),
 })
 
 export const createRelationshipSchema = z.object({

@@ -4,6 +4,7 @@ import { Crown, Loader2, Network, Pencil, Plus, Search, Trash2, UserRound } from
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { ImagePicker } from '@/components/studio/ImagePicker'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
@@ -67,6 +68,8 @@ export type CharacterBrowserProps = {
   relationships: RelationshipItem[]
   countsByTier: Record<string, number>
   total: number
+  /** `character.write`; checked on the server, repeated here for the controls. */
+  canWrite: boolean
 }
 
 type DetailTab = 'profile' | 'appearance' | 'voice' | 'relations'
@@ -77,6 +80,7 @@ export function CharacterBrowser({
   relationships,
   countsByTier,
   total,
+  canWrite,
 }: CharacterBrowserProps) {
   const router = useRouter()
   const toast = useToast()
@@ -257,7 +261,17 @@ export function CharacterBrowser({
         {selected ? (
           <section className="panel flex min-w-0 flex-col rounded-xl bg-stage-900 ring-1 ring-stage-700">
             <header className="flex flex-wrap items-start gap-3 border-b border-stage-700/60 p-4">
-              <Portrait character={selected} size="lg" />
+              {/*
+                The portrait is the upload target. 角色設定 had no way to set
+                one at all: the column, the validator and this renderer all
+                existed, and the PATCH silently dropped the field.
+              */}
+              <PortraitPicker
+                key={selected.id}
+                projectId={projectId}
+                character={selected}
+                canWrite={canWrite}
+              />
 
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <IdentityEditor
@@ -879,5 +893,66 @@ function CreateDialog({
         </div>
       </form>
     </div>
+  )
+}
+
+/**
+ * 角色定妝照 — the portrait, with upload attached.
+ *
+ * Saved immediately rather than batched into a form: there is no form here,
+ * the rest of this panel saves on blur, and an image that uploads and then
+ * waits for a 儲存 button is an image people assume is already saved.
+ *
+ * The asset is linked to the character as well as written to
+ * `key_visual_asset_id`, so deleting it later can tell what still points at it.
+ */
+function PortraitPicker({
+  projectId,
+  character,
+  canWrite,
+}: {
+  projectId: string
+  character: CharacterItem
+  canWrite: boolean
+}) {
+  const router = useRouter()
+  const toast = useToast()
+  const [saving, setSaving] = useState(false)
+
+  async function commit(assetId: string | null) {
+    setSaving(true)
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/characters/${character.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ keyVisualAssetId: assetId }),
+        }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      toast.success(assetId ? '定妝照已更新' : '已移除定妝照')
+      router.refresh()
+    } catch (error) {
+      toast.error('定妝照儲存失敗', error instanceof Error ? error.message : undefined)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!canWrite) return <Portrait character={character} size="lg" />
+
+  return (
+    <ImagePicker
+      projectId={projectId}
+      assetId={character.keyVisualAssetId}
+      onChange={(assetId) => void commit(assetId)}
+      shape="portrait"
+      label="定妝照"
+      hint="分鏡與 AI 生圖會拿這張當角色的樣貌參考。直式、臉部清楚最好。"
+      linkTo={{ entityType: 'character', entityId: character.id, slot: 'key_visual' }}
+      disabled={saving}
+    />
   )
 }

@@ -3,6 +3,7 @@
 import { ImageUp, Loader2, Settings2, Trash2, Upload } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useRef, useState, type DragEvent } from 'react'
+import { ImagePicker } from '@/components/studio/ImagePicker'
 import { useUploader } from '@/components/studio/useUploader'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
@@ -47,6 +48,8 @@ export type ProjectSettings = {
   targetMinSec: number
   targetMaxSec: number
   coverAssetId: string | null
+  /** 小說封面. Empty means「沿用作品封面」. */
+  novelCoverAssetId: string | null
 }
 
 export function ProjectSettingsDialog({
@@ -109,6 +112,7 @@ function SettingsForm({
   const [targetMinSec, setTargetMinSec] = useState(String(project.targetMinSec))
   const [targetMaxSec, setTargetMaxSec] = useState(String(project.targetMaxSec))
   const [coverAssetId, setCoverAssetId] = useState(project.coverAssetId)
+  const [novelCoverAssetId, setNovelCoverAssetId] = useState(project.novelCoverAssetId)
 
   const tags = tagText
     .split(/[,，、\s]+/)
@@ -129,7 +133,8 @@ function SettingsForm({
     status !== project.status ||
     Number(targetMinSec) !== project.targetMinSec ||
     Number(targetMaxSec) !== project.targetMaxSec ||
-    coverAssetId !== project.coverAssetId
+    coverAssetId !== project.coverAssetId ||
+    novelCoverAssetId !== project.novelCoverAssetId
 
   async function save() {
     if (!title.trim()) {
@@ -155,6 +160,7 @@ function SettingsForm({
           targetMinSec: Number(targetMinSec) || 120,
           targetMaxSec: Number(targetMaxSec) || 180,
           coverAssetId,
+          novelCoverAssetId,
         }),
       })
 
@@ -270,6 +276,25 @@ function SettingsForm({
             rows={3}
             onChange={(event) => setLogline(event.target.value)}
             placeholder="一句話說清楚這部作品在講什麼。"
+          />
+        </Field>
+
+        <Field
+          label="小說封面"
+          description="留空＝沿用作品封面。書架會用這張。"
+        >
+          {/*
+            2:3, not 16:10. A book cover and a drama's key art are different
+            pictures in different proportions, which is why they are separate
+            columns rather than one shared image.
+          */}
+          <ImagePicker
+            projectId={project.id}
+            assetId={novelCoverAssetId}
+            onChange={setNovelCoverAssetId}
+            shape="portrait"
+            label="書封"
+            hint="直式書封，以書名為主。沒有的話書架會退回作品封面。"
           />
         </Field>
 
