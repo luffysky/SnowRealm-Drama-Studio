@@ -402,7 +402,7 @@ function Chip({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+        'tap rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
         active
           ? 'bg-accent-600/25 text-ink-50 ring-1 ring-inset ring-accent-500/50'
           : 'text-ink-500 ring-1 ring-inset ring-stage-700 hover:bg-stage-800 hover:text-ink-200'

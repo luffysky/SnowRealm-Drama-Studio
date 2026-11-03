@@ -228,7 +228,7 @@ export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
             </p>
             <Link
               href={`/projects/${track.projectId}/assets/music/${track.assetId}`}
-              className="truncate text-[10px] text-ink-600 underline-offset-2 transition-colors hover:text-accent-300 hover:underline"
+              className="tap truncate text-[10px] text-ink-600 underline-offset-2 transition-colors hover:text-accent-300 hover:underline"
             >
               {track.projectTitle}・看波形與資訊
             </Link>
@@ -254,7 +254,9 @@ export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
               step={0.01}
               value={current}
               onChange={(event) => seekTo(Number(event.target.value))}
-              className="absolute inset-0 w-full cursor-pointer opacity-0"
+              /* `-inset-y-3` so the thumb is draggable on a phone; the
+                 bar itself is 6px tall and a finger is not. */
+              className="absolute inset-x-0 -inset-y-3 w-full cursor-pointer opacity-0"
             />
           </div>
           <div className="flex justify-between text-[10px] text-ink-600 tabular-nums">

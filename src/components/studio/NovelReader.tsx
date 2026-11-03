@@ -269,7 +269,7 @@ export function NovelReader({
         <button
           type="button"
           onClick={() => setPanel(panel === 'toc' ? 'none' : 'toc')}
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
+          className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
         >
           <List aria-hidden className="size-3.5" />
           目錄
@@ -282,7 +282,7 @@ export function NovelReader({
         <button
           type="button"
           onClick={() => setPanel(panel === 'settings' ? 'none' : 'settings')}
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
+          className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
         >
           <Settings2 aria-hidden className="size-3.5" />
           閱讀設定
@@ -346,7 +346,7 @@ export function NovelReader({
             type="button"
             onClick={() => flip('prev')}
             disabled={index === 0 && page === 0}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition-opacity hover:opacity-70 disabled:opacity-30"
+            className="tap inline-flex items-center gap-1 rounded-md px-2 py-1 transition-opacity hover:opacity-70 disabled:opacity-30"
           >
             <ChevronLeft aria-hidden className="size-3.5" />
             {paged ? '上一頁' : '上一章'}
@@ -361,7 +361,7 @@ export function NovelReader({
             type="button"
             onClick={() => flip('next')}
             disabled={index === chapters.length - 1 && (!paged || page >= pageCount - 1)}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 transition-opacity hover:opacity-70 disabled:opacity-30"
+            className="tap inline-flex items-center gap-1 rounded-md px-2 py-1 transition-opacity hover:opacity-70 disabled:opacity-30"
           >
             {paged ? '下一頁' : '下一章'}
             <ChevronRight aria-hidden className="size-3.5" />

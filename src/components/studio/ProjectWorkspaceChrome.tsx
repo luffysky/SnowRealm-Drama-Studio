@@ -75,7 +75,7 @@ export function ProjectWorkspaceChrome({
   return (
     <header className="flex flex-col gap-3 border-b border-stage-700/60 bg-stage-900/60 px-3 pt-3 sm:px-4 lg:px-6">
       <nav aria-label="麵包屑" className="flex items-center gap-1.5 text-[11px] text-ink-500">
-        <Link href="/projects" className="transition-colors hover:text-ink-200">
+        <Link href="/projects" className="tap transition-colors hover:text-ink-200">
           作品列表
         </Link>
         <ChevronRight aria-hidden className="size-3" />

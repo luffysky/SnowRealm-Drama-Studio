@@ -271,7 +271,7 @@ export function VideoPlayer({
             step={0.01}
             value={current}
             onChange={(event) => seekTo(Number(event.target.value))}
-            className="absolute inset-0 w-full cursor-pointer opacity-0"
+            className="absolute inset-x-0 -inset-y-3 w-full cursor-pointer opacity-0"
           />
         </div>
 

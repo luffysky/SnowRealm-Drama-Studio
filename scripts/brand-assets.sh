@@ -26,6 +26,22 @@ scale=256:256" "${webp[@]}" -quality 92 "$out/mark.webp"
 ffmpeg -y -v error -i "$out/mark.webp" -vf scale=48:48 src/app/icon.png
 ffmpeg -y -v error -i "$out/mark.webp" -vf scale=180:180 src/app/apple-icon.png
 
+# PWA 安裝後的案件圖示。
+#
+# 紋章是透明的，但許多啟動器會把透明處裝成白底，
+# 紫色的圖在白底上會變得很薄——所以自己墊上工作室的底色。
+bg='color=c=0x0a0618'
+
+# any：啟動器照原樣顯示，紋章占 78%。
+for size in 192 512; do
+  ffmpeg -y -v error -f lavfi -i "$bg:s=${size}x${size}" -i "$out/mark.webp"     -filter_complex "[1:v]scale=$((size * 78 / 100)):-1[m];[0:v][m]overlay=(W-w)/2:(H-h)/2"     -frames:v 1 "public/icons/icon-${size}.png"
+done
+
+# maskable：啟動器會裁成圓形或圓角，最多吃掉外圈 20%。
+# 紋章縮到 56% 並置中，怎麼裁都不會切到它。
+ffmpeg -y -v error -f lavfi -i "$bg:s=512x512" -i "$out/mark.webp"   -filter_complex "[1:v]scale=287:-1[m];[0:v][m]overlay=(W-w)/2:(H-h)/2"   -frames:v 1 public/icons/icon-maskable-512.png
+
+
 # 2. 登入頁抬頭用的完整 lockup（這裡文字是要的）。
 ffmpeg -y -v error -i "$src/logo-mark.png" -vf "scale=512:512" \
   "${webp[@]}" -quality 88 "$out/lockup.webp"

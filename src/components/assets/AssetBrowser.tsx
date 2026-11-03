@@ -455,7 +455,7 @@ function ViewButton({
       aria-label={label}
       aria-pressed={active}
       className={cn(
-        'grid size-7 place-items-center rounded-md transition-colors',
+        'tap grid size-7 place-items-center rounded-md transition-colors',
         active ? 'bg-stage-700 text-ink-100' : 'text-ink-600 hover:text-ink-200'
       )}
     >

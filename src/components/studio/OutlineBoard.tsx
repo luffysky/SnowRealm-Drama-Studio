@@ -364,7 +364,7 @@ function OutlineRow({
             aria-expanded={open}
             disabled={!canWrite}
             className={cn(
-              'mt-0.5 line-clamp-1 block text-left text-[11px] disabled:cursor-default',
+              'tap mt-0.5 line-clamp-1 block w-full text-left text-[11px] disabled:cursor-default',
               empty ? 'text-ink-700' : 'text-ink-500'
             )}
           >
@@ -487,7 +487,7 @@ function InlineTitle({
         onClick={() => setEditing(true)}
         title="點一下改集名"
         className={cn(
-          'min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-stage-800',
+          'tap min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-stage-800',
           value ? 'font-medium text-ink-100' : 'text-ink-600'
         )}
       >

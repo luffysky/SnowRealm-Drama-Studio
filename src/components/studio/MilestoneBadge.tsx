@@ -41,7 +41,7 @@ export function MilestoneBadge({
         }}
         title={`${milestone} 還有哪些沒做`}
         className={cn(
-          'shrink-0 rounded bg-stage-800 px-1.5 py-0.5 text-[10px] font-normal text-ink-600',
+          'tap shrink-0 rounded bg-stage-800 px-1.5 py-0.5 text-[10px] font-normal text-ink-600',
           'ring-1 ring-inset ring-stage-700 transition-colors',
           'hover:bg-stage-700 hover:text-ink-300',
           className

@@ -712,7 +712,13 @@ function ChapterPane({
           }}
           placeholder="章節標題"
           aria-label="章節標題"
-          className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-ink-50 placeholder:text-ink-600 focus:outline-none"
+          /*
+            Real height, not a `.tap` pseudo-element: an input cannot carry
+            one. At 20px this was under the 24px WCAG floor and awkward to
+            hit on a phone; the negative margin keeps the header the same
+            height as before.
+          */
+          className="-my-1 min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-ink-50 placeholder:text-ink-600 focus:outline-none"
         />
 
         <SaveBadge state={state} savedAt={savedAt} />

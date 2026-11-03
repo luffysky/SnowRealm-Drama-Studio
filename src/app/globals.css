@@ -192,6 +192,35 @@
     backdrop-filter: blur(14px) saturate(140%);
   }
 
+  /*
+   * Enlarges the tap target without changing what is drawn.
+   *
+   * A 10px badge or a breadcrumb link is 17px tall — under the 24px floor
+   * WCAG 2.2 SC 2.5.8 sets, and nowhere near the ~44px a fingertip covers.
+   *
+   * A real minimum size rather than a pseudo-element. The first version used
+   * `::after` so the drawing would not change, and it did not work: an
+   * enlarged hit area is clipped by any ancestor with `overflow`, which is
+   * every scrolling rail and panel in this app — so the badges in the
+   * sidebar stayed exactly as unhittable as before while the stylesheet
+   * claimed otherwise.
+   *
+   * 32px rather than 44: these sit in rows a few pixels apart, and 44 would
+   * make neighbours overlap and steal each other's taps.
+   *
+   * `pointer: coarse` only — a mouse is precise, and loosening a deliberately
+   * dense desktop UI buys nothing.
+   */
+  @media (pointer: coarse) {
+    .tap {
+      min-width: 32px;
+      min-height: 32px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+  }
+
   .text-balance {
     text-wrap: balance;
   }

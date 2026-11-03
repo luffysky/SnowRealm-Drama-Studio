@@ -53,7 +53,7 @@ export default async function ReadNovelPage({ params, searchParams }: Params) {
       <div className="flex items-center gap-2 px-3 pt-3 sm:px-4 lg:px-6">
         <Link
           href="/read"
-          className="inline-flex items-center gap-1 text-[11px] text-ink-500 transition-colors hover:text-ink-200"
+          className="tap inline-flex items-center gap-1 text-[11px] text-ink-500 transition-colors hover:text-ink-200"
         >
           <ChevronLeft aria-hidden className="size-3.5" />
           書架
@@ -61,7 +61,7 @@ export default async function ReadNovelPage({ params, searchParams }: Params) {
         <span className="text-[11px] text-ink-700">/</span>
         <Link
           href={`/projects/${project.id}/novel`}
-          className="text-[11px] text-ink-500 transition-colors hover:text-ink-200"
+          className="tap text-[11px] text-ink-500 transition-colors hover:text-ink-200"
         >
           編輯這本
         </Link>
