@@ -4,7 +4,7 @@ import { chapters, documents, episodes, users, versions } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import type { DocumentKindValue } from '@/lib/constants'
-import { countChars } from '@/lib/utils'
+import { countRichTextChars } from '@/lib/utils'
 
 /**
  * 小說 / 劇本 的讀寫 (designs 06, 07).
@@ -280,7 +280,8 @@ export async function saveChapter(input: {
 
   if (!chapter) throw ApiError.notFound('找不到這個章節')
 
-  const charCount = countChars(input.content)
+  // Rich text: the markup must not inflate the count.
+  const charCount = countRichTextChars(input.content)
 
   return db.transaction(async (tx) => {
     // Conditional update: matches nothing when the revision moved on.

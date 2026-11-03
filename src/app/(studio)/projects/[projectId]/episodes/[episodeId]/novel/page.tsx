@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { NovelEditor } from '@/components/studio/NovelEditor'
 import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
+import { getEditorModules } from '@/lib/settings'
 import { openDocument } from '@/lib/writing'
 
 export const metadata: Metadata = { title: '小說編輯器' }
@@ -23,7 +24,10 @@ export default async function EpisodeNovelPage({ params }: Params) {
   const { projectId, episodeId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const document = await openDocument(project.id, episodeId, 'NOVEL')
+  const [document, modules] = await Promise.all([
+    openDocument(project.id, episodeId, 'NOVEL'),
+    getEditorModules('NOVEL'),
+  ])
   if (!document) notFound()
 
   return (
@@ -41,6 +45,7 @@ export default async function EpisodeNovelPage({ params }: Params) {
       lastEditorName={document.lastEditorName}
       /* A 120–180 second episode is roughly this much prose. */
       targetChars={4000}
+      modules={modules}
     />
   )
 }

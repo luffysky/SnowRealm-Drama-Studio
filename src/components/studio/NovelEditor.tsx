@@ -5,8 +5,11 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
+import { RichTextEditor } from '@/components/editor/RichTextEditor'
+import { countHtmlChars } from '@/components/editor/extensions'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
-import { cn, countChars } from '@/lib/utils'
+import type { EditorModuleId } from '@/lib/editor/modules'
+import { cn } from '@/lib/utils'
 
 /**
  * 小說編輯器 (design 06).
@@ -43,6 +46,8 @@ export type NovelEditorProps = {
   lastEditorName: string | null
   /** Target characters per episode, from the project's settings. */
   targetChars: number
+  /** Editor modules enabled for 小說, read from app_settings. */
+  modules: EditorModuleId[]
 }
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'
@@ -59,8 +64,10 @@ export function NovelEditor({
   initialRevision,
   lastEditorName,
   targetChars,
+  modules,
 }: NovelEditorProps) {
   const toast = useToast()
+  const [enabledModules, setEnabledModules] = useState(modules)
 
   const [chapters, setChapters] = useState(initialChapters)
   const [activeId, setActiveId] = useState(initialChapters[0]?.id ?? null)
@@ -163,6 +170,32 @@ export function NovelEditor({
     }
   }
 
+  async function toggleModule(id: EditorModuleId, next: boolean) {
+    const wanted = next
+      ? [...enabledModules, id]
+      : enabledModules.filter((module) => module !== id)
+
+    const previous = enabledModules
+    setEnabledModules(wanted) // optimistic
+
+    try {
+      const response = await apiFetch('/api/settings/editor', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ surface: 'NOVEL', modules: wanted }),
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      // The server normalises (locked modules forced on, unknown ids dropped),
+      // so take its answer rather than assuming ours was valid.
+      const body = (await response.json()) as { modules: EditorModuleId[] }
+      setEnabledModules(body.modules)
+    } catch (error) {
+      setEnabledModules(previous)
+      toast.error('模組設定未儲存', error instanceof Error ? error.message : undefined)
+    }
+  }
+
   const visible = useMemo(() => {
     const term = filter.trim().toLowerCase()
     if (!term) return chapters
@@ -177,7 +210,7 @@ export function NovelEditor({
   const documentChars = chapters.reduce((n, c) => n + c.charCount, 0)
 
   return (
-    <div className="grid min-h-0 gap-4 p-3 sm:p-4 lg:grid-cols-[16rem_minmax(0,1fr)] lg:p-6 2xl:grid-cols-[16rem_minmax(0,1fr)_19rem]">
+    <div className="grid min-h-0 gap-4 p-3 sm:p-4 lg:grid-cols-[15rem_minmax(0,1fr)] lg:p-6 xl:grid-cols-[15rem_minmax(0,1fr)_18rem]">
       {/* ---- chapter rail ------------------------------------------------ */}
       <aside className="panel flex min-h-0 flex-col rounded-xl bg-stage-900 ring-1 ring-stage-700">
         <div className="flex flex-col gap-2 border-b border-stage-700/60 p-3">
@@ -256,6 +289,8 @@ export function NovelEditor({
           savedAt={savedAt}
           targetChars={targetChars}
           documentChars={documentChars}
+          enabledModules={enabledModules}
+          onToggleModule={toggleModule}
           onDirty={() => setState('dirty')}
           onSave={(content, title) => save(active.id, content, title)}
           onKeepVersion={keepVersion}
@@ -272,7 +307,7 @@ export function NovelEditor({
       )}
 
       {/* ---- side panels -------------------------------------------------- */}
-      <aside className="hidden min-w-0 flex-col gap-4 2xl:flex">
+      <aside className="hidden min-w-0 flex-col gap-4 xl:flex">
         <section className="panel rounded-xl bg-stage-900 ring-1 ring-stage-700">
           <header className="flex items-center gap-2 border-b border-stage-700/60 px-4 py-2.5">
             <Sparkles aria-hidden className="size-3.5 text-accent-400" />
@@ -345,6 +380,8 @@ function ChapterPane({
   savedAt,
   targetChars,
   documentChars,
+  enabledModules,
+  onToggleModule,
   onDirty,
   onSave,
   onKeepVersion,
@@ -354,6 +391,8 @@ function ChapterPane({
   savedAt: string | null
   targetChars: number
   documentChars: number
+  enabledModules: EditorModuleId[]
+  onToggleModule: (id: EditorModuleId, next: boolean) => void
   onDirty: () => void
   onSave: (content: string, title: string) => void | Promise<void>
   onKeepVersion: () => void | Promise<void>
@@ -361,7 +400,7 @@ function ChapterPane({
   const [content, setContent] = useState(chapter.content)
   const [title, setTitle] = useState(chapter.title)
 
-  const charCount = countChars(content)
+  const charCount = countHtmlChars(content)
 
   // Autosave: the timer restarts on every keystroke and fires once typing
   // pauses. Unmounting (a chapter switch) clears it.
@@ -414,16 +453,16 @@ function ChapterPane({
         </button>
       </header>
 
-      <textarea
-        value={content}
-        onChange={(event) => {
-          setContent(event.target.value)
+      <RichTextEditor
+        surface="NOVEL"
+        enabledModules={enabledModules}
+        initialContent={chapter.content}
+        placeholder="在這裡寫。"
+        onChange={(html) => {
+          setContent(html)
           onDirty()
         }}
-        spellCheck={false}
-        placeholder="在這裡寫。空一行分段。"
-        aria-label="章節內容"
-        className="min-h-[24rem] flex-1 resize-none bg-transparent px-5 py-4 text-sm leading-[2] text-ink-100 placeholder:text-ink-700 focus:outline-none"
+        onToggleModule={onToggleModule}
       />
 
       <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stage-700/60 px-4 py-2.5 text-[11px] text-ink-500">

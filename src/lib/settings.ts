@@ -1,6 +1,12 @@
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { appSettings } from '@/db/schema'
+import {
+  defaultModules,
+  normaliseModules,
+  type EditorModuleId,
+  type EditorSurface,
+} from '@/lib/editor/modules'
 import { DEFAULT_FX, isCurrency, type FxRates } from '@/lib/money'
 
 /**
@@ -13,6 +19,7 @@ import { DEFAULT_FX, isCurrency, type FxRates } from '@/lib/money'
 
 export const SETTING_KEYS = {
   fxRates: 'fx.rates',
+  editorModules: 'editor.modules',
 } as const
 
 async function readSetting(key: string): Promise<unknown> {
@@ -71,4 +78,40 @@ export async function getFxRates(): Promise<FxRates> {
 
 export async function setFxRates(rates: FxRates, userId: string): Promise<void> {
   await writeSetting(SETTING_KEYS.fxRates, rates, userId)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Editor modules                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Which editor modules are on, per surface.
+ *
+ * Installation-wide rather than per member: the two of them edit the same
+ * documents, and an editor that produces headings for one and not the other
+ * would make the prose depend on who typed it.
+ */
+export async function getEditorModules(surface: EditorSurface): Promise<EditorModuleId[]> {
+  const stored = await readSetting(SETTING_KEYS.editorModules)
+
+  if (stored && typeof stored === 'object') {
+    const bySurface = (stored as Record<string, unknown>)[surface]
+    if (Array.isArray(bySurface)) return normaliseModules(surface, bySurface)
+  }
+
+  return defaultModules(surface)
+}
+
+export async function setEditorModules(
+  surface: EditorSurface,
+  ids: readonly unknown[],
+  userId: string
+): Promise<EditorModuleId[]> {
+  const stored = await readSetting(SETTING_KEYS.editorModules)
+  const current =
+    stored && typeof stored === 'object' ? (stored as Record<string, unknown>) : {}
+
+  const next = normaliseModules(surface, ids)
+  await writeSetting(SETTING_KEYS.editorModules, { ...current, [surface]: next }, userId)
+  return next
 }

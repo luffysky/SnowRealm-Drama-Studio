@@ -257,3 +257,108 @@
 @utility animate-toast-in {
   animation: srds-toast-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/**
+ * Rich-text editor content (TipTap).
+ *
+ * Written by hand rather than with a typography plugin: the body is Chinese
+ * prose at a generous line height, and the defaults of a prose plugin tuned for
+ * English articles fight that on every element.
+ */
+@layer components {
+  .prose-editor :where(p) {
+    margin-block: 0.75em;
+  }
+
+  .prose-editor :where(p:first-child) {
+    margin-block-start: 0;
+  }
+
+  .prose-editor :where(h1, h2, h3) {
+    font-weight: 600;
+    color: var(--color-ink-50);
+    line-height: 1.5;
+    margin-block: 1.2em 0.6em;
+  }
+
+  .prose-editor :where(h1) {
+    font-size: 1.35em;
+  }
+  .prose-editor :where(h2) {
+    font-size: 1.2em;
+  }
+  .prose-editor :where(h3) {
+    font-size: 1.08em;
+  }
+
+  .prose-editor :where(ul, ol) {
+    margin-block: 0.75em;
+    padding-inline-start: 1.6em;
+  }
+  .prose-editor :where(ul) {
+    list-style: disc;
+  }
+  .prose-editor :where(ol) {
+    list-style: decimal;
+  }
+
+  .prose-editor :where(ul[data-type='taskList']) {
+    list-style: none;
+    padding-inline-start: 0.2em;
+  }
+  .prose-editor :where(ul[data-type='taskList'] li) {
+    display: flex;
+    gap: 0.5em;
+    align-items: flex-start;
+  }
+
+  .prose-editor :where(blockquote) {
+    border-inline-start: 2px solid var(--color-accent-500);
+    padding-inline-start: 1em;
+    color: var(--color-ink-300);
+    margin-block: 1em;
+  }
+
+  .prose-editor :where(hr) {
+    border: 0;
+    border-top: 1px solid var(--color-stage-700);
+    margin-block: 1.5em;
+  }
+
+  .prose-editor :where(mark) {
+    background-color: color-mix(in oklab, var(--color-gilt-400) 35%, transparent);
+    color: inherit;
+    border-radius: 2px;
+    padding-inline: 0.15em;
+  }
+
+  .prose-editor :where(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin-block: 1em;
+  }
+  .prose-editor :where(th, td) {
+    border: 1px solid var(--color-stage-700);
+    padding: 0.4em 0.6em;
+    text-align: start;
+  }
+  .prose-editor :where(th) {
+    background-color: var(--color-stage-850);
+    font-weight: 600;
+  }
+
+  /* Placeholder, from @tiptap/extension-placeholder. */
+  .prose-editor :where(p.is-editor-empty:first-child)::before {
+    content: attr(data-placeholder);
+    float: inline-start;
+    height: 0;
+    pointer-events: none;
+    color: var(--color-ink-700);
+  }
+
+  /* Focus module: everything but the active block recedes. */
+  .prose-editor:has(.has-focus) :where(p, h1, h2, h3, blockquote, li):not(.has-focus) {
+    opacity: 0.45;
+    transition: opacity 150ms;
+  }
+}

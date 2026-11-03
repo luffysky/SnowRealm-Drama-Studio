@@ -40,6 +40,31 @@ export function countChars(text: string): number {
 }
 
 /**
+ * Characters a human would count, from rich-text HTML.
+ *
+ * Block tags become a space before stripping, so `<p>甲</p><p>乙</p>` does not
+ * collapse into one run; entities are decoded for the handful that actually
+ * appear, because counting `&amp;` as five characters would be wrong in the
+ * same way counting `<strong>` as eight is.
+ *
+ * Used on the server, where there is no DOM. The browser has `countHtmlChars`
+ * in `src/components/editor/extensions.ts`, which parses properly.
+ */
+export function countRichTextChars(html: string): number {
+  const text = html
+    .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/blockquote|hr)[^>]*>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+
+  return text.replace(/\s/g, '').length
+}
+
+/**
  * Rough runtime estimate for a script, in seconds. Dialogue is read at roughly
  * 5 characters per second; action lines add time for what happens on screen
  * even though nothing is spoken (spec 07「片長估計須計入動作與停頓」).

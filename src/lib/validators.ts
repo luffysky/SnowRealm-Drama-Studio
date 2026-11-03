@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { EDITOR_SURFACES } from '@/lib/editor/modules'
 import { CURRENCIES } from '@/lib/money'
 import { PRODUCTION_STAGE_KEYS, PRODUCTION_STAGE_STATUSES } from '@/lib/production'
 import {
@@ -424,4 +425,10 @@ export const saveChapterSchema = z.object({
 
 export const snapshotVersionSchema = z.object({
   label: z.string().trim().max(120, '版本備註最多 120 個字').default(''),
+})
+
+/** Which editor modules are enabled for one surface. */
+export const editorModulesSchema = z.object({
+  surface: z.enum(EDITOR_SURFACES),
+  modules: z.array(z.string()).max(64),
 })
