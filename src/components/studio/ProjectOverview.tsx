@@ -1,8 +1,10 @@
 import {
   Activity,
+  AlertTriangle,
   Baseline,
   Boxes,
-  CalendarDays,
+  Clapperboard,
+  ClipboardList,
   Clock,
   Coins,
   Film,
@@ -17,7 +19,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { EmptyState } from '@/components/ui/StateViews'
-import { EpisodeStatusChip, MemberDot } from '@/components/ui/StatusChip'
+import { EpisodeStatusChip } from '@/components/ui/StatusChip'
 import {
   AI_JOB_KIND_LABEL,
   ASSET_KIND_LABEL,
@@ -32,7 +34,7 @@ import {
   type FxRates,
 } from '@/lib/money'
 import type { ProjectOverview as ProjectOverviewData } from '@/lib/project-overview'
-import { toPercent } from '@/lib/production'
+import { STAGES_PER_EPISODE, toPercent } from '@/lib/production'
 import { cn, formatBytes, formatRelativeZh } from '@/lib/utils'
 
 /**
@@ -60,52 +62,71 @@ export function ProjectOverview({
 }) {
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
-      <Logline project={project} />
-      <StatCards project={project} currency={currency} fx={fx} />
+      <OverviewHeading project={project} />
+      <KpiRow project={project} currency={currency} fx={fx} />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
+        <WorkflowPanel project={project} />
+
         <div className="flex min-w-0 flex-col gap-4">
-          <WorkflowPanel project={project} />
           <EpisodePanel project={project} />
-        </div>
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <AssetPanel project={project} />
-          <AiStatsPanel project={project} />
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <TaskPanel project={project} />
+            <RiskPanel project={project} />
+          </div>
         </div>
+      </div>
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <TaskPanel project={project} />
-          <ActivityPanel project={project} />
-        </div>
+      <div className="grid items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <AssetPanel project={project} />
+        <AiStatsPanel project={project} />
+        <ActivityPanel project={project} />
       </div>
     </div>
   )
 }
 
 /**
- * One-line premise.
+ * 作品總覽 plus the facts that identify this project.
  *
- * The breadcrumb, title, status, tags, tab strip and project switcher all moved
- * to `projects/[projectId]/layout.tsx` — the workspace chrome is shared by every
- * tab, so drawing it again here would be two headers disagreeing with each other
- * the moment one changed (`docs/ROUTES.md` §3).
+ * The title, cover, status, tags and logline are not repeated here: they live
+ * in the workspace header, which every tab shares.
  */
-function Logline({ project }: { project: ProjectOverviewData }) {
+function OverviewHeading({ project }: { project: ProjectOverviewData }) {
   return (
-    <p className="max-w-3xl text-xs leading-relaxed text-ink-400">
-      {project.logline || (
-        <span className="text-ink-600">尚未撰寫一句話簡介——待故事定稿後於「作品設定」填入。</span>
-      )}
-    </p>
+    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <h2 className="inline-flex items-center gap-2 text-sm font-semibold text-ink-100">
+        <Clapperboard aria-hidden className="size-4 text-accent-400" />
+        作品總覽
+      </h2>
+
+      <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-ink-500">
+        <div className="flex gap-1">
+          <dt>建立</dt>
+          <dd className="text-ink-300">{formatDate(project.createdAt)}</dd>
+        </div>
+        {project.tags[0] && (
+          <div className="flex gap-1">
+            <dt>主類型</dt>
+            <dd className="text-ink-300">{project.tags[0]}</dd>
+          </div>
+        )}
+      </dl>
+    </div>
   )
 }
 
-/* -------------------------------------------------------------------------- */
-/* Stat cards                                                                  */
-/* -------------------------------------------------------------------------- */
-
-function StatCards({
+/**
+ * The four headline figures.
+ *
+ * The donut buckets stage *records* by status, so the legend adds up to
+ * 集數 x 9. The completion percentage beside it comes from the weighted
+ * contract and is deliberately not the same number — a stage at 60% is one
+ * in-progress record but 0.6 of a completed equivalent — so the card says so
+ * rather than letting the two look like one figure printed twice.
+ */
+function KpiRow({
   project,
   currency,
   fx,
@@ -114,60 +135,59 @@ function StatCards({
   currency: CurrencyValue
   fx: FxRates
 }) {
-  const pct = Math.round(project.progress * 100)
-  const planned = project.plannedEpisodes || project.episodeCount
+  const totals = project.stageTotals
+  const pct = toPercent(project.progress)
 
-  const done = project.episodesByStatus.DONE ?? 0
-  const inProgress =
-    (project.episodesByStatus.WRITING ?? 0) +
-    (project.episodesByStatus.STORYBOARD ?? 0) +
-    (project.episodesByStatus.PRODUCTION ?? 0) +
-    (project.episodesByStatus.REVIEW ?? 0)
-  const waiting = (project.episodesByStatus.PLANNED ?? 0) + (project.episodesByStatus.ON_HOLD ?? 0)
-
-  const spendPct =
-    project.budget && project.budget > 0
-      ? Math.round((project.spend / project.budget) * 100)
-      : null
+  const slices = [
+    { key: 'completed', label: '已完成', value: totals.completed, className: 'text-emerald-400' },
+    { key: 'inProgress', label: '進行中', value: totals.inProgress, className: 'text-accent-400' },
+    { key: 'pending', label: '待處理', value: totals.pending, className: 'text-ink-600' },
+  ]
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-      <StatCard icon={<Activity className="size-3.5" />} title="製作進度">
-        <p className="text-2xl font-semibold text-ink-50">{pct}%</p>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stage-800">
-          <div
-            className={cn('h-full rounded-full', pct > 0 ? 'bg-brand-gradient' : '')}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      </StatCard>
-
-      <StatCard icon={<Layers className="size-3.5" />} title="集數規劃">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <StatCard icon={<Layers className="size-3.5" />} title="總集數">
         <p className="text-2xl font-semibold text-ink-50">
           {project.episodeCount}
           <span className="ml-1 text-sm font-normal text-ink-500">集</span>
         </p>
-        <p className="mt-2 text-[11px] text-ink-500">
-          已完成 {done}｜製作中 {inProgress}｜待製作 {waiting}
+        <p className="mt-1 text-[11px] text-ink-600">
+          {project.plannedEpisodes > 0 ? `規劃 ${project.plannedEpisodes} 集` : '尚未規劃集數'}
         </p>
       </StatCard>
 
-      <StatCard icon={<CalendarDays className="size-3.5" />} title="預計時程">
-        <p className="text-sm font-medium text-ink-100">
-          {project.startDate || project.dueDate ? (
-            <>
-              {formatDate(project.startDate)} ~ {formatDate(project.dueDate)}
-            </>
-          ) : (
-            <span className="text-ink-600">尚未設定起訖日</span>
-          )}
+      <StatCard icon={<ClipboardList className="size-3.5" />} title="製作階段紀錄">
+        <p className="text-2xl font-semibold text-ink-50">
+          {totals.total.toLocaleString('en-US')}
+          <span className="ml-1 text-sm font-normal text-ink-500">筆</span>
         </p>
-        <p className="mt-2 text-[11px] text-ink-500">
-          {project.daysRemaining === null
-            ? `規劃 ${planned} 集，每集 120–180 秒`
-            : project.daysRemaining >= 0
-              ? `剩餘 ${project.daysRemaining} 天`
-              : `已逾期 ${Math.abs(project.daysRemaining)} 天`}
+        <p className="mt-1 text-[11px] text-ink-600">
+          {project.episodeCount} 集 x {STAGES_PER_EPISODE} 階段
+        </p>
+      </StatCard>
+
+      <StatCard icon={<Activity className="size-3.5" />} title="整體完成率">
+        <div className="flex items-center gap-3">
+          <Donut fraction={project.progress} />
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            {slices.map((slice) => (
+              <div key={slice.key} className="flex items-center gap-1.5 text-[10px]">
+                <span aria-hidden className={cn('text-[8px]', slice.className)}>
+                  ●
+                </span>
+                <span className="text-ink-500">{slice.label}</span>
+                <span className="ml-auto text-ink-300 tabular-nums">
+                  {slice.value.toLocaleString('en-US')}
+                </span>
+                <span className="w-11 text-right text-ink-600 tabular-nums">
+                  {totals.total > 0 ? `${((slice.value / totals.total) * 100).toFixed(1)}%` : '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="mt-1.5 text-[10px] text-ink-700">
+          完成率 {pct}% 以已驗證進度加權，與上方筆數不是同一個數字
         </p>
       </StatCard>
 
@@ -175,33 +195,54 @@ function StatCards({
         <p className="text-xl font-semibold text-ink-50">
           {project.budget ? formatFromBase(project.budget, currency, fx) : '未設定'}
         </p>
-        <p className="mt-2 text-[11px] text-ink-500">
+        <p className="mt-1 text-[11px] text-ink-500">
           已支出 {formatFromBase(project.spend, currency, fx)}
-          {spendPct !== null && `（${spendPct}%）`}
         </p>
-        {/* A converted figure without its rate and date is an unsourced claim. */}
         {conversionNote(currency, fx) && (
           <p className="mt-1 text-[10px] text-ink-600">{conversionNote(currency, fx)}</p>
         )}
-        {spendPct !== null && (
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stage-800">
-            <div
-              className={cn(
-                'h-full rounded-full',
-                spendPct > 90 ? 'bg-rose-500' : spendPct > 70 ? 'bg-amber-500' : 'bg-accent-500'
-              )}
-              style={{ width: `${Math.min(spendPct, 100)}%` }}
-            />
-          </div>
-        )}
       </StatCard>
+    </div>
+  )
+}
 
-      <StatCard icon={<Users className="size-3.5" />} title="主要負責">
-        <div className="flex flex-col gap-2">
-          <MemberLine member={project.owner} fallback="未指定負責人" />
-          <MemberLine member={project.techLead} fallback="未指定技術支援" />
-        </div>
-      </StatCard>
+/**
+ * Completion ring.
+ *
+ * Pure SVG: a charting library for one arc would cost hundreds of kilobytes to
+ * draw what `stroke-dasharray` already does.
+ */
+function Donut({ fraction }: { fraction: number }) {
+  const pct = toPercent(fraction)
+  const radius = 22
+  const circumference = 2 * Math.PI * radius
+  const filled = circumference * Math.min(Math.max(fraction, 0), 1)
+
+  return (
+    <div className="relative size-16 shrink-0">
+      <svg viewBox="0 0 56 56" className="size-full -rotate-90" aria-hidden>
+        <circle
+          cx="28"
+          cy="28"
+          r={radius}
+          fill="none"
+          strokeWidth="7"
+          className="stroke-stage-800"
+        />
+        <circle
+          cx="28"
+          cy="28"
+          r={radius}
+          fill="none"
+          strokeWidth="7"
+          strokeLinecap="round"
+          className="stroke-accent-500"
+          strokeDasharray={`${filled.toFixed(2)} ${circumference.toFixed(2)}`}
+        />
+      </svg>
+      <span className="absolute inset-0 grid place-items-center text-sm font-semibold text-ink-50">
+        {pct}%
+      </span>
     </div>
   )
 }
@@ -225,26 +266,6 @@ function StatCard({
       </h2>
       {children}
     </section>
-  )
-}
-
-function MemberLine({
-  member,
-  fallback,
-}: {
-  member: { name: string; title: string; color: string } | null
-  fallback: string
-}) {
-  if (!member) return <p className="text-[11px] text-ink-600">{fallback}</p>
-
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      <MemberDot name={member.name} color={member.color} />
-      <div className="flex min-w-0 flex-col leading-tight">
-        <span className="truncate text-xs font-medium text-ink-100">{member.name}</span>
-        <span className="truncate text-[10px] text-ink-500">{member.title}</span>
-      </div>
-    </div>
   )
 }
 
@@ -344,101 +365,76 @@ function WorkflowPanel({ project }: { project: ProjectOverviewData }) {
 }
 
 function EpisodePanel({ project }: { project: ProjectOverviewData }) {
+  const shown = project.episodes.length
+  const remaining = Math.max(project.episodeCount - shown, 0)
+
   return (
     <Panel
-      title={`分集列表（${project.episodeCount} 集）`}
+      title="集數進度概覽"
       icon={<Film className="size-3.5" />}
-      action={<GatedAction label="管理集數" milestone="M1" />}
-      bodyClassName=""
+      action={
+        project.episodeCount > 0 ? (
+          /*
+           * spec v3 §11.3: the overview shows at most eight cards and must
+           * offer a way to the full list. Never let these look like all of it.
+           */
+          <GatedAction label={`查看全部 ${project.episodeCount} 集`} milestone="M1" />
+        ) : undefined
+      }
     >
-      {project.episodes.length === 0 ? (
+      {shown === 0 ? (
         <EmptyState
           title="尚未建立集數"
-          description="建立集數後，這裡會列出每一集的狀態與進度。"
+          description="建立集數後，這裡會顯示最近與重點集數的狀態。"
           icon={<Film aria-hidden className="size-5 text-ink-500" />}
           className="py-10"
         />
       ) : (
         <>
-          {/* Table on tablet and up; stacked rows on a phone, where five
-              columns would each be a few characters wide. */}
-          <div className="hidden sm:block">
-            {/*
-              table-fixed with explicit widths: left to itself the browser
-              gives the four short columns what they ask for and squeezes the
-              title down to「未…」.
-            */}
-            <table className="w-full table-fixed text-left text-xs">
-              <thead className="text-[10px] text-ink-600">
-                <tr className="border-b border-stage-700/60">
-                  <th scope="col" className="w-[4.5rem] px-4 py-2 font-medium">
-                    集數
-                  </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
-                    標題
-                  </th>
-                  <th scope="col" className="w-20 px-2 py-2 font-medium">
-                    狀態
-                  </th>
-                  <th scope="col" className="w-24 px-2 py-2 font-medium">
-                    進度
-                  </th>
-                  <th scope="col" className="w-24 px-4 py-2 text-right font-medium">
-                    截止日
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {project.episodes.map((episode) => (
-                  <tr key={episode.id} className="border-b border-stage-800/70 last:border-0">
-                    <td className="px-4 py-2 font-medium text-ink-300 tabular-nums">
-                      EP{String(episode.number).padStart(3, '0')}
-                    </td>
-                    <td className="px-2 py-2">
-                      <span className="block truncate text-ink-200">
-                        {episode.title || <span className="text-ink-600">未命名</span>}
-                      </span>
-                    </td>
-                    <td className="px-2 py-2">
-                      <EpisodeStatusChip status={episode.status as EpisodeStatusValue} />
-                    </td>
-                    <td className="px-2 py-2">
-                      <MiniBar value={episode.progress} />
-                    </td>
-                    <td className="px-4 py-2 text-right text-ink-500 tabular-nums">
-                      {episode.dueDate ? formatDate(episode.dueDate) : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <ul className="flex flex-col sm:hidden">
+          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
             {project.episodes.map((episode) => (
               <li
                 key={episode.id}
-                className="flex flex-col gap-1.5 border-b border-stage-800/70 px-4 py-2.5 last:border-0"
+                className="panel flex flex-col overflow-hidden rounded-lg bg-stage-850 ring-1 ring-stage-700"
               >
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-medium text-ink-300 tabular-nums">
+                <div className="relative aspect-video w-full">
+                  {episode.coverAssetId ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`/api/files/${episode.coverAssetId}`}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      className="absolute inset-0 size-full object-cover"
+                    />
+                  ) : (
+                    <div aria-hidden className="art-placeholder absolute inset-0" />
+                  )}
+                  <div
+                    aria-hidden
+                    className="absolute inset-0 bg-gradient-to-t from-stage-950/90 to-transparent"
+                  />
+                  <span className="absolute bottom-1.5 left-2 text-[11px] font-medium text-ink-50 tabular-nums">
                     EP{String(episode.number).padStart(3, '0')}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-xs text-ink-200">
+                  <span className="absolute right-1.5 bottom-1.5">
+                    <EpisodeStatusChip status={episode.status as EpisodeStatusValue} />
+                  </span>
+                </div>
+
+                <div className="flex flex-col gap-1 p-2">
+                  <span className="truncate text-[11px] text-ink-300">
                     {episode.title || <span className="text-ink-600">未命名</span>}
                   </span>
-                  <EpisodeStatusChip status={episode.status as EpisodeStatusValue} />
+                  <MiniBar value={episode.progress} />
                 </div>
-                <MiniBar value={episode.progress} />
               </li>
             ))}
           </ul>
 
-          {project.episodeCount > project.episodes.length && (
-            <p className="px-4 py-2.5 text-center text-[11px] text-ink-600">
-              僅顯示前 {project.episodes.length} 集，其餘 {project.episodeCount -
-                project.episodes.length}{' '}
-              集待「集數列表」頁完成後檢視（M1）
+          {remaining > 0 && (
+            <p className="mt-3 text-center text-[11px] text-ink-600">
+              另有 {remaining} 集未顯示，完整清單待「集數管理」頁完成（M1）
             </p>
           )}
         </>
@@ -634,6 +630,83 @@ function DueChip({ due, days }: { due: Date | null; days: number | null }) {
     >
       {label}
     </span>
+  )
+}
+
+/**
+ * 關鍵風險與提醒.
+ *
+ * Derived from facts in the database, never from a hand-kept list: an overdue
+ * task is overdue because its due date has passed, and a stage is flagged
+ * because somebody set it to `blocked`. With nothing wrong the panel says so
+ * instead of inventing a warning to fill the space.
+ */
+function RiskPanel({ project }: { project: ProjectOverviewData }) {
+  const overdue = project.tasks.filter((t) => t.dueInDays !== null && t.dueInDays < 0)
+  const dueToday = project.tasks.filter((t) => t.dueInDays === 0)
+  const blocked = project.workflow.filter((s) => s.state === 'ACTIVE' && s.progress === 0)
+
+  const risks: { id: string; tone: 'high' | 'medium' | 'info'; text: string }[] = []
+
+  for (const task of overdue) {
+    risks.push({
+      id: `overdue-${task.id}`,
+      tone: 'high',
+      text: `${task.title}（逾期 ${Math.abs(task.dueInDays!)} 天）`,
+    })
+  }
+  for (const task of dueToday) {
+    risks.push({ id: `today-${task.id}`, tone: 'medium', text: `${task.title}（今日到期）` })
+  }
+  if (project.budget && project.spend / project.budget >= 0.8) {
+    risks.push({
+      id: 'budget',
+      tone: 'medium',
+      text: `製作預算已使用 ${Math.round((project.spend / project.budget) * 100)}%`,
+    })
+  }
+  if (project.assetTotals.count === 0 && blocked.length > 0) {
+    risks.push({
+      id: 'assets',
+      tone: 'info',
+      text: '尚未上傳任何素材，後續階段會卡在素材製作',
+    })
+  }
+
+  return (
+    <Panel title="關鍵風險與提醒" icon={<AlertTriangle className="size-3.5" />}>
+      {risks.length === 0 ? (
+        <EmptyState
+          title="目前沒有逾期或風險項目"
+          description="逾期任務、預算超支與阻塞階段會自動出現在這裡。"
+          icon={<AlertTriangle aria-hidden className="size-5 text-ink-500" />}
+          className="py-8"
+        />
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {risks.slice(0, 6).map((risk) => (
+            <li key={risk.id} className="flex items-start gap-2">
+              <span
+                aria-hidden
+                className={cn(
+                  'mt-0.5 grid size-4 shrink-0 place-items-center rounded-full text-[9px] font-bold',
+                  risk.tone === 'high'
+                    ? 'bg-rose-500/20 text-rose-300'
+                    : risk.tone === 'medium'
+                      ? 'bg-amber-500/20 text-amber-300'
+                      : 'bg-sky-500/20 text-sky-300'
+                )}
+              >
+                !
+              </span>
+              <span className="min-w-0 flex-1 text-xs leading-relaxed text-ink-300">
+                {risk.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   )
 }
 

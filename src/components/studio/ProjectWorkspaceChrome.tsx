@@ -29,6 +29,8 @@ export type WorkspaceProject = {
   title: string
   isFlagship: boolean
   coverAssetId: string | null
+  /** Shown in the switcher under each title, e.g.「製作中 · 120 集」. */
+  summary?: string
 }
 
 export function ProjectWorkspaceChrome({
@@ -37,6 +39,7 @@ export function ProjectWorkspaceChrome({
   statusLabel,
   statusClassName,
   tags,
+  logline,
 }: {
   project: WorkspaceProject
   /** Every project this member may open, for the switcher. */
@@ -44,6 +47,7 @@ export function ProjectWorkspaceChrome({
   statusLabel: string
   statusClassName: string
   tags: string[]
+  logline: string
 }) {
   const pathname = usePathname()
   const activeKey = activeProjectTabKey(pathname, project.id) ?? 'overview'
@@ -58,37 +62,52 @@ export function ProjectWorkspaceChrome({
         <span className="truncate text-ink-200">{project.title}</span>
       </nav>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Private bucket: served through /api/files, which checks the session. */}
-        {project.coverAssetId && (
+      <div className="flex items-start gap-3 sm:gap-4">
+        {/*
+          Private bucket: the cover is fetched through /api/files, which checks
+          the session and then redirects to a short-lived presigned URL.
+        */}
+        {project.coverAssetId ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={`/api/files/${project.coverAssetId}`}
             alt=""
             decoding="async"
-            className="h-9 w-16 shrink-0 rounded object-cover ring-1 ring-stage-700"
+            className="hidden h-20 w-32 shrink-0 rounded-lg object-cover ring-1 ring-stage-700 sm:block lg:h-24 lg:w-40"
+          />
+        ) : (
+          <div
+            aria-hidden
+            className="art-placeholder hidden h-20 w-32 shrink-0 rounded-lg ring-1 ring-stage-700 sm:block lg:h-24 lg:w-40"
           />
         )}
 
-        <ProjectSwitcher project={project} siblings={siblings} activeKey={activeKey} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <ProjectSwitcher project={project} siblings={siblings} activeKey={activeKey} />
 
-        <span
-          className={cn(
-            'shrink-0 rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset',
-            statusClassName
-          )}
-        >
-          {statusLabel}
-        </span>
+            <span
+              className={cn(
+                'shrink-0 rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset',
+                statusClassName
+              )}
+            >
+              {statusLabel}
+            </span>
 
-        {tags.map((tag) => (
-          <span
-            key={tag}
-            className="rounded bg-stage-800/80 px-1.5 py-0.5 text-[10px] text-ink-300 ring-1 ring-inset ring-stage-700"
-          >
-            {tag}
-          </span>
-        ))}
+            {tags.length > 0 && (
+              <span className="truncate text-[11px] text-ink-500">{tags.join(' × ')}</span>
+            )}
+          </div>
+
+          <p className="line-clamp-2 max-w-3xl text-xs leading-relaxed text-ink-400">
+            {logline || (
+              <span className="text-ink-600">
+                尚未撰寫一句話簡介——待故事定稿後於「作品設定」填入。
+              </span>
+            )}
+          </p>
+        </div>
       </div>
 
       <TabStrip projectId={project.id} activeKey={activeKey} />
@@ -171,7 +190,12 @@ function ProjectSwitcher({
                   ) : (
                     <Film aria-hidden className="size-3.5 shrink-0 text-ink-500" />
                   )}
-                  <span className="min-w-0 flex-1 truncate">{sibling.title}</span>
+                  <span className="flex min-w-0 flex-1 flex-col leading-tight">
+                    <span className="truncate">{sibling.title}</span>
+                    {sibling.summary && (
+                      <span className="truncate text-[10px] text-ink-600">{sibling.summary}</span>
+                    )}
+                  </span>
                   {current && <Check aria-hidden className="size-3.5 shrink-0 text-accent-400" />}
                 </Link>
               )

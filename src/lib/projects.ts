@@ -44,6 +44,7 @@ export type ProjectCard = {
   budget: number | null
   isFavourite: boolean
   updatedAt: Date
+  createdAt: Date
 }
 
 export type ProjectFilters = {
@@ -219,6 +220,7 @@ export async function listProjects(
       budget: budgetBy.has(row.id) ? budgetBy.get(row.id)! : null,
       isFavourite: favouriteIds.has(row.id),
       updatedAt: row.updatedAt,
+      createdAt: row.createdAt,
     }
   })
 

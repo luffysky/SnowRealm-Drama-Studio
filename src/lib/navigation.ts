@@ -157,11 +157,19 @@ export const PROJECT_TABS: ProjectTab[] = [
   { key: 'characters', label: '角色設定', segment: 'characters', ready: false, milestone: 'M2', design: 10 },
   { key: 'storyboard', label: '分鏡工作台', segment: 'storyboard', ready: false, milestone: 'M3', design: 12 },
   { key: 'assets', label: '素材管理', segment: 'assets', ready: false, milestone: 'M3', design: 14 },
-  { key: 'production', label: '製作進度', segment: 'production', ready: false, milestone: 'M1', design: 17 },
+  { key: 'production', label: '製作流程', segment: 'production', ready: false, milestone: 'M1', design: 17 },
   { key: 'reviews', label: '審核發布', segment: 'reviews', ready: false, milestone: 'M4', design: 58 },
   { key: 'versions', label: '版本紀錄', segment: 'versions', ready: false, milestone: 'M2', design: 8 },
-  { key: 'tasks', label: '作品任務', segment: 'tasks', ready: false, milestone: 'M4', design: 18 },
 ]
+
+/**
+ * Routes that exist under a project but are not tabs.
+ *
+ * `/tasks` is reachable from the production page rather than the strip
+ * (spec v3 §11.1「作品任務（可由製作頁進入）」), and the per-episode editors
+ * hang off `/episodes/[episodeId]`.
+ */
+export const PROJECT_SUB_ROUTES = ['tasks'] as const
 
 export function projectTabHref(projectId: string, tab: ProjectTab): string {
   return tab.segment ? `/projects/${projectId}/${tab.segment}` : `/projects/${projectId}`

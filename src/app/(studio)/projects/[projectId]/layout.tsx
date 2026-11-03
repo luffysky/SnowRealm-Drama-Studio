@@ -51,10 +51,18 @@ export default async function ProjectWorkspaceLayout({
           title: card.title,
           isFlagship: card.isFlagship,
           coverAssetId: card.coverAssetId,
+          summary: `${PROJECT_STATUS_LABEL[card.status]} · ${
+            card.episodeCount > 0
+              ? `${card.episodeCount} 集`
+              : card.plannedEpisodes > 0
+                ? `暫定 ${card.plannedEpisodes} 集`
+                : '尚未規劃集數'
+          }`,
         }))}
         statusLabel={PROJECT_STATUS_LABEL[project.status]}
         statusClassName={PROJECT_STATUS_STYLE[project.status]}
         tags={project.tags}
+        logline={project.logline}
       />
 
       <div className="min-w-0 flex-1">{children}</div>

@@ -94,6 +94,8 @@ export const episodes = pgTable(
     /** Target runtime in seconds; validated against the arc's project range. */
     targetSec: integer('target_sec').notNull().default(150),
     status: episodeStatusEnum('status').notNull().default('PLANNED'),
+    /** Still frame shown in the episode cards and the 05 list. */
+    coverAssetId: uuid('cover_asset_id'),
     /** Planned air / delivery date, used by the progress gantt. */
     dueDate: timestamp('due_date', { withTimezone: true }),
     notes: text('notes').notNull().default(''),

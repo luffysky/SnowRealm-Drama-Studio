@@ -61,6 +61,22 @@ export type OverviewEpisode = {
   status: string
   progress: number
   dueDate: Date | null
+  coverAssetId: string | null
+}
+
+/**
+ * Stage rows bucketed for the completion donut.
+ *
+ * Counts of *rows*, not of completed equivalents: the legend reads
+ * 「已完成 276 / 進行中 168 / 待處理 636」 and those must add up to the stage
+ * record count, which a sum of fractions would not.
+ */
+export type StageTotals = {
+  completed: number
+  inProgress: number
+  pending: number
+  /** episodeCount × 9 — the planned number of records. */
+  total: number
 }
 
 export type ProjectOverview = {
@@ -81,7 +97,9 @@ export type ProjectOverview = {
   spend: number
   owner: { name: string; title: string; color: string } | null
   techLead: { name: string; title: string; color: string } | null
+  createdAt: Date
   workflow: WorkflowStep[]
+  stageTotals: StageTotals
   episodes: OverviewEpisode[]
   assets: { kind: string; count: number; bytes: number }[]
   assetTotals: { count: number; bytes: number }
@@ -134,6 +152,12 @@ export async function getProjectOverview(
         .select({
           stage: episodeProductionStages.stageKey,
           total: count(),
+          completed: sql<number>`count(*) filter (where ${episodeProductionStages.status} = 'completed')`.mapWith(
+            Number
+          ),
+          inProgress: sql<number>`count(*) filter (where ${episodeProductionStages.status} in ('in_progress','in_review','blocked'))`.mapWith(
+            Number
+          ),
           done: sql<string>`sum(
             case
               when ${episodeProductionStages.status} = 'completed' then 1.0
@@ -156,6 +180,7 @@ export async function getProjectOverview(
           title: episodes.title,
           status: episodes.status,
           dueDate: episodes.dueDate,
+          coverAssetId: episodes.coverAssetId,
           stageTotal: sql<number>`count(${episodeProductionStages.id})`.mapWith(Number),
           stageDone: sql<string>`sum(
             case
@@ -237,6 +262,17 @@ export async function getProjectOverview(
     stageRows.map((r) => [r.stage as string, { total: Number(r.total), done: Number(r.done) }])
   )
 
+  const plannedRecords = detail.episodeCount * STAGES_PER_EPISODE
+  const completedRows = stageRows.reduce((n, r) => n + Number(r.completed), 0)
+  const inProgressRows = stageRows.reduce((n, r) => n + Number(r.inProgress), 0)
+  const stageTotals: StageTotals = {
+    completed: completedRows,
+    inProgress: inProgressRows,
+    // Records that were never created are pending work, not missing work.
+    pending: Math.max(plannedRecords - completedRows - inProgressRows, 0),
+    total: plannedRecords,
+  }
+
   const workflow: WorkflowStep[] = PRODUCTION_STAGE_KEYS.map((key) => {
     const row = stageBy.get(key)
     // Denominator is the episode count, not the rows present: a stage whose
@@ -294,7 +330,9 @@ export async function getProjectOverview(
     spend: detail.spend,
     owner: memberOf(projectRow[0]?.ownerId),
     techLead: memberOf(projectRow[0]?.techLeadId),
+    createdAt: detail.createdAt,
     workflow,
+    stageTotals,
     episodes: episodeRows.map((e) => ({
       id: e.id,
       number: e.number,
@@ -303,6 +341,7 @@ export async function getProjectOverview(
       // Always out of nine: an episode missing its 上架發布 row is not 8/8 done.
       progress: aggregateProgress(e.stageDone, STAGES_PER_EPISODE),
       dueDate: e.dueDate,
+      coverAssetId: e.coverAssetId,
     })),
     assets: assetList,
     library: {

@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Search,
   PenLine,
   Receipt,
   Settings,
@@ -82,9 +83,18 @@ export function StudioShell({ user, children }: { user: SessionUser; children: R
 /* Top bar                                                                     */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Top bar.
+ *
+ * Spec v3's designs removed the horizontal section tabs: navigation lives in
+ * the rail alone, and this strip carries the current location, global search
+ * and the account menu. Two parallel navigations was exactly the duplication
+ * the B+ decision set out to remove (`docs/ROUTES.md`).
+ */
 function TopBar({ user, onOpenRail }: { user: SessionUser; onOpenRail: () => void }) {
   const pathname = usePathname()
   const activeKey = activeSectionKey(pathname)
+  const section = NAV_SECTIONS.find((s) => s.key === activeKey)
 
   return (
     <header
@@ -100,17 +110,11 @@ function TopBar({ user, onOpenRail }: { user: SessionUser; onOpenRail: () => voi
         <Menu aria-hidden className="size-5" />
       </button>
 
-      <nav aria-label="主要區域" className="hidden min-w-0 flex-1 lg:block">
-        <ul className="flex items-center gap-1 overflow-x-auto">
-          {NAV_SECTIONS.map((section) => (
-            <li key={section.key}>
-              <SectionTab section={section} active={section.key === activeKey} />
-            </li>
-          ))}
-        </ul>
-      </nav>
+      <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-ink-50">
+        {section?.label ?? 'Drama Studio'}
+      </h1>
 
-      <span className="flex-1 text-sm font-semibold text-ink-50 lg:hidden">Drama Studio</span>
+      <GlobalSearchStub />
 
       <div className="flex shrink-0 items-center gap-1">
         {/* Disabled rather than dead: spec v2 §4 forbids a button that does nothing. */}
@@ -132,39 +136,24 @@ function TopBar({ user, onOpenRail }: { user: SessionUser; onOpenRail: () => voi
   )
 }
 
-function SectionTab({ section, active }: { section: NavSection; active: boolean }) {
-  const Icon = ICONS[section.icon] ?? LayoutDashboard
-
-  const base =
-    'inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium whitespace-nowrap transition-all'
-
-  if (!section.ready) {
-    return (
-      <span
-        aria-disabled="true"
-        title={`「${section.label}」尚未實作，預計於 ${section.milestone} 階段交付`}
-        className={cn(base, 'cursor-default text-ink-600 hover:bg-stage-800/60 hover:text-ink-400')}
-      >
-        <Icon aria-hidden className="size-4 opacity-60" />
-        {section.label}
-      </span>
-    )
-  }
-
+/**
+ * The global search box from the design.
+ *
+ * Rendered as a disabled field rather than omitted: it is a committed part of
+ * the layout, and a search box that silently returns nothing would be worse
+ * than one that says it is not built yet.
+ */
+function GlobalSearchStub() {
   return (
-    <Link
-      href={section.href}
-      aria-current={active ? 'page' : undefined}
-      className={cn(
-        base,
-        active
-          ? 'bg-brand-gradient glow-accent-sm text-white'
-          : 'text-ink-300 hover:bg-stage-800 hover:text-ink-50'
-      )}
+    <div
+      aria-disabled="true"
+      title="全域搜尋尚未實作，預計於 M4 階段交付"
+      className="hidden h-9 w-72 cursor-default items-center gap-2 rounded-lg bg-stage-900/80 px-3 text-xs text-ink-600 ring-1 ring-inset ring-stage-700 select-none md:flex xl:w-96"
     >
-      <Icon aria-hidden className="size-4" />
-      {section.label}
-    </Link>
+      <Search aria-hidden className="size-3.5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">搜尋作品、集數、素材、任務…</span>
+      <kbd className="shrink-0 rounded bg-stage-800 px-1 text-[10px] text-ink-700">M4</kbd>
+    </div>
   )
 }
 

@@ -50,6 +50,13 @@
       "when": 1793696278115,
       "tag": "0006_production_stages_v3",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793696686041,
+      "tag": "0007_episode_cover",
+      "breakpoints": true
     }
   ]
 }
