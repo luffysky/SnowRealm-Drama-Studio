@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { EpisodeManager } from '@/components/studio/EpisodeManager'
+import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { EPISODE_STATUSES, type EpisodeStatusValue } from '@/lib/constants'
 import {
@@ -72,6 +73,7 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
 
   return (
     <EpisodeManager
+      canWrite={can(user, 'episode.write')}
       projectId={project.id}
       result={{ ...result, rows: result.rows.map(serialise) }}
       selected={selected ? serialise(selected) : null}

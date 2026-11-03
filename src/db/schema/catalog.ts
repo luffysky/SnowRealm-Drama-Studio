@@ -126,6 +126,20 @@ export const episodes = pgTable(
     status: episodeStatusEnum('status').notNull().default('PLANNED'),
     /** Still frame shown in the episode cards and the 05 list. */
     coverAssetId: uuid('cover_asset_id'),
+    /**
+     * 成片 — the finished cut of this episode.
+     *
+     * Earlier cuts are not lost: a re-edit is uploaded as a new asset in the
+     * same lineage (`root_asset_id` + `version`), and this column moves to
+     * point at it. So switching the current cut never destroys the one that
+     * shipped, and a released episode can still be traced to the exact file
+     * that was released.
+     *
+     * No foreign key, matching every other asset reference in this schema —
+     * `updateEpisodeFinalCut()` validates it instead (kind, upload status and
+     * project), because the database will not.
+     */
+    finalAssetId: uuid('final_asset_id'),
     /** Planned air / delivery date, used by the progress gantt. */
     dueDate: timestamp('due_date', { withTimezone: true }),
     notes: text('notes').notNull().default(''),

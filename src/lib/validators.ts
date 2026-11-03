@@ -131,6 +131,11 @@ export const outlineEditSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, { message: '沒有要變更的欄位' })
 
+/** 集數成片：指定哪一個 asset 是成片，null 代表移除。 */
+export const finalCutSchema = z.object({
+  assetId: uuid.nullable(),
+})
+
 /** 一次採用多集的大綱。 */
 export const outlineApplySchema = z.object({
   entries: z

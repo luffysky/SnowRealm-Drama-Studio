@@ -30,6 +30,7 @@ import {
   type ProductionStageStatus,
 } from '@/lib/production'
 import { cn } from '@/lib/utils'
+import { FinalCutPanel } from '@/components/studio/FinalCutPanel'
 import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
@@ -56,6 +57,8 @@ export type EpisodeManagerProps = {
   sort: string
   /** 17 製作進度 reuses this table under its own heading. */
   heading?: string
+  /** Whether this member may change the final cut. */
+  canWrite?: boolean
 }
 
 /** Dates cross into a Client Component, so they travel as ISO strings. */
@@ -76,6 +79,7 @@ export function EpisodeManager({
   stage,
   sort,
   heading = '集數管理',
+  canWrite = false,
 }: EpisodeManagerProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -242,7 +246,7 @@ export function EpisodeManager({
           )}
         </div>
 
-        <DetailRail episode={selected} projectId={projectId} />
+        <DetailRail episode={selected} projectId={projectId} canWrite={canWrite} />
       </div>
     </div>
   )
@@ -618,7 +622,15 @@ function PageButton({
   )
 }
 
-function DetailRail({ episode, projectId }: { episode: SerialisedEpisode | null; projectId: string }) {
+function DetailRail({
+  episode,
+  projectId,
+  canWrite,
+}: {
+  episode: SerialisedEpisode | null
+  projectId: string
+  canWrite: boolean
+}) {
   if (!episode) {
     return (
       <aside className="panel rounded-xl bg-stage-900 ring-1 ring-stage-700">
@@ -673,6 +685,8 @@ function DetailRail({ episode, projectId }: { episode: SerialisedEpisode | null;
           {episode.logline || <span className="text-ink-600">尚未撰寫。</span>}
         </p>
       </div>
+
+      <FinalCutPanel projectId={projectId} episodeId={episode.id} canWrite={canWrite} />
 
       <div className="flex flex-col gap-2">
         <h4 className="text-[11px] font-medium text-ink-400">

@@ -1,0 +1,12 @@
+-- 集數成片（Z1）。
+--
+-- 在這之前沒有任何地方標記「這一集的成片是哪一支」：
+-- assets 有 VIDEO 類型、episodeId 也能掛，但那只代表「這支影片屬於這一集」，
+-- 不代表它是成片——分鏡預覽、素材片段、NG 版本全都符合那個條件。
+--
+-- 重剪不會蓋掉舊版：新的一刀以同一個 root_asset_id 上傳成新 asset，
+-- 這個欄位改指向它。已發行的集數因此仍然追得到當時實際發行的那個檔案。
+--
+-- 不加外鍵，與這個 schema 裡其他 30 個 asset 參照一致；
+-- 改由 updateEpisodeFinalCut() 驗證類型、上傳狀態與作品歸屬。
+ALTER TABLE "episodes" ADD COLUMN IF NOT EXISTS "final_asset_id" uuid;

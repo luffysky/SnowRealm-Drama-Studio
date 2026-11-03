@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '@/db'
-import { episodeProductionStages, episodes } from '@/db/schema'
+import { assets, episodeProductionStages, episodes } from '@/db/schema'
+import { ApiError } from '@/lib/api'
 import {
   DEFAULT_PER_PAGE,
   type EpisodeListResult,
@@ -484,4 +485,119 @@ export async function applyOutline(
 
     return { applied }
   })
+}
+
+/* -------------------------------------------------------------------------- */
+/* 成片 (Z1)                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export type FinalCut = {
+  assetId: string
+  name: string
+  title: string
+  sizeBytes: number
+  durationSec: number | null
+  version: number
+  uploadedAt: Date
+}
+
+/**
+ * Sets or clears an episode's finished cut.
+ *
+ * The asset is checked rather than trusted, for the same reason the cover is:
+ * `final_asset_id` carries no foreign key and no type constraint, so the
+ * database would happily accept a still image, a half-finished upload, or a
+ * video belonging to another project.
+ *
+ * Returns null when the episode is not in this project, so the caller answers
+ * 404 instead of distinguishing "wrong project" from "no such episode".
+ */
+export async function updateEpisodeFinalCut(
+  projectId: string,
+  episodeId: string,
+  assetId: string | null
+): Promise<{ id: string; finalAssetId: string | null } | null> {
+  if (assetId) {
+    const [asset] = await db
+      .select({
+        id: assets.id,
+        kind: assets.kind,
+        status: assets.uploadStatus,
+      })
+      .from(assets)
+      .where(and(eq(assets.id, assetId), eq(assets.projectId, projectId)))
+      .limit(1)
+
+    if (!asset) {
+      throw new ApiError(400, '找不到這個檔案，或它不屬於這部作品', 'final_cut_not_found')
+    }
+    if (asset.status !== 'COMPLETED') {
+      throw new ApiError(409, '這個檔案還沒上傳完成', 'final_cut_incomplete')
+    }
+    if (asset.kind !== 'VIDEO') {
+      throw new ApiError(400, '成片必須是影片檔', 'final_cut_not_video')
+    }
+  }
+
+  const [row] = await db
+    .update(episodes)
+    .set({ finalAssetId: assetId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(episodes.id, episodeId),
+        eq(episodes.projectId, projectId),
+        isNull(episodes.deletedAt)
+      )
+    )
+    .returning({ id: episodes.id, finalAssetId: episodes.finalAssetId })
+
+  return row ?? null
+}
+
+/**
+ * The current cut and every earlier one, newest first.
+ *
+ * Earlier cuts come from the asset lineage (`root_asset_id`), not from a
+ * history table: a re-edit is a new file, and the generic asset versioning
+ * already models exactly that.
+ */
+export async function episodeCuts(
+  projectId: string,
+  episodeId: string
+): Promise<{ current: FinalCut | null; history: FinalCut[] }> {
+  const [episode] = await db
+    .select({ finalAssetId: episodes.finalAssetId })
+    .from(episodes)
+    .where(and(eq(episodes.id, episodeId), eq(episodes.projectId, projectId)))
+    .limit(1)
+
+  const rows = await db
+    .select({
+      assetId: assets.id,
+      name: assets.name,
+      title: assets.title,
+      sizeBytes: assets.sizeBytes,
+      durationSec: assets.durationSec,
+      version: assets.version,
+      uploadedAt: assets.createdAt,
+    })
+    .from(assets)
+    .where(
+      and(
+        eq(assets.projectId, projectId),
+        eq(assets.episodeId, episodeId),
+        eq(assets.kind, 'VIDEO'),
+        eq(assets.uploadStatus, 'COMPLETED'),
+        isNull(assets.deletedAt)
+      )
+    )
+    .orderBy(desc(assets.version), desc(assets.createdAt))
+
+  const current = rows.find((row) => row.assetId === episode?.finalAssetId) ?? null
+
+  return {
+    current,
+    // Everything else that could be promoted to the current cut.
+    history: rows.filter((row) => row.assetId !== current?.assetId),
+  }
 }
