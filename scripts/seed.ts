@@ -107,13 +107,23 @@ async function seedUsers(accounts: SeedAccount[]) {
   }
 }
 
-async function seedProject() {
+async function seedProject(owner: { id: string } | null, techLead: { id: string } | null) {
   const [project] = await db
     .insert(projects)
     .values({
       title: FLAGSHIP.projectTitle,
       slug: FLAGSHIP.projectSlug,
       status: 'IN_PRODUCTION',
+      /*
+       * Genre tags are the one piece of descriptive copy seeded here, because
+       * they are settled facts about the show rather than story content. The
+       * logline, synopsis and episode titles stay empty — those are still
+       * undecided and must not be invented (spec v2 §0, §10).
+       */
+      tags: [...FLAGSHIP.tags],
+      isFlagship: true,
+      ownerId: owner?.id ?? null,
+      techLeadId: techLead?.id ?? null,
       targetMinSec: FLAGSHIP.targetMinSec,
       targetMaxSec: FLAGSHIP.targetMaxSec,
     })
@@ -121,6 +131,10 @@ async function seedProject() {
       target: projects.slug,
       set: {
         title: FLAGSHIP.projectTitle,
+        tags: [...FLAGSHIP.tags],
+        isFlagship: true,
+        ownerId: owner?.id ?? null,
+        techLeadId: techLead?.id ?? null,
         targetMinSec: FLAGSHIP.targetMinSec,
         targetMaxSec: FLAGSHIP.targetMaxSec,
         updatedAt: new Date(),
@@ -246,7 +260,16 @@ async function main() {
   const accounts = readAccounts()
   await seedUsers(accounts)
 
-  const { projectId, arcId } = await seedProject()
+  // Re-read so the project can point at the rows that were just upserted.
+  const seeded = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(inArray(users.email, accounts.map((a) => a.email.toLowerCase())))
+
+  const owner = seeded.find((u) => u.email === accounts[0]!.email.toLowerCase()) ?? null
+  const techLead = seeded.find((u) => u.email === accounts[1]!.email.toLowerCase()) ?? null
+
+  const { projectId, arcId } = await seedProject(owner, techLead)
   await seedEpisodes(projectId, arcId)
 
   console.log('\n[seed] 完成。可用上述帳號登入。\n')

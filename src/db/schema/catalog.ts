@@ -1,13 +1,16 @@
 import { relations } from 'drizzle-orm'
 import {
+  boolean,
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
   uuid,
 } from 'drizzle-orm/pg-core'
+import { users } from './auth'
 import { episodeStatusEnum, projectStatusEnum } from './enums'
 
 /**
@@ -23,8 +26,18 @@ export const projects = pgTable(
     logline: text('logline').notNull().default(''),
     synopsis: text('synopsis').notNull().default(''),
     genre: text('genre').notNull().default(''),
+    /** Genre chips shown on the card, e.g. 古風 / 愛情 / 權謀 (design 03). */
+    tags: text('tags').array().notNull().default([]),
     status: projectStatusEnum('status').notNull().default('PLANNING'),
+    /** 主力作品 — the one the studio is actively pushing. At most one is expected. */
+    isFlagship: boolean('is_flagship').notNull().default(false),
     coverAssetId: uuid('cover_asset_id'),
+    /** 負責人 and 技術支援, shown in the detail rail. */
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'set null' }),
+    techLeadId: uuid('tech_lead_id').references(() => users.id, { onDelete: 'set null' }),
+    /** 開工日期 / 預計完成. */
+    startDate: timestamp('start_date', { withTimezone: true }),
+    dueDate: timestamp('due_date', { withTimezone: true }),
     /** Default target duration for new episodes, in seconds. */
     targetMinSec: integer('target_min_sec').notNull().default(120),
     targetMaxSec: integer('target_max_sec').notNull().default(180),
@@ -97,9 +110,41 @@ export const episodes = pgTable(
   ]
 )
 
-export const projectsRelations = relations(projects, ({ many }) => ({
+/**
+ * Per-member favourite (the heart on each card in design 03).
+ *
+ * Its own table rather than a column on `projects`, because the two members
+ * favourite independently — a flag on the project would make one person's
+ * choice overwrite the other's.
+ */
+export const projectFavourites = pgTable(
+  'project_favourites',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.projectId] }),
+    index('project_favourites_user_idx').on(t.userId),
+  ]
+)
+
+export const projectsRelations = relations(projects, ({ one, many }) => ({
   arcs: many(arcs),
   episodes: many(episodes),
+  owner: one(users, { fields: [projects.ownerId], references: [users.id], relationName: 'project_owner' }),
+  techLead: one(users, { fields: [projects.techLeadId], references: [users.id], relationName: 'project_tech_lead' }),
+  favourites: many(projectFavourites),
+}))
+
+export const projectFavouritesRelations = relations(projectFavourites, ({ one }) => ({
+  user: one(users, { fields: [projectFavourites.userId], references: [users.id] }),
+  project: one(projects, { fields: [projectFavourites.projectId], references: [projects.id] }),
 }))
 
 export const arcsRelations = relations(arcs, ({ one, many }) => ({

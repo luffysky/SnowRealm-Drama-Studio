@@ -8,11 +8,17 @@ import { pgEnum } from 'drizzle-orm/pg-core'
 /** Both real members are OWNER today; the column exists so a narrower role can be added without a migration of meaning. */
 export const roleEnum = pgEnum('role', ['OWNER', 'COLLABORATOR'])
 
+/**
+ * 作品狀態. Ordered as the pipeline runs, which is also the order the filter
+ * pills appear in on the 作品列表 page (design 03).
+ */
 export const projectStatusEnum = pgEnum('project_status', [
   'PLANNING',
   'IN_PRODUCTION',
-  'PAUSED',
+  'POST_PRODUCTION',
   'COMPLETED',
+  'RELEASED',
+  'PAUSED',
   'ARCHIVED',
 ])
 

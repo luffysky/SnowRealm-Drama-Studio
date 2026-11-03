@@ -25,11 +25,14 @@ export const ROLE_DESCRIPTION: Record<RoleValue, string> = {
 // 作品 / 集數
 // ---------------------------------------------------------------------------
 
+/** Pipeline order — also the order the filter pills appear in (design 03). */
 export const PROJECT_STATUSES = [
   'PLANNING',
   'IN_PRODUCTION',
-  'PAUSED',
+  'POST_PRODUCTION',
   'COMPLETED',
+  'RELEASED',
+  'PAUSED',
   'ARCHIVED',
 ] as const
 export type ProjectStatusValue = (typeof PROJECT_STATUSES)[number]
@@ -37,9 +40,32 @@ export type ProjectStatusValue = (typeof PROJECT_STATUSES)[number]
 export const PROJECT_STATUS_LABEL: Record<ProjectStatusValue, string> = {
   PLANNING: '企劃中',
   IN_PRODUCTION: '製作中',
+  POST_PRODUCTION: '後製中',
+  COMPLETED: '已完成',
+  RELEASED: '已發行',
   PAUSED: '暫停',
-  COMPLETED: '已完結',
-  ARCHIVED: '已封存',
+  ARCHIVED: '封存',
+}
+
+export const PROJECT_STATUS_STYLE: Record<ProjectStatusValue, string> = {
+  PLANNING: 'bg-stage-700/90 text-ink-200 ring-stage-600',
+  IN_PRODUCTION: 'bg-accent-600/90 text-white ring-accent-400/60',
+  POST_PRODUCTION: 'bg-indigo-600/90 text-white ring-indigo-400/60',
+  COMPLETED: 'bg-emerald-600/90 text-white ring-emerald-400/60',
+  RELEASED: 'bg-sky-600/90 text-white ring-sky-400/60',
+  PAUSED: 'bg-amber-600/90 text-white ring-amber-400/60',
+  ARCHIVED: 'bg-stage-800 text-ink-500 ring-stage-700',
+}
+
+/** Sort options offered by the 排序 dropdown on 作品列表. */
+export const PROJECT_SORTS = ['UPDATED', 'CREATED', 'TITLE', 'PROGRESS'] as const
+export type ProjectSortValue = (typeof PROJECT_SORTS)[number]
+
+export const PROJECT_SORT_LABEL: Record<ProjectSortValue, string> = {
+  UPDATED: '最新更新',
+  CREATED: '建立時間',
+  TITLE: '作品名稱',
+  PROGRESS: '製作進度',
 }
 
 export const EPISODE_STATUSES = [
@@ -489,6 +515,8 @@ export const ACCEPTED_MIME_EXACT = [
 export const FLAGSHIP = {
   projectTitle: '一灶見山河',
   projectSlug: 'yi-zao-jian-shan-he',
+  /** Settled genre facts about the show. Story content is deliberately absent. */
+  tags: ['古風', '愛情', '權謀'] as const,
   arcIndex: 1,
   arcTitle: '萬家燈火',
   plannedEpisodes: 120,
