@@ -105,7 +105,16 @@ export function parseArgonParams(
   }
 }
 
-export const PASSWORD_MIN_LENGTH = 10
+/**
+ * Minimum length for the two studio accounts.
+ *
+ * Eight is lower than a public service should accept. It is set here because
+ * this is a closed two-person tool with no registration route, where the real
+ * defence against guessing is the login rate limiter in `rate-limit.ts` rather
+ * than entropy — and because a bar the members route around by writing the
+ * password on a note is worse than a shorter one they remember.
+ */
+export const PASSWORD_MIN_LENGTH = 8
 
 /**
  * Minimum bar for the two studio accounts. Deliberately length-led —

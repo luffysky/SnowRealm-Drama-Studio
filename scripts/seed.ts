@@ -18,10 +18,13 @@ import { closeDb, db } from '../src/db'
 import { arcs, episodeStages, episodes, projects, users } from '../src/db/schema'
 import { hashPassword, describePasswordProblem } from '../src/lib/auth/password'
 import { FLAGSHIP, STAGES } from '../src/lib/constants'
+import { accountHandleSchema } from '../src/lib/validators'
 import { loadEnv } from '../src/lib/load-env'
 
 type SeedAccount = {
   email: string
+  /** Short login handle typed instead of the email address. */
+  account: string
   name: string
   title: string
   password: string
@@ -40,6 +43,7 @@ function readAccounts(): SeedAccount[] {
   const accounts: SeedAccount[] = [
     {
       email: required('SEED_OWNER_EMAIL'),
+      account: required('SEED_OWNER_ACCOUNT'),
       name: required('SEED_OWNER_NAME'),
       title: process.env.SEED_OWNER_TITLE?.trim() || 'CEO',
       password: required('SEED_OWNER_PASSWORD'),
@@ -47,6 +51,7 @@ function readAccounts(): SeedAccount[] {
     },
     {
       email: required('SEED_COLLABORATOR_EMAIL'),
+      account: required('SEED_COLLABORATOR_ACCOUNT'),
       name: required('SEED_COLLABORATOR_NAME'),
       title: process.env.SEED_COLLABORATOR_TITLE?.trim() || '技術總監',
       password: required('SEED_COLLABORATOR_PASSWORD'),
@@ -66,10 +71,24 @@ function readAccounts(): SeedAccount[] {
     if (problem) {
       throw new Error(`${account.email} 的密碼不符合要求：${problem}`)
     }
+
+    const handle = accountHandleSchema.safeParse(account.account)
+    if (!handle.success) {
+      throw new Error(
+        `${account.email} 的帳號「${account.account}」不符合要求：` +
+          `${handle.error.issues[0]?.message ?? '格式不正確'}`
+      )
+    }
   }
 
-  if (accounts[0]!.email === accounts[1]!.email) {
+  if (accounts[0]!.email.toLowerCase() === accounts[1]!.email.toLowerCase()) {
     throw new Error('兩個帳號不可使用相同的 email')
+  }
+
+  // The unique index is case-insensitive, so the check has to be too —
+  // otherwise the second upsert fails with a raw Postgres error instead.
+  if (accounts[0]!.account.toLowerCase() === accounts[1]!.account.toLowerCase()) {
+    throw new Error('兩個帳號不可使用相同的登入帳號')
   }
 
   return accounts
@@ -84,6 +103,7 @@ async function seedUsers(accounts: SeedAccount[]) {
       .insert(users)
       .values({
         email: account.email,
+        account: account.account,
         name: account.name,
         title: account.title,
         passwordHash,
@@ -93,6 +113,7 @@ async function seedUsers(accounts: SeedAccount[]) {
       .onConflictDoUpdate({
         target: users.email,
         set: {
+          account: account.account,
           name: account.name,
           title: account.title,
           passwordHash,
@@ -103,7 +124,10 @@ async function seedUsers(accounts: SeedAccount[]) {
         },
       })
 
-    console.log(`  user  ${account.email.padEnd(32)} ${account.name}（${account.title}）`)
+    console.log(
+      `  user  ${account.account.padEnd(14)} ${account.email.padEnd(28)} ` +
+        `${account.name}（${account.title}）`
+    )
   }
 }
 

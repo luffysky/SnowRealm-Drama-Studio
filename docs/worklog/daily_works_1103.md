@@ -99,3 +99,87 @@ npm audit   0 vulnerabilities
 > **05 集數列表不是 120 格網格。** 是分頁表格（每頁 10 筆、12 頁）+ 5 個 Tab + 篩選列 + **右側詳情欄**。我原本一直假設是網格，看了 `UI Design/05_episodes.png` 才發現。**動手前先看設計圖。**
 
 **唯一卡著的問題**：Vercel 用 Hobby 還是 Pro？影響 `vercel.json` 的 cron 頻率（Hobby 最短每天一次，目前設每分鐘）。
+
+---
+
+# 第二段（同日下午）
+
+## 1. 資料庫搬到 Neon
+
+使用者把 `.env.local` 的 `DATABASE_URL` 換成 Neon（`ep-icy-dew-ao0xrvif`，ap-southeast-1，PostgreSQL 18.6）。連線驗證通過，schema 是空的，跑完 migration 得到 **39 張表 / 30 個 enum / 132 個索引**。
+
+**順手補的安全洞**：破壞性測試（會 truncate 的那幾個檔）原本只認 `DATABASE_URL`，換成 Neon 之後它們不是去刪正式資料，就是整批 skip 讓涵蓋率無聲下降。加了 `TEST_DATABASE_URL`：
+
+- 應用程式連 Neon，測試連本機 `embedded-postgres`（`npm run db:local`）
+- `tests/helpers/database.ts` 的 `testDatabaseReady()` 統一判斷，三個測試檔和 `scripts/smoke.ts` 共用
+- 沒設 `TEST_DATABASE_URL` 又指著 Neon → 測試直接 skip，不會誤刪
+
+## 2. 登入改成「帳號 + 密碼」
+
+使用者在 `.env.local` 自己加了 `SEED_OWNER_ACCOUNT` / `SEED_COLLABORATOR_ACCOUNT`，並把 email / 帳號 / 密碼都換成真值 ——「email 跟帳號不一樣」。
+
+- `users` 新增 `account` 欄位（migration `0004_omniscient_franklin_storm.sql`）。唯一索引建在 `lower(account)` 且 `where account <> ''`：大小寫不敏感，沒設帳號的列不互相卡住。
+- `loginSchema` 改收 `identifier`（帳號或 email 都行），保留 `email` 當別名，所以 `scripts/smoke.ts` 原本的 13 處呼叫完全不用改。
+- 登入查詢改成 `lower(email) = ? OR (account <> '' AND lower(account) = ?)`。
+- 登入表單第一格從 `type="email"` 改成 `type="text"`（否則瀏覽器會先擋掉「Niannian」這種帳號），標籤補「輸入帳號或 Email 皆可」。
+- `PASSWORD_MIN_LENGTH` 10 → **8**。使用者設的密碼是 8 和 9 碼。這確實低於公開服務該有的標準，所以在 code 裡寫明理由：這是封閉的雙人工具、沒有註冊路徑，真正擋暴力破解的是 `rate-limit.ts` 的登入限速，而不是熵。
+
+**實測**（`next start` 連 Neon）：帳號登入 200、帳號大小寫不敏感 200、email 登入 200、協作者帳號 200、錯誤密碼 401、不存在帳號 401、缺 CSRF token 403、跨站 Origin 403。
+
+**踩到的坑**：`db:seed` 是依 email upsert，使用者改了 email 之後 Neon 上變成 4 個帳號（舊的兩個 `@snowrealm.local` 沒被改名，是多出來的）。寫了 `scripts/prune-users.ts` 處理 —— 預設 dry-run、要 `--apply` 才真的刪、拒絕刪掉目前 `SEED_*_EMAIL` 指到的帳號、也拒絕刪掉還擁有作品的人。清完剩正確的兩筆。
+
+另外兩支維護腳本：
+- `npm run account:check` —— 檢查雜湊演算法與參數、實際試一次驗證、確認會拒絕錯誤密碼，全程不印明文
+- `npm run account:password -- --email <帳號或Email> [--new-email <新Email>]` —— 密碼從 stdin 讀（不進 shell history），改完撤銷該帳號所有 session
+
+> **關於 Neon Auth**：不開。那是 Neon 主控台的代管身分服務（底層 Stack Auth），開了密碼會交給第三方，我們自己的 `password_hash`、Argon2id、bcrypt 無感遷移、session 撤銷就全部失效，而且多一個要養的外部服務。向 Neon 要的只有 Postgres。
+
+## 3. Favicon 與 PWA
+
+- `scripts/make-icons.mjs` —— 一份 SVG 原始碼（六角雪花，紫→洋紅漸層，對齊 `.bg-brand-gradient`）產生全部尺寸：`src/app/icon.svg`、`icon.png` 48、`apple-icon.png` 180、`public/icons/icon-{192,512}.png`、`icon-maskable-512.png`（maskable 版縮到 0.62 並去圓角，才不會被啟動器裁掉）。產物已進 repo，sharp 只是 Next 的間接依賴，不放進 build 流程。
+- **沒做 `favicon.ico`**：sharp 寫不出 ICO 容器，把 PNG 改名叫 `.ico` 比沒有還糟。`icon.svg` + `icon.png` 已涵蓋所有現役瀏覽器。
+- `src/app/manifest.ts` —— `display: standalone`、`start_url: /dashboard`、theme/background `#0a0618`、三個圖示（含 maskable）。
+- `public/sw.js` —— **故意做得很窄**。導覽（HTML）一律走網路，失敗才給 `/offline`；`/api/*` 完全不碰；只有 `/_next/static/`、`/icons/`、manifest、圖示走 cache-first。每一頁都在 session 後面，快取住 HTML 等於把一個人的畫面給另一個人看、或讓登出後的頁面還活著。登出時額外送 `srds:clear-cache` 清乾淨。
+- 只在 production 註冊 service worker（dev 的 bundle 沒有 hash，worker 擋在前面只會製造「為什麼還是舊的」）。
+
+## 4. RWD 真的去量了
+
+寫了 `scripts/shots.mjs`：用 Node 內建的 WebSocket 直接驅動 Chrome DevTools Protocol（不裝 Puppeteer），先用 `SEED_OWNER_*` 照瀏覽器的方式登入拿 cookie，再在 **phone 390 / tablet 820 / desktop 1440** 三個視窗各截一張全頁 PNG。
+
+截出來才看到的三個真問題（讀 class 名稱絕對看不出來）：
+
+1. **作品列表的右側詳情欄在平板上**：欄位掉到格狀下方變成整頁寬，16:9 的封面就成了一塊 460px 高的空漸層。改成 `h-32 sm:h-40 xl:h-auto xl:aspect-video`，只有真的變成側欄時才套比例。
+2. **手機上搜尋框被擠爛**：和排序下拉、檢視切換擠同一列，placeholder 只剩「搜尋作品名稱或」。`sm` 以下改成獨佔一整列。
+3. **1440px 筆電上 5 張統計卡斷成 3+2**：原本斷點給到 `2xl`（1536），改成 `xl`。
+
+（Git Bash 會把 `/login` 這種參數改寫成 Windows 路徑，所以腳本接受不帶斜線的寫法。）
+
+## 5. 04 作品總覽
+
+`src/app/(studio)/projects/[projectId]/page.tsx` + `src/components/studio/ProjectOverview.tsx`，資料層 `src/lib/project-overview.ts`。**純 Server Component，不送任何 JS**。
+
+- Hero：麵包屑、標題、狀態 chip、類型標籤、logline（還沒寫就明講「尚未撰寫」，不捏造）
+- 8 個分頁：只有「總覽」可點，其餘停用並標 M2/M3/M4
+- 5 張統計卡：製作進度、集數規劃、預計時程、製作預算、主要負責
+- 7 步製作流程：對應到 9 個 `episode_stages`，企劃與發行沒有 stage 列，改從作品狀態推導。桌機橫向連線、手機轉直向（七個有字的節點塞不進 390px）
+- 分集列表：前 8 集，桌機 `table-fixed` 表格、手機堆疊卡片，並明講其餘 112 集要等 05 頁
+- 素材資產 6 格、AI 生成統計、待辦任務、近期動態 —— 目前全是空狀態，每一格都寫了「空」的理由
+
+`src/lib/navigation.ts` 加了 `resolveLeaf()`：href 含 `/_` 的項目會代入當前網址裡的作品 id；不在作品頁時停用並顯示「需選作品」，不會連到 `/projects/_` 吃 404。03 的「進入作品詳情」也改成真的連結。
+
+**一個 lint 擋下來的真問題**：`DueChip` 在 render 裡讀 `Date.now()`（`react-hooks/purity`）。算到期天數搬進資料層，元件回到純函式——這頁是伺服器算完再 hydrate，在 render 讀時鐘就是在等 hydration mismatch。
+
+## ✅ 驗證狀態（第二段收工）
+
+```
+typecheck   PASS
+lint        PASS（0 errors, 0 warnings）
+測試        91 passed（5 檔，接本機 PG）
+build       成功
+登入        帳號/email/大小寫/錯誤密碼/CSRF 三種攻擊 全部符合預期
+RWD         phone 390 / tablet 820 / desktop 1440 三種寬度實際截圖檢查過
+```
+
+## 🔨 下一棒
+
+**05 集數列表**。再提醒一次：**不是 120 格網格**，是分頁表格（每頁 10 筆、12 頁）+ 5 個 Tab + 篩選列 + 右側詳情欄。先看 `UI Design/05_episodes.png`。

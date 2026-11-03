@@ -1,0 +1,2 @@
+ALTER TABLE "users" ADD COLUMN "account" text DEFAULT '' NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "users_account_lower_idx" ON "users" USING btree (lower("account")) WHERE "users"."account" <> '';

@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadEnv } from '@/lib/load-env'
+import { testDatabaseReady } from './helpers/database'
 
 /**
  * Integration tests for the AI job queue against a real database.
@@ -14,14 +14,12 @@ import { loadEnv } from '@/lib/load-env'
  * resolution, which is exactly the path being asserted.
  */
 
-loadEnv()
 
 /**
- * Runs only against a local database: each test truncates `ai_jobs` so the
- * worker's claim limit is not consumed by rows another test left behind.
+ * Destructive: truncates tables between tests. Runs only against a local
+ * database — set TEST_DATABASE_URL when DATABASE_URL points at Neon.
  */
-const dbUrl = process.env.DATABASE_URL ?? ''
-const hasDb = Boolean(dbUrl) && !/neon\.(tech|build)/.test(dbUrl)
+const hasDb = testDatabaseReady()
 
 // Imported lazily so the file can be collected even without a database.
 let db: typeof import('@/db').db

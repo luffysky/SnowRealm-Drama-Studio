@@ -25,10 +25,12 @@ import { useToast } from '@/components/ui/Toast'
 import type { SessionUser } from '@/lib/auth/session'
 import { apiFetch } from '@/lib/client-fetch'
 import {
+  activeProjectId,
   activeSectionKey,
   isActiveHref,
   NAV_FOOTER,
   NAV_SECTIONS,
+  resolveLeaf,
   type NavLeaf,
   type NavSection,
 } from '@/lib/navigation'
@@ -202,6 +204,9 @@ function UserChip({ user }: { user: SessionUser }) {
     setSigningOut(true)
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' })
+      // The worker caches only static assets, but a sign-out is the right
+      // moment to leave nothing of this session behind on the device.
+      navigator.serviceWorker?.controller?.postMessage('srds:clear-cache')
       router.replace('/login')
       router.refresh()
     } catch {
@@ -298,6 +303,8 @@ function Rail({
 }) {
   const pathname = usePathname()
   const activeKey = activeSectionKey(pathname)
+  // Project-scoped entries resolve their `_` placeholder against this.
+  const projectId = activeProjectId(pathname)
 
   // A section with children starts expanded when it contains the current page.
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() =>
@@ -330,6 +337,7 @@ function Rail({
                 key={section.key}
                 section={section}
                 pathname={pathname}
+                projectId={projectId}
                 expanded={expanded[section.key] ?? false}
                 onToggle={() =>
                   setExpanded((prev) => ({ ...prev, [section.key]: !prev[section.key] }))
@@ -342,7 +350,13 @@ function Rail({
           <ul className="mt-2 flex flex-col gap-0.5 border-t border-stage-700/50 pt-2">
             {NAV_FOOTER.map((leaf) => (
               <li key={leaf.key}>
-                <RailLeaf leaf={leaf} pathname={pathname} onNavigate={onClose} indent={false} />
+                <RailLeaf
+                  leaf={leaf}
+                  pathname={pathname}
+                  projectId={projectId}
+                  onNavigate={onClose}
+                  indent={false}
+                />
               </li>
             ))}
           </ul>
@@ -385,12 +399,14 @@ function Brand({ onClose }: { onClose: () => void }) {
 function RailSection({
   section,
   pathname,
+  projectId,
   expanded,
   onToggle,
   onNavigate,
 }: {
   section: NavSection
   pathname: string
+  projectId: string | null
   expanded: boolean
   onToggle: () => void
   onNavigate: () => void
@@ -466,7 +482,13 @@ function RailSection({
         <ul className="mt-0.5 flex flex-col gap-0.5">
           {(section.children ?? []).map((leaf) => (
             <li key={leaf.key}>
-              <RailLeaf leaf={leaf} pathname={pathname} onNavigate={onNavigate} indent />
+              <RailLeaf
+                leaf={leaf}
+                pathname={pathname}
+                projectId={projectId}
+                onNavigate={onNavigate}
+                indent
+              />
             </li>
           ))}
         </ul>
@@ -478,37 +500,43 @@ function RailSection({
 function RailLeaf({
   leaf,
   pathname,
+  projectId,
   onNavigate,
   indent,
 }: {
   leaf: NavLeaf
   pathname: string
+  projectId: string | null
   onNavigate: () => void
   indent: boolean
 }) {
-  const active = leaf.ready && isActiveHref(pathname, leaf.href)
+  const { href, enabled, reason } = resolveLeaf(leaf, projectId)
+  const active = enabled && isActiveHref(pathname, href)
 
   const row = cn(
     'flex items-center gap-2 rounded-lg py-2 pr-2.5 text-xs transition-all',
     indent ? 'pl-9' : 'pl-2.5'
   )
 
-  if (!leaf.ready) {
+  if (!enabled) {
     return (
       <span
         aria-disabled="true"
-        title={`「${leaf.label}」尚未實作，預計於 ${leaf.milestone} 階段交付`}
+        title={reason}
         className={cn(row, 'cursor-default text-ink-700 select-none hover:bg-stage-800/60 hover:text-ink-500')}
       >
         <span className="truncate">{leaf.label}</span>
-        <span className="ml-auto shrink-0 text-[10px] text-ink-700">{leaf.milestone}</span>
+        {/* A ready-but-unscoped entry shows no milestone — it is built. */}
+        <span className="ml-auto shrink-0 text-[10px] text-ink-700">
+          {leaf.ready ? '需選作品' : leaf.milestone}
+        </span>
       </span>
     )
   }
 
   return (
     <Link
-      href={leaf.href}
+      href={href}
       onClick={onNavigate}
       aria-current={active ? 'page' : undefined}
       className={cn(

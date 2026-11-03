@@ -1,16 +1,34 @@
-import { relations } from 'drizzle-orm'
-import { boolean, index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
+import {
+  boolean,
+  index,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from 'drizzle-orm/pg-core'
 import { roleEnum } from './enums'
 
 /**
  * Exactly two rows exist, seeded by `npm run db:seed`. There is no
- * self-registration route and no OAuth; `passwordHash` is bcrypt.
+ * self-registration route and no OAuth. `passwordHash` holds an Argon2id PHC
+ * string for every account created or changed here; bcrypt is still *verified*
+ * for any pre-existing hash and replaced on the next successful login.
  */
 export const users = pgTable(
   'users',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     email: text('email').notNull().unique(),
+    /**
+     * Short login handle, e.g. `Niannian`. Either this or the email address
+     * signs a member in, which is what the two of them actually type.
+     *
+     * Empty means "no handle set"; the unique index below ignores those rows
+     * rather than letting one empty string block the second account.
+     */
+    account: text('account').notNull().default(''),
     name: text('name').notNull(),
     /** Job title shown in the team page, e.g. CEO / 技術總監. */
     title: text('title').notNull().default(''),
@@ -24,7 +42,16 @@ export const users = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('users_email_idx').on(t.email)]
+  (t) => [
+    index('users_email_idx').on(t.email),
+    /**
+     * Case-insensitive and partial: `niannian` and `Niannian` are the same
+     * handle, and accounts that have not set one are exempt.
+     */
+    uniqueIndex('users_account_lower_idx')
+      .on(sql`lower(${t.account})`)
+      .where(sql`${t.account} <> ''`),
+  ]
 )
 
 /**

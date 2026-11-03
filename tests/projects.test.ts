@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { loadEnv } from '@/lib/load-env'
+import { testDatabaseReady } from './helpers/database'
 
 /**
  * Integration tests for the 作品列表 query layer (design 03).
@@ -10,10 +10,11 @@ import { loadEnv } from '@/lib/load-env'
  * one member — so these run against a real database rather than mocks.
  */
 
-loadEnv()
-
-const dbUrl = process.env.DATABASE_URL ?? ''
-const hasDb = Boolean(dbUrl) && !/neon\.(tech|build)/.test(dbUrl)
+/**
+ * Destructive: truncates tables between tests. Runs only against a local
+ * database — set TEST_DATABASE_URL when DATABASE_URL points at Neon.
+ */
+const hasDb = testDatabaseReady()
 
 let db: typeof import('@/db').db
 let schema: typeof import('@/db/schema')

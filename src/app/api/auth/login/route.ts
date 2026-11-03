@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, or, sql } from 'drizzle-orm'
 import { headers } from 'next/headers'
 import { db } from '@/db'
 import { users } from '@/db/schema'
@@ -30,17 +30,19 @@ export const POST = handle(async (request: Request) => {
   const input = await parseJson(request, loginSchema)
   const headerList = await headers()
 
-  const email = input.email.trim().toLowerCase()
+  // Either the handle (`Niannian`) or the email address; both are matched
+  // case-insensitively.
+  const identifier = input.identifier.toLowerCase()
   const ipAddress = clientIp(headerList)
   const userAgent = headerList.get('user-agent') ?? ''
 
   // Check the limiter before touching the password, so a locked-out caller
   // never reaches the hash comparison.
-  const verdict = await checkLoginRateLimit({ email, ipAddress })
+  const verdict = await checkLoginRateLimit({ email: identifier, ipAddress })
   if (verdict.limited) {
     await recordSecurityEvent({
       kind: 'LOGIN_RATE_LIMITED',
-      email,
+      email: identifier,
       ipAddress,
       userAgent,
       detail: `scope=${verdict.scope}`,
@@ -55,6 +57,7 @@ export const POST = handle(async (request: Request) => {
     .select({
       id: users.id,
       email: users.email,
+      account: users.account,
       name: users.name,
       title: users.title,
       role: users.role,
@@ -63,7 +66,14 @@ export const POST = handle(async (request: Request) => {
       active: users.active,
     })
     .from(users)
-    .where(eq(users.email, email))
+    .where(
+      or(
+        eq(sql`lower(${users.email})`, identifier),
+        // An empty handle must never match an empty input — the validator
+        // already rejects that, but the guard keeps the intent explicit.
+        and(sql`${users.account} <> ''`, eq(sql`lower(${users.account})`, identifier))
+      )
+    )
     .limit(1)
 
   /*
@@ -79,7 +89,7 @@ export const POST = handle(async (request: Request) => {
     await recordSecurityEvent({
       kind: 'LOGIN_FAILED',
       userId: user?.id ?? null,
-      email,
+      email: identifier,
       ipAddress,
       userAgent,
       detail: user ? 'bad_password' : 'unknown_account',
@@ -91,7 +101,7 @@ export const POST = handle(async (request: Request) => {
     await recordSecurityEvent({
       kind: 'LOGIN_FAILED',
       userId: user.id,
-      email,
+      email: user.email,
       ipAddress,
       userAgent,
       detail: 'inactive',
@@ -120,7 +130,7 @@ export const POST = handle(async (request: Request) => {
       await recordSecurityEvent({
         kind: 'PASSWORD_REHASHED',
         userId: user.id,
-        email,
+        email: user.email,
         ipAddress,
         userAgent,
         detail: 'bcrypt_to_argon2id',
@@ -136,7 +146,7 @@ export const POST = handle(async (request: Request) => {
   await recordSecurityEvent({
     kind: 'LOGIN_SUCCESS',
     userId: user.id,
-    email,
+    email: user.email,
     ipAddress,
     userAgent,
   })
@@ -153,6 +163,7 @@ export const POST = handle(async (request: Request) => {
     user: {
       id: user.id,
       email: user.email,
+      account: user.account,
       name: user.name,
       title: user.title,
       role: user.role,

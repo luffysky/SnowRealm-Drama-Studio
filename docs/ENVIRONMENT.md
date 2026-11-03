@@ -29,6 +29,7 @@ SnowRealm Drama Studio V1 — Neon PostgreSQL + Cloudflare R2 + Vercel
 | `AI_MAX_OUTPUT_TOKENS` | ⬜ | AI 單次輸出上限，預設 `8000`（配合 Hobby 的 60 秒限制） |
 | `CRON_SECRET` | ✅ | AI 背景 worker 的憑證。未設定則 worker 停用，AI 任務會一直停在佇列 |
 | `SEED_OWNER_EMAIL` | ✅* | 初始化 Owner 帳號 |
+| `SEED_OWNER_ACCOUNT` | ✅* | Owner 的登入帳號（短名稱） |
 | `SEED_OWNER_NAME` | ✅* | Owner 顯示名稱 |
 | `SEED_OWNER_PASSWORD` | ✅* | Owner 初始密碼（存入前做雜湊） |
 | `SEED_COLLABORATOR_EMAIL` | ✅* | 初始化 Collaborator 帳號 |
@@ -268,18 +269,41 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 | 變數 | 說明 |
 |---|---|
-| `SEED_OWNER_EMAIL` | Owner 登入用 email |
+| `SEED_OWNER_EMAIL` | Owner 的 email |
+| `SEED_OWNER_ACCOUNT` | Owner 的登入帳號（短名稱，與 email 無關） |
 | `SEED_OWNER_NAME` | Owner 顯示名稱，例如「製片」 |
+| `SEED_OWNER_TITLE` | Owner 職稱，預設 `CEO` |
 | `SEED_OWNER_PASSWORD` | Owner 初始密碼 |
-| `SEED_COLLABORATOR_EMAIL` | Collaborator 登入用 email |
+| `SEED_COLLABORATOR_EMAIL` | Collaborator 的 email |
+| `SEED_COLLABORATOR_ACCOUNT` | Collaborator 的登入帳號 |
 | `SEED_COLLABORATOR_NAME` | Collaborator 顯示名稱，例如「編導」 |
+| `SEED_COLLABORATOR_TITLE` | Collaborator 職稱，預設 `技術總監` |
 | `SEED_COLLABORATOR_PASSWORD` | Collaborator 初始密碼 |
+
+**登入方式**：帳號或 email 都可以，兩者皆不分大小寫。帳號限英數字與 `.` `_` `-`，
+長度 3–32，且兩個人不可重複（唯一索引建在 `lower(account)`）。
 
 **權限差異**
 - **Owner**：全部製作內容的讀寫，加上成員管理與刪除作品
 - **Collaborator**：全部製作內容的讀寫，不能管理成員或刪除作品
 
-密碼建議 12 字元以上。seed 執行完畢後，這六個變數即可從 Vercel 刪除。
+密碼最低 8 字元（`src/lib/auth/password.ts` 的 `PASSWORD_MIN_LENGTH`），建議更長。
+seed 執行完畢後，這些變數即可從 Vercel 刪除。
+
+> ⚠️ **`db:seed` 是依 email 做 upsert。** 之後改 `SEED_*_EMAIL` 再 seed 一次，會多出
+> 一個帳號而不是改名。要改帳密請改用：
+>
+> ```bash
+> npm run account:check                                   # 檢查目前帳號狀態
+> npm run account:password -- --email <帳號或Email> [--new-email <新Email>]
+> npx tsx scripts/prune-users.ts --email <舊Email>          # 先 dry-run
+> npx tsx scripts/prune-users.ts --email <舊Email> --apply  # 確認後才刪
+> ```
+
+> **為什麼不用 Neon Auth？** Neon 主控台的 Auth 是代管身分服務（底層 Stack Auth），
+> 啟用後密碼由第三方保管，本專案的 `password_hash`、Argon2id 參數、bcrypt 無感遷移、
+> session 撤銷與登入限速都將失效，而且多一個需要維護的外部服務。本專案只向 Neon
+> 取用 Postgres。
 
 ---
 
@@ -307,11 +331,19 @@ R2_BUCKET=snowrealm-drama-studio
 
 # ---- 初始帳號（seed 後可刪）----
 SEED_OWNER_EMAIL=
+SEED_OWNER_ACCOUNT=
 SEED_OWNER_NAME=
+SEED_OWNER_TITLE=
 SEED_OWNER_PASSWORD=
 SEED_COLLABORATOR_EMAIL=
+SEED_COLLABORATOR_ACCOUNT=
 SEED_COLLABORATOR_NAME=
+SEED_COLLABORATOR_TITLE=
 SEED_COLLABORATOR_PASSWORD=
+
+# ---- 測試用資料庫（DATABASE_URL 指向 Neon 時必填）----
+# 破壞性測試只會跑在這裡，永遠不會碰 Neon。先 `npm run db:local` 啟動。
+TEST_DATABASE_URL=postgresql://srds:srds_local_dev@127.0.0.1:55432/snowrealm_drama_studio
 
 # ---- AI（選填，未設定則 AI 功能顯示「尚未啟用」）----
 ANTHROPIC_API_KEY=

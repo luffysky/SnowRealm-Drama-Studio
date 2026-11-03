@@ -4,7 +4,7 @@
 > 設計圖在 `UI Design/`（80 張，01–80 對應 spec 編號）。
 > **完成的用 ~~刪除線~~ 保留可見（不刪）。**
 >
-> 目前狀態：**M0 基礎完成**（commit `9278261`）。可點頁面只有 `/login`、`/dashboard`。
+> 目前狀態：**M1 進行中**。可點頁面：`/login`、`/dashboard`、`/projects`、`/projects/[projectId]`。
 
 ---
 
@@ -14,9 +14,9 @@
 
 ### 進度
 - [x] ~~**01 總儀表板重做**~~ ✅ 1103（`9278261`）——對著 `UI Design/01_dashboard.png`：問候橫幅（依時段變早安/午安/下午好/晚安）、雙人成員卡、快速操作 6 格、6 個統計磚（含警示色邊框）、專案進度 + 9 階段條、支出圓環（純 SVG 無圖表庫）、AI 任務狀態、待辦/近期活動/今日重點。**所有數字查真實資料**，空資料庫就顯示 0 與空狀態。
-- [ ] **03 作品列表**（`src/app/(studio)/projects/page.tsx`，設計圖 `03_projects.png`）
-- [ ] **04 作品總覽**（`projects/[projectId]/page.tsx`，設計圖 `04_project_overview.png`）
-- [ ] **05 集數列表**（`projects/[projectId]/episodes/page.tsx`，設計圖 `05_episodes.png`）
+- [x] ~~**03 作品列表**~~ ✅ 1103（`7f68d08`）——篩選膠囊（計數永遠算全量，不受篩選影響）、搜尋（標題 + 標籤）、排序、格狀/列表切換、收藏（每人各自一份）、右側詳情欄。
+- [x] ~~**04 作品總覽**~~ ✅ 1103——`src/app/(studio)/projects/[projectId]/page.tsx` + `ProjectOverview.tsx`，資料層 `src/lib/project-overview.ts`。Hero（麵包屑／標題／標籤／logline）、8 分頁列（只有「總覽」可點，其餘標階段）、5 張統計卡、7 步製作流程（手機轉直向）、分集列表（桌機表格／手機堆疊）、素材資產 6 格、AI 生成統計、待辦任務、近期動態。**全部空狀態都寫實**，沒有捏造數字。
+- [ ] **05 集數列表**（`projects/[projectId]/episodes/page.tsx`，設計圖 `05_episodes.png`）**← 下一棒**
 - [ ] **24–29 作品表單六 Tab**（`ProjectFormDialog.tsx`，設計圖 `24_`~`29_`）
 - [ ] **30 AI 作品企劃** / **31 封面上傳裁切** / **32 批次建立集數**
 
@@ -35,6 +35,10 @@
 3. 未實作的按鈕/連結 → **停用並標示階段**，不做空按鈕、不連 404（spec v2 §4）。
 4. 鐵規則 gate：`tsc --noEmit` / `eslint` / `vitest run` / `next build` 全綠 → 更新工作日誌 → commit / push。
 5. 新頁面做好後，去 `src/lib/navigation.ts` 把對應項目的 `ready` 改成 `true`。
+   - 屬於單一作品的項目（href 含 `/_`）由 `resolveLeaf()` 代入當前作品 id；不在作品頁時會停用並顯示「需選作品」，不會連到 `/projects/_` 變 404。
+6. **RWD 一定要實際截圖驗證**，不要讀 class 名稱自我感覺良好：
+   `node scripts/shots.mjs --base http://127.0.0.1:3400 --out .shots projects dashboard`
+   （phone 390 / tablet 820 / desktop 1440 各一張全頁 PNG；會自己用 `SEED_OWNER_*` 登入）
 
 ---
 

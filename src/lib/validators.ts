@@ -17,12 +17,43 @@ import { PASSWORD_MIN_LENGTH } from './auth/password'
 
 export const uuid = z.string().uuid('識別碼格式不正確')
 
-export const loginSchema = z.object({
-  email: z.string().trim().min(1, '請輸入帳號').pipe(z.email('請輸入有效的 email')),
-  password: z.string().min(1, '請輸入密碼'),
-  remember: z.boolean().optional().default(true),
-})
+/**
+ * A member signs in with either their handle (`Niannian`) or their email
+ * address, so this field is not validated as an email — the server decides
+ * which column to match on.
+ *
+ * `email` is still accepted as an alias so older clients and the smoke test
+ * keep working; whichever arrives is normalised to `identifier`.
+ */
+export const loginSchema = z
+  .object({
+    identifier: z.string().trim().min(1, '請輸入帳號').optional(),
+    email: z.string().trim().min(1, '請輸入帳號').optional(),
+    password: z.string().min(1, '請輸入密碼'),
+    remember: z.boolean().optional().default(true),
+  })
+  .transform((value) => ({
+    identifier: (value.identifier ?? value.email ?? '').trim(),
+    password: value.password,
+    remember: value.remember,
+  }))
+  .refine((value) => value.identifier.length > 0, {
+    message: '請輸入帳號',
+    path: ['identifier'],
+  })
 export type LoginInput = z.infer<typeof loginSchema>
+
+/**
+ * A login handle: letters, digits, dot, dash and underscore. Deliberately
+ * narrow — it goes in a URL-ish place eventually and must not collide with an
+ * email address, so an `@` is rejected.
+ */
+export const accountHandleSchema = z
+  .string()
+  .trim()
+  .min(3, '帳號至少需要 3 個字元')
+  .max(32, '帳號最多 32 個字元')
+  .regex(/^[A-Za-z0-9._-]+$/, '帳號只能使用英數字與 . _ -')
 
 export const changePasswordSchema = z
   .object({

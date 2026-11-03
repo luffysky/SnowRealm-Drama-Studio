@@ -11,12 +11,17 @@ import { apiFetch } from '@/lib/client-fetch'
 /**
  * Login form (spec 02). Two seeded accounts only — there is no registration
  * link, no invite flow and no third-party sign-in, by design.
+ *
+ * The first field takes either the member's handle or their email address;
+ * the server decides which column to match. It is a plain text input rather
+ * than `type="email"`, because a handle would otherwise trip the browser's own
+ * validation before the request is ever made.
  */
 export function LoginForm() {
   const router = useRouter()
   const toast = useToast()
 
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
@@ -27,7 +32,7 @@ export function LoginForm() {
     event.preventDefault()
     setFormError(null)
 
-    if (!email.trim() || !password) {
+    if (!identifier.trim() || !password) {
       setFormError('請輸入帳號與密碼')
       return
     }
@@ -37,7 +42,7 @@ export function LoginForm() {
       const response = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password, remember }),
+        body: JSON.stringify({ identifier: identifier.trim(), password, remember }),
       })
 
       if (!response.ok) {
@@ -63,14 +68,17 @@ export function LoginForm() {
 
   return (
     <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
-      <Field label="帳號" required>
+      <Field label="帳號" hint="輸入帳號或 Email 皆可" required>
         <Input
-          type="email"
-          name="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@snowrealm.studio"
+          type="text"
+          name="identifier"
+          value={identifier}
+          onChange={(event) => setIdentifier(event.target.value)}
+          placeholder="帳號或 Email"
           autoComplete="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
           autoFocus
           required
           disabled={submitting}

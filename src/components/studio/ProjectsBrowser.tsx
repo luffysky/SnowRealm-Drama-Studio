@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import {
   ArrowRight,
   CalendarDays,
@@ -238,7 +239,12 @@ function FilterBar({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="relative min-w-0 flex-1 sm:max-w-sm">
+      {/*
+        On a phone the search box shares the row with the sort select and the
+        view toggle, which squeezes its placeholder to「搜尋作品名稱或」. Give it
+        the whole first row below sm and let the controls wrap under it.
+      */}
+      <div className="relative w-full min-w-0 sm:max-w-sm sm:flex-1">
         <Search
           aria-hidden
           className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-600"
@@ -422,7 +428,12 @@ function DetailRail({ project }: { project: ProjectDetailData | undefined }) {
   return (
     <aside className="flex flex-col gap-3">
       <section className="panel overflow-hidden rounded-xl bg-stage-900 ring-1 ring-stage-700">
-        <div className="relative aspect-video w-full">
+        {/*
+          Below xl the rail sits under the grid at full page width, where a
+          16:9 cover would be a ~460px slab of empty gradient. Fixed height
+          there; the aspect ratio only applies once the rail is a column.
+        */}
+        <div className="relative h-32 w-full sm:h-40 xl:h-auto xl:aspect-video">
           <div aria-hidden className="art-placeholder absolute inset-0" />
           <div
             aria-hidden
@@ -511,16 +522,13 @@ function DetailRail({ project }: { project: ProjectDetailData | undefined }) {
         </div>
       </section>
 
-      {/* 04 作品總覽 lands in M1. */}
-      <span
-        aria-disabled="true"
-        title="作品詳情頁尚未實作，預計於 M1 階段交付"
-        className="inline-flex cursor-default items-center justify-center gap-2 rounded-xl bg-stage-800 px-4 py-2.5 text-xs font-medium text-ink-600 ring-1 ring-stage-700"
+      <Link
+        href={`/projects/${project.id}`}
+        className="bg-brand-gradient glow-accent-sm inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
       >
-        進入作品詳情
-        <span className="text-[10px] text-ink-700">M1</span>
+        進入作品總覽
         <ArrowRight aria-hidden className="size-3.5" />
-      </span>
+      </Link>
     </aside>
   )
 }

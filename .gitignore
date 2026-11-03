@@ -24,3 +24,6 @@ debug_pic/
 # os
 .DS_Store
 Thumbs.db
+
+# Local RWD screenshots (scripts/shots.mjs)
+.shots/
