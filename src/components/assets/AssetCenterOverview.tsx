@@ -6,13 +6,13 @@ import {
   Mic,
   Music,
   Package,
-  Plus,
   ShieldCheck,
   Volume2,
   type LucideIcon,
 } from 'lucide-react'
 import Link from 'next/link'
 import { AssetCenterNav } from '@/components/assets/AssetCenterNav'
+import { AssetUploadButton } from '@/components/assets/AssetUploadButton'
 import { EmptyState } from '@/components/ui/StateViews'
 import type { AssetCenterData } from '@/lib/asset-center'
 import { assetPreviewUrl } from '@/lib/asset-url'
@@ -81,13 +81,14 @@ export function AssetCenterOverview({
       <div className="flex flex-wrap items-end justify-between gap-2">
         <AssetCenterNav projectId={projectId} counts={counts} />
 
-        <Link
-          href={`/projects/${projectId}/assets/music/new`}
-          className="mb-1 inline-flex items-center gap-1.5 rounded-md bg-accent-600 px-2.5 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-accent-500"
-        >
-          <Plus aria-hidden className="size-3.5" />
-          新增音樂
-        </Link>
+        {/*
+          「新增檔案」, not 「新增音樂」: this page counts six kinds of asset and
+          the only button on it used to open the music form, which left every
+          other kind with no entry point here.
+        */}
+        <div className="mb-1">
+          <AssetUploadButton projectId={projectId} />
+        </div>
       </div>
 
       <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

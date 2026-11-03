@@ -766,6 +766,31 @@ export async function finishVariantUpload(input: {
     .returning()
 
   if (!updated) throw ApiError.notFound('找不到這個預覽檔')
+
+  /*
+   * A waveform knows the track's length, because computing it meant decoding
+   * the whole file. Carry that onto the asset when nothing else has.
+   *
+   * Without this, audio uploaded from 「新增檔案」 had a null
+   * `durationSec` forever: only the music metadata form used to send one, and
+   * a file that never passes through that form never gets a length. The list
+   * then shows 「—」 for the duration while the player, which reads it from
+   * the audio element, shows the real number on the next screen.
+   *
+   * Only when absent: a value the uploader sent explicitly is the better one,
+   * and overwriting it here would be a silent downgrade.
+   */
+  if (variant.kind === 'WAVEFORM' && asset.durationSec === null) {
+    const duration = Number((variant.params as { durationSec?: unknown } | null)?.durationSec)
+
+    if (Number.isFinite(duration) && duration > 0) {
+      await db
+        .update(assets)
+        .set({ durationSec: Math.round(duration) })
+        .where(and(eq(assets.id, asset.id), isNull(assets.durationSec)))
+    }
+  }
+
   return updated
 }
 

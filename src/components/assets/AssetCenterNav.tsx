@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { ASSET_TABS, assetTabHref } from '@/lib/asset-center-view'
 import { cn } from '@/lib/utils'
 
 /**
@@ -13,16 +14,6 @@ import { cn } from '@/lib/utils'
  * temptation is strongest because the strip looks wrong with gaps in it.
  */
 
-type Tab = {
-  key: string
-  label: string
-  segment: string
-  ready: boolean
-  milestone?: string
-  /** Counts are passed in; a tab never invents its own number. */
-  count?: number
-}
-
 export function AssetCenterNav({
   projectId,
   counts,
@@ -31,23 +22,18 @@ export function AssetCenterNav({
   counts: Partial<Record<string, number>>
 }) {
   const pathname = usePathname()
-  const base = `/projects/${projectId}/assets`
 
-  const tabs: Tab[] = [
-    { key: 'overview', label: '資產總覽', segment: '', ready: true },
-    { key: 'all', label: '全部素材', segment: 'all', ready: false, milestone: 'M3' },
-    { key: 'image', label: '圖片', segment: 'image', ready: false, milestone: 'M3', count: counts.IMAGE },
-    { key: 'video', label: '影片', segment: 'video', ready: false, milestone: 'M3', count: counts.VIDEO },
-    { key: 'music', label: '音樂', segment: 'music', ready: true, count: counts.MUSIC },
-    { key: 'sfx', label: '音效', segment: 'sfx', ready: false, milestone: 'M3', count: counts.SFX },
-    { key: 'voice', label: '配音', segment: 'voice', ready: false, milestone: 'M3', count: counts.VOICE },
-    { key: 'licenses', label: '授權管理', segment: 'licenses', ready: false, milestone: 'M3' },
-  ]
+  // The tab list lives in `@/lib/asset-center-view` because the uploader needs
+  // the same one to decide where to send you after a file lands.
+  const tabs = ASSET_TABS.map((tab) => ({
+    ...tab,
+    count: tab.kinds?.reduce((total, kind) => total + (counts[kind] ?? 0), 0),
+  }))
 
   return (
     <nav aria-label="素材資產中心" className="flex flex-wrap gap-1 border-b border-stage-700/60">
       {tabs.map((tab) => {
-        const href = tab.segment ? `${base}/${tab.segment}` : base
+        const href = assetTabHref(projectId, tab)
         const active = pathname === href
 
         const label = (

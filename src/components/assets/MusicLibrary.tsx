@@ -256,9 +256,13 @@ function ListRow({ projectId, row }: { projectId: string; row: MusicItem }) {
       </span>
 
       <span className="flex min-w-0 flex-[2] flex-col">
-        <span className="truncate text-xs font-medium text-ink-100">
+        {/* The title opens the waveform player (83); the pencil still edits. */}
+        <Link
+          href={`/projects/${projectId}/assets/music/${row.assetId}`}
+          className="truncate text-xs font-medium text-ink-100 transition-colors hover:text-accent-300"
+        >
           {row.title || row.name}
-        </span>
+        </Link>
         <span className="truncate text-[10px] text-ink-600">
           {MUSIC_CATEGORY_LABEL[row.category]}
           {row.artist && `・${row.artist}`}
@@ -304,9 +308,12 @@ function CardRow({ projectId, row }: { projectId: string; row: MusicItem }) {
           <Music aria-hidden className="size-3.5 text-accent-400" />
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-xs font-medium text-ink-100">
+          <Link
+            href={`/projects/${projectId}/assets/music/${row.assetId}`}
+            className="truncate text-xs font-medium text-ink-100 transition-colors hover:text-accent-300"
+          >
             {row.title || row.name}
-          </span>
+          </Link>
           <span className="truncate text-[10px] text-ink-600">
             {MUSIC_CATEGORY_LABEL[row.category]}
             {row.artist && `・${row.artist}`}

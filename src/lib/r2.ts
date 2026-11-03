@@ -357,6 +357,28 @@ export async function headObject(objectKey: string): Promise<{
   }
 }
 
+/**
+ * Reads a small object's bytes on the server.
+ *
+ * Only for things measured in kilobytes — waveform peaks, and nothing else so
+ * far. Audio and video are presigned and fetched by the browser directly;
+ * pulling a 50 MB file through a function would pay for the bandwidth twice
+ * and still be slower.
+ *
+ * Returns null when the object is gone, which the caller treats as "no
+ * waveform" rather than an error.
+ */
+export async function getObjectText(objectKey: string): Promise<string | null> {
+  try {
+    const out = await r2().send(new GetObjectCommand({ Bucket: bucket(), Key: objectKey }))
+    const body = out.Body
+    if (!body) return null
+    return await body.transformToString('utf-8')
+  } catch {
+    return null
+  }
+}
+
 export async function deleteObject(objectKey: string): Promise<void> {
   await r2().send(new DeleteObjectCommand({ Bucket: bucket(), Key: objectKey }))
 }

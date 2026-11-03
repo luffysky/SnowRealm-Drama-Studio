@@ -5,6 +5,7 @@
  *   node scripts/shots.mjs --click 作品設定 /projects/<id>     # 開啟對話框再截圖
  *   node scripts/shots.mjs --viewport /path                    # 只截可見範圍
  *   node scripts/shots.mjs --anon /login                       # 不登入（看登入頁）
+ *   node scripts/shots.mjs --as owner /dashboard             # 改用 OWNER 帳號
  *
  * Why this exists: "手機也要順" cannot be verified by reading Tailwind class
  * names. This drives a real Chrome over the DevTools Protocol, signs in the way
@@ -14,13 +15,14 @@
  * No Puppeteer: CDP is a WebSocket protocol and Node ships a WebSocket client,
  * so this needs nothing beyond the Chrome already installed.
  *
- * Credentials come from SEED_OWNER_EMAIL / SEED_OWNER_PASSWORD. They are never
- * logged.
+ * Credentials come from SEED_COLLABORATOR_EMAIL / _PASSWORD, or SEED_OWNER_*
+ * with `--as owner`. They are never logged.
  */
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 
 const CHROME_CANDIDATES = [
@@ -81,11 +83,12 @@ function parseSetCookie(headers) {
   return jar
 }
 
-async function signIn(base) {
-  const email = process.env.SEED_OWNER_EMAIL
-  const password = process.env.SEED_OWNER_PASSWORD
+export async function signIn(base, role) {
+  const prefix = role === 'owner' ? 'SEED_OWNER' : 'SEED_COLLABORATOR'
+  const email = process.env[`${prefix}_EMAIL`]
+  const password = process.env[`${prefix}_PASSWORD`]
   if (!email || !password) {
-    throw new Error('需要 SEED_OWNER_EMAIL / SEED_OWNER_PASSWORD（讀自 .env.local）')
+    throw new Error(`需要 ${prefix}_EMAIL / ${prefix}_PASSWORD（讀自 .env.local）`)
   }
 
   const first = await fetch(`${base}/login`, { redirect: 'manual' })
@@ -118,7 +121,7 @@ async function signIn(base) {
 /* Chrome DevTools Protocol                                                    */
 /* -------------------------------------------------------------------------- */
 
-function launchChrome(port, userDataDir) {
+export function launchChrome(port, userDataDir) {
   const binary = CHROME_CANDIDATES.find((candidate) => existsSync(candidate))
   if (!binary) throw new Error('找不到 Chrome 或 Edge')
 
@@ -141,7 +144,7 @@ function launchChrome(port, userDataDir) {
   return child
 }
 
-async function debuggerUrl(port) {
+export async function debuggerUrl(port) {
   // Chrome needs a moment to open the port; retry rather than sleep blindly.
   for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
@@ -157,7 +160,7 @@ async function debuggerUrl(port) {
 }
 
 /** Minimal CDP client over the built-in WebSocket. */
-class Cdp {
+export class Cdp {
   constructor(socket) {
     this.socket = socket
     this.nextId = 1
@@ -256,8 +259,18 @@ async function main() {
    */
   const anon = process.argv.includes('--anon')
 
-  const cookies = anon ? {} : await signIn(base)
-  console.log(anon ? '  未登入（--anon）\n' : '  已登入\n')
+  /*
+   * Signs in as the collaborator by default. The owner account belongs to
+   * the other person, and every screenshot run used to leave a 「登入」 row
+   * under their name in the activity feed. `--as owner` is still there for
+   * the screens whose content depends on the owner-only permissions.
+   */
+  const role = arg('as', 'collaborator')
+
+  const cookies = anon ? {} : await signIn(base, role)
+  console.log(
+    anon ? '  未登入（--anon）\n' : `  已登入（${role}）\n`
+  )
 
   await mkdir(outDir, { recursive: true })
 
@@ -354,4 +367,11 @@ async function main() {
   }
 }
 
-await main()
+/*
+ * Only when run directly. The CDP plumbing above is exported for other one-off
+ * drivers to reuse, and importing this file used to take a full set of
+ * screenshots as a side effect.
+ */
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main()
+}
