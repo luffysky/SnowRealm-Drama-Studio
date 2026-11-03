@@ -72,6 +72,7 @@ function toCardData(card: {
   dueDate: Date | null
   spend: number
   isFavourite: boolean
+  coverAssetId: string | null
 }): ProjectCardData {
   return {
     id: card.id,
@@ -85,5 +86,6 @@ function toCardData(card: {
     dueDate: card.dueDate?.toISOString() ?? null,
     spend: card.spend,
     isFavourite: card.isFavourite,
+    coverAssetId: card.coverAssetId,
   }
 }

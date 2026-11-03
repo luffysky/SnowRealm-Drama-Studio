@@ -25,6 +25,7 @@ export type ProjectAccess = {
   status: ProjectStatusValue
   tags: string[]
   isFlagship: boolean
+  coverAssetId: string | null
 }
 
 /**
@@ -70,6 +71,7 @@ export async function findAccessibleProject(
       status: projects.status,
       tags: projects.tags,
       isFlagship: projects.isFlagship,
+      coverAssetId: projects.coverAssetId,
     })
     .from(projects)
     .where(and(eq(projects.id, projectId), visibleProjects(userId)))

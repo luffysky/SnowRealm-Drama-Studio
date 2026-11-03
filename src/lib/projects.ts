@@ -4,7 +4,7 @@ import {
   activities,
   arcs,
   budgets,
-  episodeStages,
+  episodeProductionStages,
   episodes,
   projectFavourites,
   projects,
@@ -12,6 +12,7 @@ import {
   users,
 } from '@/db/schema'
 import type { ProjectSortValue, ProjectStatusValue } from '@/lib/constants'
+import { aggregateProgress, STAGES_PER_EPISODE } from '@/lib/production'
 
 /**
  * Query layer for 作品列表 / 作品總覽 (designs 03 / 04).
@@ -114,16 +115,33 @@ export async function listProjects(
         .where(and(inArray(episodes.projectId, ids), isNull(episodes.deletedAt)))
         .groupBy(episodes.projectId),
 
+      /*
+       * Completed equivalents per project, following the one contract in
+       * `src/lib/production.ts`. `done` is a sum of fractions, not a count of
+       * finished rows: a stage at 60% contributes 0.6, and `blocked` never
+       * contributes a whole stage.
+       */
       db
         .select({
-          projectId: episodes.projectId,
+          projectId: episodeProductionStages.projectId,
           total: count(),
-          done: sql<number>`count(*) filter (where ${episodeStages.state} = 'DONE')`.mapWith(Number),
+          done: sql<string>`sum(
+            case
+              when ${episodeProductionStages.status} = 'completed' then 1.0
+              when ${episodeProductionStages.status} = 'not_started' then 0.0
+              else least(greatest(coalesce(${episodeProductionStages.progressPercent}, 0), 0), 100) / 100.0
+            end
+          )`.mapWith(Number),
         })
-        .from(episodeStages)
-        .innerJoin(episodes, eq(episodes.id, episodeStages.episodeId))
-        .where(and(inArray(episodes.projectId, ids), isNull(episodes.deletedAt)))
-        .groupBy(episodes.projectId),
+        .from(episodeProductionStages)
+        .innerJoin(episodes, eq(episodes.id, episodeProductionStages.episodeId))
+        .where(
+          and(
+            inArray(episodeProductionStages.projectId, ids),
+            isNull(episodes.deletedAt)
+          )
+        )
+        .groupBy(episodeProductionStages.projectId),
 
       db
         .select({
@@ -169,8 +187,19 @@ export async function listProjects(
 
   const cards: ProjectCard[] = rows.map((row) => {
     const stage = stageBy.get(row.id)
-    const stageTotal = Number(stage?.total ?? 0)
-    const stageDone = Number(stage?.done ?? 0)
+    const episodeCount = Number(episodeBy.get(row.id)?.total ?? 0)
+
+    /*
+     * The denominator is the *planned* number of stages — every episode times
+     * nine — not the number of stage rows that happen to exist. An episode
+     * whose rows were never created is unstarted work, and counting only the
+     * rows present would report a project nobody has touched as complete
+     * (spec v3 §11.2「尚未建立階段時的分母規則要明確且一致」).
+     */
+    const effectiveStages = Math.max(
+      episodeCount * STAGES_PER_EPISODE,
+      Number(stage?.total ?? 0)
+    )
 
     return {
       id: row.id,
@@ -180,10 +209,10 @@ export async function listProjects(
       tags: row.tags,
       isFlagship: row.isFlagship,
       coverAssetId: row.coverAssetId,
-      episodeCount: Number(episodeBy.get(row.id)?.total ?? 0),
+      episodeCount,
       doneEpisodes: Number(episodeBy.get(row.id)?.done ?? 0),
       plannedEpisodes: plannedBy.get(row.id) ?? 0,
-      progress: stageTotal > 0 ? stageDone / stageTotal : 0,
+      progress: aggregateProgress(Number(stage?.done ?? 0), effectiveStages),
       startDate: row.startDate,
       dueDate: row.dueDate,
       spend: spendBy.get(row.id) ?? 0,

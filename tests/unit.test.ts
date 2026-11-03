@@ -1,7 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { diffLines, diffStats } from '@/lib/diff'
 import { roleCan, isDestructive, PERMISSIONS } from '@/lib/auth/rbac'
-import { ASSET_KINDS, EPISODE_STATUSES, STAGES } from '@/lib/constants'
+import { ASSET_KINDS, EPISODE_STATUSES } from '@/lib/constants'
+import {
+  PRODUCTION_STAGE_KEYS,
+  PRODUCTION_STAGE_LABEL,
+  PRODUCTION_STAGE_STATUSES,
+} from '@/lib/production'
 import { buildObjectKey, extensionOf, planParts, shouldUseMultipart } from '@/lib/r2'
 import { decryptSecret, encryptSecret, last4, safeEqual } from '@/lib/crypto'
 import {
@@ -280,8 +285,32 @@ describe('diff', () => {
 })
 
 describe('enum vocabularies stay in sync with the UI', () => {
-  it('covers the nine production stages', () => {
-    expect(STAGES).toHaveLength(9)
+  it('covers the nine production stages, in pipeline order', () => {
+    // spec v3 §11.2 fixes both the keys and their order.
+    expect(PRODUCTION_STAGE_KEYS).toEqual([
+      'story_planning',
+      'novel',
+      'script',
+      'storyboard',
+      'assets',
+      'video',
+      'postproduction',
+      'review',
+      'release',
+    ])
+  })
+
+  it('names every stage', () => {
+    for (const key of PRODUCTION_STAGE_KEYS) {
+      expect(PRODUCTION_STAGE_LABEL[key]).toBeTruthy()
+    }
+    expect(PRODUCTION_STAGE_LABEL.story_planning).toBe('劇情規劃')
+    expect(PRODUCTION_STAGE_LABEL.release).toBe('上架發布')
+  })
+
+  it('has a stage status for work that exists but is not accepted', () => {
+    expect(PRODUCTION_STAGE_STATUSES).toContain('in_review')
+    expect(PRODUCTION_STAGE_STATUSES).toContain('blocked')
   })
 
   it('includes every asset kind the spec names', () => {

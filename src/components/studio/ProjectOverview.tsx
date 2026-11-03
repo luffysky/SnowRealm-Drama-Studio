@@ -3,7 +3,6 @@ import {
   Baseline,
   Boxes,
   CalendarDays,
-  Check,
   Clock,
   Coins,
   Film,
@@ -12,7 +11,6 @@ import {
   Layers,
   ListChecks,
   Music,
-  Play,
   Sparkles,
   Users,
   Video,
@@ -34,6 +32,7 @@ import {
   type FxRates,
 } from '@/lib/money'
 import type { ProjectOverview as ProjectOverviewData } from '@/lib/project-overview'
+import { toPercent } from '@/lib/production'
 import { cn, formatBytes, formatRelativeZh } from '@/lib/utils'
 
 /**
@@ -296,89 +295,51 @@ function GatedAction({ label, milestone }: { label: string; milestone: string })
 
 function WorkflowPanel({ project }: { project: ProjectOverviewData }) {
   return (
-    <Panel title="製作流程（工作流）" icon={<Baseline className="size-3.5" />}>
-      {/* Horizontal on wide screens, vertical on a phone — seven labelled
-          nodes do not fit across 390px without shrinking the text to nothing. */}
-      <ol className="flex flex-col gap-0 sm:flex-row sm:items-start">
-        {project.workflow.map((step, index) => {
-          const last = index === project.workflow.length - 1
-          return (
-            <li
-              key={step.key}
-              className="flex gap-3 sm:min-w-0 sm:flex-1 sm:flex-col sm:items-center sm:gap-1.5"
+    <Panel title="九階段製作流程" icon={<Baseline className="size-3.5" />}>
+      {/*
+        A row per stage rather than a horizontal pipeline: nine labelled nodes
+        do not fit across a phone, and each stage now carries a real figure
+        (how many of the N episodes have cleared it) that a node cannot show.
+      */}
+      <ul className="flex flex-col gap-2">
+        {project.workflow.map((step) => (
+          <li key={step.key} className="flex items-center gap-2">
+            <span className="w-5 shrink-0 text-right text-[10px] text-ink-700 tabular-nums">
+              {step.ordinal}
+            </span>
+            <span
+              className={cn(
+                'w-16 shrink-0 truncate text-[11px]',
+                step.state === 'DONE'
+                  ? 'text-emerald-300'
+                  : step.state === 'ACTIVE'
+                    ? 'text-accent-300'
+                    : 'text-ink-500'
+              )}
             >
-              <div className="flex flex-col items-center sm:w-full sm:flex-row">
-                {/* Left rail on phone / connecting line on desktop. */}
-                <span
-                  aria-hidden
-                  className={cn(
-                    'hidden h-0.5 flex-1 sm:block',
-                    index === 0
-                      ? 'bg-transparent'
-                      : project.workflow[index - 1]?.state === 'DONE'
-                        ? 'bg-emerald-600'
-                        : 'bg-stage-700'
-                  )}
-                />
-                <StepNode state={step.state} />
-                <span
-                  aria-hidden
-                  className={cn(
-                    'hidden h-0.5 flex-1 sm:block',
-                    last
-                      ? 'bg-transparent'
-                      : step.state === 'DONE'
-                        ? 'bg-emerald-600'
-                        : 'bg-stage-700'
-                  )}
-                />
-                {/* Vertical connector, phone only. */}
-                {!last && <span aria-hidden className="w-0.5 flex-1 bg-stage-700 sm:hidden" />}
-              </div>
+              {step.label}
+            </span>
 
-              <div className="flex min-w-0 flex-col pb-4 sm:items-center sm:pb-0">
-                <span
-                  className={cn(
-                    'truncate text-[11px] font-medium',
-                    step.state === 'DONE'
-                      ? 'text-emerald-300'
-                      : step.state === 'ACTIVE'
-                        ? 'text-accent-300'
-                        : 'text-ink-600'
-                  )}
-                >
-                  {step.label}
-                </span>
-                <span className="text-[10px] text-ink-600">
-                  {step.progress > 0 ? `${Math.round(step.progress * 100)}%` : '未開始'}
-                </span>
-              </div>
-            </li>
-          )
-        })}
-      </ol>
+            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stage-800">
+              <div
+                className={cn(
+                  'h-full rounded-full transition-all',
+                  step.state === 'DONE' ? 'bg-emerald-500' : 'bg-brand-gradient'
+                )}
+                style={{ width: `${toPercent(step.progress)}%` }}
+              />
+            </div>
+
+            <span className="w-10 shrink-0 text-right text-[10px] text-ink-400 tabular-nums">
+              {toPercent(step.progress)}%
+            </span>
+            <span className="hidden w-16 shrink-0 text-right text-[10px] text-ink-600 tabular-nums sm:inline">
+              {step.episodesDone} / {step.episodeCount}
+            </span>
+          </li>
+        ))}
+      </ul>
     </Panel>
-  )
-}
-
-function StepNode({ state }: { state: 'DONE' | 'ACTIVE' | 'PENDING' }) {
-  return (
-    <span
-      className={cn(
-        'grid size-7 shrink-0 place-items-center rounded-full ring-1',
-        state === 'DONE'
-          ? 'bg-emerald-600 text-white ring-emerald-400/60'
-          : state === 'ACTIVE'
-            ? 'bg-accent-600 text-white ring-accent-400/60 glow-accent-sm'
-            : 'bg-stage-800 text-ink-600 ring-stage-700'
-      )}
-    >
-      {state === 'DONE' ? (
-        <Check aria-hidden className="size-3.5" />
-      ) : (
-        <Play aria-hidden className="size-3" />
-      )}
-    </span>
   )
 }
 

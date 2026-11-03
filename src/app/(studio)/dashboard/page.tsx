@@ -24,7 +24,7 @@ import {
   activities,
   aiJobs,
   arcs,
-  episodeStages,
+  episodeProductionStages,
   episodes,
   expenses,
   projects,
@@ -46,12 +46,16 @@ import { ProgressBar } from '@/components/ui/StatusChip'
 import { getSessionUser } from '@/lib/auth/session'
 import {
   EXPENSE_CATEGORY_LABEL,
-  STAGE_LABEL,
-  STAGES,
   type ExpenseCategoryValue,
-  type StageValue,
 } from '@/lib/constants'
 import { conversionNote, formatFromBase } from '@/lib/money'
+import {
+  aggregateProgress,
+  PRODUCTION_STAGE_KEYS,
+  PRODUCTION_STAGE_LABEL,
+  stageOrdinal,
+  toPercent,
+} from '@/lib/production'
 import { getFxRates } from '@/lib/settings'
 import { formatRelativeZh } from '@/lib/utils'
 
@@ -119,14 +123,22 @@ export default async function DashboardPage() {
 
     db
       .select({
-        stage: episodeStages.stage,
-        done: sql<number>`count(*) filter (where ${episodeStages.state} = 'DONE')`.mapWith(Number),
+        stage: episodeProductionStages.stageKey,
+        done: sql<string>`sum(
+          case
+            when ${episodeProductionStages.status} = 'completed' then 1.0
+            when ${episodeProductionStages.status} = 'not_started' then 0.0
+            else least(greatest(coalesce(${episodeProductionStages.progressPercent}, 0), 0), 100) / 100.0
+          end
+        )`.mapWith(Number),
         total: count(),
       })
-      .from(episodeStages)
-      .innerJoin(episodes, eq(episodes.id, episodeStages.episodeId))
-      .where(and(eq(episodes.projectId, project.id), isNull(episodes.deletedAt)))
-      .groupBy(episodeStages.stage),
+      .from(episodeProductionStages)
+      .innerJoin(episodes, eq(episodes.id, episodeProductionStages.episodeId))
+      .where(
+        and(eq(episodeProductionStages.projectId, project.id), isNull(episodes.deletedAt))
+      )
+      .groupBy(episodeProductionStages.stageKey),
 
     db
       .select({ kind: aiJobs.kind, n: count() })
@@ -326,17 +338,17 @@ export default async function DashboardPage() {
 
             <div className="flex flex-col gap-2 border-t border-stage-700/60 pt-3">
               <span className="text-[11px] font-medium text-ink-400">製作階段</span>
-              {STAGES.map((stage: StageValue) => {
+              {PRODUCTION_STAGE_KEYS.map((stage) => {
                 const row = stageByKey.get(stage)
                 const total = Number(row?.total ?? 0)
                 const done = Number(row?.done ?? 0)
                 return (
                   <MeterRow
                     key={stage}
-                    label={STAGE_LABEL[stage]}
+                    label={`${stageOrdinal(stage)} ${PRODUCTION_STAGE_LABEL[stage]}`}
                     value={done}
                     max={total}
-                    trailing={`${done} / ${total}`}
+                    trailing={`${toPercent(aggregateProgress(done, total))}%`}
                   />
                 )
               })}

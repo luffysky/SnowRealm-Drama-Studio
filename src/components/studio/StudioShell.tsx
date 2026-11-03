@@ -14,6 +14,7 @@ import {
   PenLine,
   Receipt,
   Settings,
+  Sparkles,
   Users,
   X,
   type LucideIcon,
@@ -59,6 +60,7 @@ const ICONS: Record<string, LucideIcon> = {
   Users,
   Receipt,
   Settings,
+  Sparkles,
 }
 
 export function StudioShell({ user, children }: { user: SessionUser; children: ReactNode }) {

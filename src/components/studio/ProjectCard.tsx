@@ -32,6 +32,8 @@ export type ProjectCardData = {
   dueDate: string | null
   spend: number
   isFavourite: boolean
+  /** Cover image, served through /api/files which checks the session first. */
+  coverAssetId: string | null
 }
 
 export function ProjectCard({
@@ -101,8 +103,28 @@ export function ProjectCard({
     >
       {/* cover */}
       <div className="relative aspect-video w-full overflow-hidden">
-        {/* Gradient stands in until a cover asset is uploaded. */}
-        <div aria-hidden className="art-placeholder absolute inset-0" />
+        {/*
+          The bucket is private, so the cover is fetched through
+          /api/files/<id>, which checks the session and then redirects to a
+          short-lived presigned URL. Embedding the presigned URL directly would
+          rot as soon as it expired.
+
+          Plain <img>, not next/image: the route answers with a 307 to R2, and
+          the optimiser would have to be allow-listed for a host that changes.
+        */}
+        {project.coverAssetId ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/files/${project.coverAssetId}`}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className="absolute inset-0 size-full object-cover"
+          />
+        ) : (
+          /* Gradient stands in until a cover asset is uploaded. */
+          <div aria-hidden className="art-placeholder absolute inset-0" />
+        )}
         <div
           aria-hidden
           className="absolute inset-0 bg-gradient-to-t from-stage-950 via-stage-950/40 to-transparent"

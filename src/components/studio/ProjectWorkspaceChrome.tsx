@@ -28,6 +28,7 @@ export type WorkspaceProject = {
   id: string
   title: string
   isFlagship: boolean
+  coverAssetId: string | null
 }
 
 export function ProjectWorkspaceChrome({
@@ -58,6 +59,17 @@ export function ProjectWorkspaceChrome({
       </nav>
 
       <div className="flex flex-wrap items-center gap-2">
+        {/* Private bucket: served through /api/files, which checks the session. */}
+        {project.coverAssetId && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/files/${project.coverAssetId}`}
+            alt=""
+            decoding="async"
+            className="h-9 w-16 shrink-0 rounded object-cover ring-1 ring-stage-700"
+          />
+        )}
+
         <ProjectSwitcher project={project} siblings={siblings} activeKey={activeKey} />
 
         <span
@@ -148,7 +160,17 @@ function ProjectSwitcher({
                       : 'text-ink-300 hover:bg-stage-800 hover:text-ink-50'
                   )}
                 >
-                  <Film aria-hidden className="size-3.5 shrink-0 text-ink-500" />
+                  {sibling.coverAssetId ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`/api/files/${sibling.coverAssetId}`}
+                      alt=""
+                      decoding="async"
+                      className="h-6 w-10 shrink-0 rounded object-cover"
+                    />
+                  ) : (
+                    <Film aria-hidden className="size-3.5 shrink-0 text-ink-500" />
+                  )}
                   <span className="min-w-0 flex-1 truncate">{sibling.title}</span>
                   {current && <Check aria-hidden className="size-3.5 shrink-0 text-accent-400" />}
                 </Link>

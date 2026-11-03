@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { CURRENCIES } from '@/lib/money'
+import { PRODUCTION_STAGE_KEYS, PRODUCTION_STAGE_STATUSES } from '@/lib/production'
 import {
   ASSET_KINDS,
   CAMERA_MOVES,
@@ -9,8 +10,6 @@ import {
   MAX_UPLOAD_BYTES,
   SHOT_SIZES,
   SHOT_STATUSES,
-  STAGE_STATES,
-  STAGES,
 } from './constants'
 import { PASSWORD_MIN_LENGTH } from './auth/password'
 
@@ -133,8 +132,8 @@ export const episodeBulkUpdateSchema = z.object({
   status: z.enum(EPISODE_STATUSES).optional(),
   targetSec: z.coerce.number().int().min(10).max(3600).optional(),
   assigneeId: uuid.nullable().optional(),
-  stage: z.enum(STAGES).optional(),
-  stageState: z.enum(STAGE_STATES).optional(),
+  stage: z.enum(PRODUCTION_STAGE_KEYS).optional(),
+  stageState: z.enum(PRODUCTION_STAGE_STATUSES).optional(),
 })
 
 export const documentSaveSchema = z.object({
@@ -254,8 +253,8 @@ export const assetUpdateSchema = z.object({
 
 export const stageUpdateSchema = z.object({
   episodeId: uuid,
-  stage: z.enum(STAGES),
-  state: z.enum(STAGE_STATES),
+  stage: z.enum(PRODUCTION_STAGE_KEYS),
+  state: z.enum(PRODUCTION_STAGE_STATUSES),
   assigneeId: uuid.nullable().optional(),
   note: z.string().trim().max(1000).optional(),
 })

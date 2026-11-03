@@ -40,11 +40,17 @@ export default async function ProjectWorkspaceLayout({
   return (
     <div className="flex min-h-full flex-col">
       <ProjectWorkspaceChrome
-        project={{ id: project.id, title: project.title, isFlagship: project.isFlagship }}
+        project={{
+          id: project.id,
+          title: project.title,
+          isFlagship: project.isFlagship,
+          coverAssetId: project.coverAssetId,
+        }}
         siblings={cards.map((card) => ({
           id: card.id,
           title: card.title,
           isFlagship: card.isFlagship,
+          coverAssetId: card.coverAssetId,
         }))}
         statusLabel={PROJECT_STATUS_LABEL[project.status]}
         statusClassName={PROJECT_STATUS_STYLE[project.status]}

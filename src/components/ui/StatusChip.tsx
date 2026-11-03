@@ -8,16 +8,18 @@ import {
   EPISODE_STATUS_STYLE,
   SHOT_STATUS_LABEL,
   SHOT_STATUS_STYLE,
-  STAGE_STATE_LABEL,
-  STAGE_STATE_STYLE,
   TASK_PRIORITY_LABEL,
   TASK_PRIORITY_STYLE,
   type AiJobStatusValue,
   type EpisodeStatusValue,
   type ShotStatusValue,
-  type StageStateValue,
   type TaskPriorityValue,
 } from '@/lib/constants'
+import {
+  PRODUCTION_STAGE_STATUS_LABEL,
+  PRODUCTION_STAGE_STATUS_STYLE,
+  type ProductionStageStatus,
+} from '@/lib/production'
 import { cn } from '@/lib/utils'
 
 /** Generic chip. The typed wrappers below are what pages should use. */
@@ -52,8 +54,12 @@ export function ShotStatusChip({ status }: { status: ShotStatusValue }) {
   return <Chip className={SHOT_STATUS_STYLE[status]}>{SHOT_STATUS_LABEL[status]}</Chip>
 }
 
-export function StageStateChip({ state }: { state: StageStateValue }) {
-  return <Chip className={STAGE_STATE_STYLE[state]}>{STAGE_STATE_LABEL[state]}</Chip>
+export function StageStatusChip({ status }: { status: ProductionStageStatus }) {
+  return (
+    <Chip className={PRODUCTION_STAGE_STATUS_STYLE[status]}>
+      {PRODUCTION_STAGE_STATUS_LABEL[status]}
+    </Chip>
+  )
 }
 
 export function AiJobStatusChip({ status }: { status: AiJobStatusValue }) {

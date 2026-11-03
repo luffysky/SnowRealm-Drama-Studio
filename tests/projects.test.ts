@@ -80,15 +80,15 @@ describe.skipIf(!hasDb)('listProjects', () => {
 
     // Mark one stage done, then put it back.
     const [stage] = await db
-      .select({ id: schema.episodeStages.id })
-      .from(schema.episodeStages)
-      .where(eq(schema.episodeStages.episodeId, episode!.id))
+      .select({ id: schema.episodeProductionStages.id })
+      .from(schema.episodeProductionStages)
+      .where(eq(schema.episodeProductionStages.episodeId, episode!.id))
       .limit(1)
 
     await db
-      .update(schema.episodeStages)
-      .set({ state: 'DONE' })
-      .where(eq(schema.episodeStages.id, stage!.id))
+      .update(schema.episodeProductionStages)
+      .set({ status: 'completed', progressPercent: 100 })
+      .where(eq(schema.episodeProductionStages.id, stage!.id))
 
     try {
       const { cards } = await projectsLib.listProjects(ownerId)
@@ -99,9 +99,61 @@ describe.skipIf(!hasDb)('listProjects', () => {
       expect(card.progress).toBeLessThan(0.01)
     } finally {
       await db
-        .update(schema.episodeStages)
-        .set({ state: 'TODO' })
-        .where(eq(schema.episodeStages.id, stage!.id))
+        .update(schema.episodeProductionStages)
+        .set({ status: 'not_started', progressPercent: 0 })
+        .where(eq(schema.episodeProductionStages.id, stage!.id))
+    }
+  })
+
+  it('counts a half-finished stage as half, and a blocked one as not done', async () => {
+    /*
+     * spec v3 §11.2: `completed` counts 1, `in_progress` counts its verified
+     * percentage, and a blocked stage must never be treated as complete.
+     */
+    const [episode] = await db
+      .select({ id: schema.episodes.id })
+      .from(schema.episodes)
+      .where(eq(schema.episodes.projectId, projectId))
+      .limit(1)
+
+    const [stage] = await db
+      .select({ id: schema.episodeProductionStages.id })
+      .from(schema.episodeProductionStages)
+      .where(eq(schema.episodeProductionStages.episodeId, episode!.id))
+      .limit(1)
+
+    const progressOf = async () => {
+      const { cards } = await projectsLib.listProjects(ownerId)
+      return cards.find((c) => c.id === projectId)!.progress
+    }
+
+    try {
+      await db
+        .update(schema.episodeProductionStages)
+        .set({ status: 'completed', progressPercent: 100 })
+        .where(eq(schema.episodeProductionStages.id, stage!.id))
+      const whole = await progressOf()
+
+      await db
+        .update(schema.episodeProductionStages)
+        .set({ status: 'in_progress', progressPercent: 50 })
+        .where(eq(schema.episodeProductionStages.id, stage!.id))
+      const half = await progressOf()
+
+      expect(half).toBeGreaterThan(0)
+      expect(half).toBeLessThan(whole)
+
+      // Blocked at 0% contributes nothing, however urgent it feels.
+      await db
+        .update(schema.episodeProductionStages)
+        .set({ status: 'blocked', progressPercent: 0 })
+        .where(eq(schema.episodeProductionStages.id, stage!.id))
+      expect(await progressOf()).toBe(0)
+    } finally {
+      await db
+        .update(schema.episodeProductionStages)
+        .set({ status: 'not_started', progressPercent: 0 })
+        .where(eq(schema.episodeProductionStages.id, stage!.id))
     }
   })
 

@@ -126,19 +126,43 @@ export const uploadStatusEnum = pgEnum('upload_status', [
   'ABORTED',
 ])
 
-export const stageEnum = pgEnum('stage', [
-  'NOVEL',
-  'SCRIPT',
-  'STORYBOARD',
-  'IMAGE',
-  'VIDEO',
-  'VOICE',
-  'MUSIC',
-  'EDIT',
-  'REVIEW',
+/**
+ * The nine production stages, as fixed keys (spec v3 §11.2).
+ *
+ * Lower case and snake_case because the spec names them that way and they
+ * appear in URLs and API payloads. The order is the pipeline order, which the
+ * UI relies on.
+ *
+ * Replaces the earlier set (NOVEL…REVIEW): 劇情規劃 and 上架發布 were added,
+ * and 圖像/配音/音樂 collapsed into a single 素材製作 stage.
+ */
+export const productionStageKeyEnum = pgEnum('production_stage_key', [
+  'story_planning',
+  'novel',
+  'script',
+  'storyboard',
+  'assets',
+  'video',
+  'postproduction',
+  'review',
+  'release',
 ])
 
-export const stageStateEnum = pgEnum('stage_state', ['TODO', 'DOING', 'BLOCKED', 'DONE'])
+/**
+ * Spec v3 §11.2. `in_review` sits between work and acceptance: a stage whose
+ * output exists but has not been approved is not finished, and must not count
+ * as one.
+ */
+export const productionStageStatusEnum = pgEnum('production_stage_status', [
+  'not_started',
+  'in_progress',
+  'blocked',
+  'in_review',
+  'completed',
+])
+
+/** Who a stage is assigned to. AI work is tracked separately from a person's. */
+export const assigneeTypeEnum = pgEnum('assignee_type', ['USER', 'AI', 'EXTERNAL'])
 
 /** 任務看板的五個狀態 */
 export const taskStatusEnum = pgEnum('task_status', [

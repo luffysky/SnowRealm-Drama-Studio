@@ -104,68 +104,11 @@ export const EPISODE_STATUS_STYLE: Record<EpisodeStatusValue, string> = {
 // 製作階段
 // ---------------------------------------------------------------------------
 
-export const STAGES = [
-  'NOVEL',
-  'SCRIPT',
-  'STORYBOARD',
-  'IMAGE',
-  'VIDEO',
-  'VOICE',
-  'MUSIC',
-  'EDIT',
-  'REVIEW',
-] as const
-export type StageValue = (typeof STAGES)[number]
-
-export const STAGE_LABEL: Record<StageValue, string> = {
-  NOVEL: '小說',
-  SCRIPT: '劇本',
-  STORYBOARD: '分鏡',
-  IMAGE: '圖像',
-  VIDEO: '影片',
-  VOICE: '配音',
-  MUSIC: '音樂',
-  EDIT: '剪輯',
-  REVIEW: '審核',
-}
-
-/** Single character used in the dense 120-episode grid. */
-export const STAGE_SHORT: Record<StageValue, string> = {
-  NOVEL: '小',
-  SCRIPT: '劇',
-  STORYBOARD: '分',
-  IMAGE: '圖',
-  VIDEO: '影',
-  VOICE: '音',
-  MUSIC: '樂',
-  EDIT: '剪',
-  REVIEW: '審',
-}
-
-export const STAGE_STATES = ['TODO', 'DOING', 'BLOCKED', 'DONE'] as const
-export type StageStateValue = (typeof STAGE_STATES)[number]
-
-export const STAGE_STATE_LABEL: Record<StageStateValue, string> = {
-  TODO: '未開始',
-  DOING: '進行中',
-  BLOCKED: '卡住',
-  DONE: '完成',
-}
-
-export const STAGE_STATE_STYLE: Record<StageStateValue, string> = {
-  TODO: 'bg-stage-800 text-ink-500 ring-stage-700',
-  DOING: 'bg-amber-500/20 text-amber-300 ring-amber-600/60',
-  BLOCKED: 'bg-rose-500/20 text-rose-300 ring-rose-600/60',
-  DONE: 'bg-emerald-500/20 text-emerald-300 ring-emerald-600/60',
-}
-
-/** Dot colour for the compact stage strip on an episode card. */
-export const STAGE_STATE_DOT: Record<StageStateValue, string> = {
-  TODO: 'bg-stage-600',
-  DOING: 'bg-amber-400',
-  BLOCKED: 'bg-rose-500',
-  DONE: 'bg-emerald-400',
-}
+/**
+ * 製作階段的名稱、顏色與完成度規則全部移到 `src/lib/production.ts`
+ * （spec v3 §11.2 的九階段固定鍵）。舊的 STAGES / STAGE_STATES 已移除，
+ * 因為那套鍵值（IMAGE／VOICE／MUSIC／EDIT）不再存在於資料庫。
+ */
 
 // ---------------------------------------------------------------------------
 // 分鏡

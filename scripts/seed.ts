@@ -15,9 +15,10 @@
  */
 import { eq, inArray } from 'drizzle-orm'
 import { closeDb, db } from '../src/db'
-import { arcs, episodeStages, episodes, projects, users } from '../src/db/schema'
+import { arcs, episodeProductionStages, episodes, projects, users } from '../src/db/schema'
 import { hashPassword, describePasswordProblem } from '../src/lib/auth/password'
-import { FLAGSHIP, STAGES } from '../src/lib/constants'
+import { FLAGSHIP } from '../src/lib/constants'
+import { PRODUCTION_STAGE_KEYS } from '../src/lib/production'
 import { accountHandleSchema } from '../src/lib/validators'
 import { loadEnv } from '../src/lib/load-env'
 
@@ -223,18 +224,23 @@ async function seedEpisodes(projectId: string, arcId: string) {
         .returning({ id: episodes.id, number: episodes.number })
 
       const stageRows = inserted.flatMap((ep) =>
-        STAGES.map((stage) => ({ episodeId: ep.id, stage, state: 'TODO' as const }))
+        PRODUCTION_STAGE_KEYS.map((stageKey) => ({
+          projectId,
+          episodeId: ep.id,
+          stageKey,
+          status: 'not_started' as const,
+        }))
       )
 
       // Chunked: a single 1,080-row insert exceeds the parameter limit.
       for (let i = 0; i < stageRows.length; i += 500) {
-        await tx.insert(episodeStages).values(stageRows.slice(i, i + 500))
+        await tx.insert(episodeProductionStages).values(stageRows.slice(i, i + 500))
       }
     })
 
     console.log(
       `  episodes 新增 ${toCreate.length} 集（第 ${toCreate[0]} ~ ${toCreate.at(-1)} 集）` +
-        `，共 ${toCreate.length * STAGES.length} 筆階段紀錄`
+        `，共 ${toCreate.length * PRODUCTION_STAGE_KEYS.length} 筆階段紀錄`
     )
   }
 
@@ -248,29 +254,33 @@ async function seedEpisodes(projectId: string, arcId: string) {
   if (episodeIds.length === 0) return
 
   const stageCounts = await db
-    .select({ episodeId: episodeStages.episodeId, stage: episodeStages.stage })
-    .from(episodeStages)
-    .where(inArray(episodeStages.episodeId, episodeIds))
+    .select({
+      episodeId: episodeProductionStages.episodeId,
+      stageKey: episodeProductionStages.stageKey,
+    })
+    .from(episodeProductionStages)
+    .where(inArray(episodeProductionStages.episodeId, episodeIds))
 
   const byEpisode = new Map<string, Set<string>>()
   for (const row of stageCounts) {
     const set = byEpisode.get(row.episodeId) ?? new Set<string>()
-    set.add(row.stage)
+    set.add(row.stageKey)
     byEpisode.set(row.episodeId, set)
   }
 
   const backfill = episodeIds.flatMap((id) => {
     const have2 = byEpisode.get(id) ?? new Set<string>()
-    return STAGES.filter((s) => !have2.has(s)).map((stage) => ({
+    return PRODUCTION_STAGE_KEYS.filter((k) => !have2.has(k)).map((stageKey) => ({
+      projectId,
       episodeId: id,
-      stage,
-      state: 'TODO' as const,
+      stageKey,
+      status: 'not_started' as const,
     }))
   })
 
   if (backfill.length > 0) {
     for (let i = 0; i < backfill.length; i += 500) {
-      await db.insert(episodeStages).values(backfill.slice(i, i + 500))
+      await db.insert(episodeProductionStages).values(backfill.slice(i, i + 500))
     }
     console.log(`  stages  補齊 ${backfill.length} 筆缺少的階段紀錄`)
   }

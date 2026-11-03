@@ -4,7 +4,7 @@ import {
   aiJobs,
   assets,
   characters,
-  episodeStages,
+  episodeProductionStages,
   episodes,
   projects,
   tasks,
@@ -12,6 +12,14 @@ import {
   worldEntries,
 } from '@/db/schema'
 import type { ProjectStatusValue } from '@/lib/constants'
+import {
+  aggregateProgress,
+  PRODUCTION_STAGE_KEYS,
+  PRODUCTION_STAGE_LABEL,
+  stageOrdinal,
+  STAGES_PER_EPISODE,
+  type ProductionStageKey,
+} from '@/lib/production'
 import { getProjectDetail } from '@/lib/projects'
 
 /**
@@ -25,34 +33,25 @@ import { getProjectDetail } from '@/lib/projects'
  */
 
 /**
- * The seven workflow steps the pipeline shows.
+ * One entry per production stage, in pipeline order.
  *
- * They are coarser than the nine `episode_stages`, so each step owns a set of
- * stages and its completion is the fraction of those rows that are DONE.
- * 企劃 and 發行 own none: they are read from the project's own status instead,
- * since neither has stage rows behind it.
+ * This used to collapse the stages into seven coarser "workflow steps", with
+ * 企劃 and 發行 inferred from the project's status because no stage row backed
+ * them. Spec v3 §11.2 gave 劇情規劃 and 上架發布 real keys, so the pipeline is
+ * now simply the nine stages and nothing has to be guessed.
  */
-export const WORKFLOW_STEPS = [
-  { key: 'PLANNING', label: '企劃', stages: [] as readonly string[] },
-  { key: 'SCRIPT', label: '劇本', stages: ['NOVEL', 'SCRIPT'] as readonly string[] },
-  { key: 'STORYBOARD', label: '分鏡', stages: ['STORYBOARD'] as readonly string[] },
-  {
-    key: 'PRODUCTION',
-    label: '製作',
-    stages: ['IMAGE', 'VIDEO', 'VOICE', 'MUSIC'] as readonly string[],
-  },
-  { key: 'POST', label: '後製', stages: ['EDIT'] as readonly string[] },
-  { key: 'REVIEW', label: '審核', stages: ['REVIEW'] as readonly string[] },
-  { key: 'RELEASE', label: '發行', stages: [] as readonly string[] },
-] as const
-
 export type WorkflowStepState = 'DONE' | 'ACTIVE' | 'PENDING'
 
 export type WorkflowStep = {
-  key: string
+  key: ProductionStageKey
   label: string
+  /** `01`–`09`, as the design numbers them. */
+  ordinal: string
   state: WorkflowStepState
+  /** 0–1, completed equivalents over rows for this stage. */
   progress: number
+  episodesDone: number
+  episodeCount: number
 }
 
 export type OverviewEpisode = {
@@ -130,18 +129,25 @@ export async function getProjectOverview(
         .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt)))
         .groupBy(episodes.status),
 
+      // Per-stage completed equivalents, same contract as everywhere else.
       db
         .select({
-          stage: episodeStages.stage,
+          stage: episodeProductionStages.stageKey,
           total: count(),
-          done: sql<number>`count(*) filter (where ${episodeStages.state} = 'DONE')`.mapWith(
-            Number
-          ),
+          done: sql<string>`sum(
+            case
+              when ${episodeProductionStages.status} = 'completed' then 1.0
+              when ${episodeProductionStages.status} = 'not_started' then 0.0
+              else least(greatest(coalesce(${episodeProductionStages.progressPercent}, 0), 0), 100) / 100.0
+            end
+          )`.mapWith(Number),
         })
-        .from(episodeStages)
-        .innerJoin(episodes, eq(episodes.id, episodeStages.episodeId))
-        .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt)))
-        .groupBy(episodeStages.stage),
+        .from(episodeProductionStages)
+        .innerJoin(episodes, eq(episodes.id, episodeProductionStages.episodeId))
+        .where(
+          and(eq(episodeProductionStages.projectId, projectId), isNull(episodes.deletedAt))
+        )
+        .groupBy(episodeProductionStages.stageKey),
 
       db
         .select({
@@ -150,13 +156,20 @@ export async function getProjectOverview(
           title: episodes.title,
           status: episodes.status,
           dueDate: episodes.dueDate,
-          stageTotal: sql<number>`count(${episodeStages.id})`.mapWith(Number),
-          stageDone: sql<number>`count(*) filter (where ${episodeStages.state} = 'DONE')`.mapWith(
-            Number
-          ),
+          stageTotal: sql<number>`count(${episodeProductionStages.id})`.mapWith(Number),
+          stageDone: sql<string>`sum(
+            case
+              when ${episodeProductionStages.status} = 'completed' then 1.0
+              when ${episodeProductionStages.status} = 'not_started' then 0.0
+              else least(greatest(coalesce(${episodeProductionStages.progressPercent}, 0), 0), 100) / 100.0
+            end
+          )`.mapWith(Number),
         })
         .from(episodes)
-        .leftJoin(episodeStages, eq(episodeStages.episodeId, episodes.id))
+        .leftJoin(
+          episodeProductionStages,
+          eq(episodeProductionStages.episodeId, episodes.id)
+        )
         .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt)))
         .groupBy(episodes.id)
         .orderBy(asc(episodes.number))
@@ -224,30 +237,23 @@ export async function getProjectOverview(
     stageRows.map((r) => [r.stage as string, { total: Number(r.total), done: Number(r.done) }])
   )
 
-  const workflow: WorkflowStep[] = WORKFLOW_STEPS.map((step) => {
-    if (step.stages.length === 0) {
-      const done =
-        step.key === 'PLANNING' ? detail.episodeCount > 0 : detail.status === 'RELEASED'
-      return {
-        key: step.key,
-        label: step.label,
-        state: (done ? 'DONE' : 'PENDING') as WorkflowStepState,
-        progress: done ? 1 : 0,
-      }
+  const workflow: WorkflowStep[] = PRODUCTION_STAGE_KEYS.map((key) => {
+    const row = stageBy.get(key)
+    // Denominator is the episode count, not the rows present: a stage whose
+    // rows were never created is unstarted work, not absent work.
+    const total = Math.max(detail.episodeCount, Number(row?.total ?? 0))
+    const done = Number(row?.done ?? 0)
+    const progress = aggregateProgress(done, total)
+
+    return {
+      key,
+      label: PRODUCTION_STAGE_LABEL[key],
+      ordinal: stageOrdinal(key),
+      state: (progress >= 1 ? 'DONE' : progress > 0 ? 'ACTIVE' : 'PENDING') as WorkflowStepState,
+      progress,
+      episodesDone: Math.round(done),
+      episodeCount: total,
     }
-
-    let total = 0
-    let doneCount = 0
-    for (const stage of step.stages) {
-      const row = stageBy.get(stage)
-      total += Number(row?.total ?? 0)
-      doneCount += Number(row?.done ?? 0)
-    }
-
-    const progress = total > 0 ? doneCount / total : 0
-    const state: WorkflowStepState = progress >= 1 ? 'DONE' : progress > 0 ? 'ACTIVE' : 'PENDING'
-
-    return { key: step.key, label: step.label, state, progress }
   })
 
   // Highlight where work actually stands: the earliest unfinished step.
@@ -294,7 +300,8 @@ export async function getProjectOverview(
       number: e.number,
       title: e.title,
       status: e.status,
-      progress: e.stageTotal > 0 ? e.stageDone / e.stageTotal : 0,
+      // Always out of nine: an episode missing its 上架發布 row is not 8/8 done.
+      progress: aggregateProgress(e.stageDone, STAGES_PER_EPISODE),
       dueDate: e.dueDate,
     })),
     assets: assetList,

@@ -449,7 +449,18 @@ function DetailRail({
           there; the aspect ratio only applies once the rail is a column.
         */}
         <div className="relative h-32 w-full sm:h-40 xl:h-auto xl:aspect-video">
-          <div aria-hidden className="art-placeholder absolute inset-0" />
+          {project.coverAssetId ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`/api/files/${project.coverAssetId}`}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="absolute inset-0 size-full object-cover"
+            />
+          ) : (
+            <div aria-hidden className="art-placeholder absolute inset-0" />
+          )}
           <div
             aria-hidden
             className="absolute inset-0 bg-gradient-to-t from-stage-900 to-transparent"

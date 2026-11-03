@@ -90,6 +90,20 @@ export const NAV_SECTIONS: NavSection[] = [
     design: 20,
   },
   {
+    /*
+     * Spec v3 §11.1: this may stay in the global rail *only* because it is the
+     * cross-project job queue and provider monitor (designs 76 and 80).
+     * Generating for one project happens inside that project's workspace.
+     */
+    key: 'ai',
+    label: 'AI 製片中心',
+    icon: 'Sparkles',
+    href: '/ai',
+    ready: false,
+    milestone: 'M3',
+    design: 80,
+  },
+  {
     key: 'settings',
     label: '系統設定',
     icon: 'Settings',
@@ -126,46 +140,27 @@ export type ProjectTab = {
  * table in the docs, so a tab cannot exist in the UI without a route or the
  * other way round.
  */
+/**
+ * Every view of one project, in the order the tab strip shows them.
+ *
+ * Segments come from spec v3 §11.1's route table, which is authoritative over
+ * the older visual designs. One definition drives the strip, the active-tab
+ * highlight and the route table in the docs, so a tab cannot exist in the UI
+ * without a route or the other way round.
+ */
 export const PROJECT_TABS: ProjectTab[] = [
   { key: 'overview', label: '總覽', segment: '', ready: true, design: 4 },
-  { key: 'episodes', label: '集數', segment: 'episodes', ready: false, milestone: 'M1', design: 5 },
-  { key: 'script', label: '劇本', segment: 'script', ready: false, milestone: 'M2', design: 7 },
+  { key: 'episodes', label: '集數管理', segment: 'episodes', ready: false, milestone: 'M1', design: 5 },
+  { key: 'novel', label: '小說編輯', segment: 'novel', ready: false, milestone: 'M2', design: 6 },
+  { key: 'scripts', label: '劇本工坊', segment: 'scripts', ready: false, milestone: 'M2', design: 7 },
   { key: 'world', label: '世界觀', segment: 'world', ready: false, milestone: 'M2', design: 9 },
-  {
-    key: 'characters',
-    label: '角色',
-    segment: 'characters',
-    ready: false,
-    milestone: 'M2',
-    design: 10,
-  },
-  {
-    key: 'storyboard',
-    label: '分鏡',
-    segment: 'storyboard',
-    ready: false,
-    milestone: 'M3',
-    design: 12,
-  },
-  { key: 'assets', label: '素材', segment: 'assets', ready: false, milestone: 'M3', design: 14 },
-  {
-    key: 'production',
-    label: '製作',
-    segment: 'production',
-    ready: false,
-    milestone: 'M3',
-    design: 17,
-  },
-  { key: 'reviews', label: '審核', segment: 'reviews', ready: false, milestone: 'M4', design: 57 },
-  { key: 'versions', label: '版本', segment: 'versions', ready: false, milestone: 'M2', design: 8 },
-  {
-    key: 'settings',
-    label: '設定',
-    segment: 'settings',
-    ready: false,
-    milestone: 'M4',
-    design: 21,
-  },
+  { key: 'characters', label: '角色設定', segment: 'characters', ready: false, milestone: 'M2', design: 10 },
+  { key: 'storyboard', label: '分鏡工作台', segment: 'storyboard', ready: false, milestone: 'M3', design: 12 },
+  { key: 'assets', label: '素材管理', segment: 'assets', ready: false, milestone: 'M3', design: 14 },
+  { key: 'production', label: '製作進度', segment: 'production', ready: false, milestone: 'M1', design: 17 },
+  { key: 'reviews', label: '審核發布', segment: 'reviews', ready: false, milestone: 'M4', design: 58 },
+  { key: 'versions', label: '版本紀錄', segment: 'versions', ready: false, milestone: 'M2', design: 8 },
+  { key: 'tasks', label: '作品任務', segment: 'tasks', ready: false, milestone: 'M4', design: 18 },
 ]
 
 export function projectTabHref(projectId: string, tab: ProjectTab): string {
