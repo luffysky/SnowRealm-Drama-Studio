@@ -11,6 +11,8 @@ import {
   MAX_UPLOAD_BYTES,
   SHOT_SIZES,
   SHOT_STATUSES,
+  WORLD_CATEGORIES,
+  WORLD_EVENT_SCOPES,
 } from './constants'
 import { PASSWORD_MIN_LENGTH } from './auth/password'
 
@@ -443,4 +445,33 @@ export const saveSceneSchema = z.object({
   timeOfDay: z.string().trim().max(40, '時間最多 40 個字').optional(),
   content: z.string().max(200_000, '單一場次最多 200,000 個字元'),
   expectedRevision: z.number().int().nonnegative(),
+})
+
+/* -------------------------------------------------------------------------- */
+/* 世界觀                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export const createWorldEntrySchema = z.object({
+  category: z.enum(WORLD_CATEGORIES),
+  title: z.string().trim().min(1, '請輸入標題').max(120, '標題最多 120 個字'),
+  summary: z.string().trim().max(500, '摘要最多 500 個字').optional(),
+  body: z.string().max(50_000, '內文最多 50,000 個字元').optional(),
+  tags: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
+})
+
+export const updateWorldEntrySchema = z.object({
+  category: z.enum(WORLD_CATEGORIES).optional(),
+  title: z.string().trim().min(1, '請輸入標題').max(120, '標題最多 120 個字').optional(),
+  summary: z.string().trim().max(500, '摘要最多 500 個字').optional(),
+  body: z.string().max(50_000, '內文最多 50,000 個字元').optional(),
+  tags: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
+  isCanon: z.boolean().optional(),
+})
+
+export const createWorldEventSchema = z.object({
+  scope: z.enum(WORLD_EVENT_SCOPES),
+  title: z.string().trim().min(1, '請輸入事件名稱').max(120, '名稱最多 120 個字'),
+  description: z.string().trim().max(2000, '說明最多 2000 個字').optional(),
+  eraLabel: z.string().trim().max(60, '紀年最多 60 個字').optional(),
+  revealedInEpisode: z.number().int().positive().nullable().optional(),
 })

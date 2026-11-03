@@ -153,7 +153,7 @@ export const PROJECT_TABS: ProjectTab[] = [
   { key: 'episodes', label: '集數管理', segment: 'episodes', ready: true, design: 5 },
   { key: 'novel', label: '小說編輯', segment: 'novel', ready: true, design: 6 },
   { key: 'scripts', label: '劇本工坊', segment: 'scripts', ready: true, design: 7 },
-  { key: 'world', label: '世界觀', segment: 'world', ready: false, milestone: 'M2', design: 9 },
+  { key: 'world', label: '世界觀', segment: 'world', ready: true, design: 9 },
   { key: 'characters', label: '角色設定', segment: 'characters', ready: false, milestone: 'M2', design: 10 },
   { key: 'storyboard', label: '分鏡工作台', segment: 'storyboard', ready: false, milestone: 'M3', design: 12 },
   { key: 'assets', label: '素材管理', segment: 'assets', ready: false, milestone: 'M3', design: 14 },
