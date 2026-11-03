@@ -16,7 +16,14 @@
  * unbuilt entry renders disabled with its milestone, never as a link to a 404.
  */
 
-export type Milestone = 'M1' | 'M2' | 'M3' | 'M4'
+/**
+ * Delivery milestones.
+ *
+ * M0 is the groundwork — auth, database, storage, deployment — which no
+ * navigation entry points at but which the milestone panel still has to be
+ * able to report on.
+ */
+export type Milestone = 'M0' | 'M1' | 'M2' | 'M3' | 'M4'
 
 export type NavLeaf = {
   key: string

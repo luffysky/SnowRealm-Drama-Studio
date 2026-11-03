@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { AltTitles } from '@/components/studio/AltTitles'
+import { MilestoneBadge } from '@/components/studio/MilestoneBadge'
 import { ProjectSettingsDialog } from '@/components/studio/ProjectSettingsDialog'
 import {
   activeProjectTabKey,
@@ -275,7 +276,7 @@ function Tab({
         )}
       >
         {tab.label}
-        <span className="text-[9px] text-ink-700">{tab.milestone}</span>
+        {tab.milestone && <MilestoneBadge milestone={tab.milestone} label={tab.label} />}
       </span>
     )
   }

@@ -125,6 +125,8 @@ export function OutlineGenerator({
    */
   const [sourceText, setSourceText] = useState('')
   const [writtenCount, setWrittenCount] = useState(0)
+  /** Episodes with prose: their outlines summarise, the rest are proposals. */
+  const [writtenNumbers, setWrittenNumbers] = useState<number[]>([])
   const [loadingContext, setLoadingContext] = useState(false)
 
   useEffect(() => {
@@ -141,9 +143,14 @@ export function OutlineGenerator({
         )
         if (!response.ok) throw new Error(await readApiError(response))
 
-        const body = (await response.json()) as { sourceText: string; writtenCount: number }
+        const body = (await response.json()) as {
+          sourceText: string
+          writtenCount: number
+          writtenNumbers: number[]
+        }
         setSourceText(body.sourceText)
         setWrittenCount(body.writtenCount)
+        setWrittenNumbers(body.writtenNumbers ?? [])
       } catch (cause) {
         if (controller.signal.aborted) return
         setError(cause instanceof Error ? cause.message : '讀取範圍資料失敗')
@@ -480,6 +487,20 @@ export function OutlineGenerator({
                       <span className="text-xs font-medium text-ink-100">
                         EP{String(entry.number).padStart(3, '0')}
                       </span>
+                      {/*
+                        The distinction that matters at adoption time: an
+                        outline for a written episode describes what is there,
+                        one for an empty episode is the model's invention.
+                      */}
+                      {writtenNumbers.includes(entry.number) ? (
+                        <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
+                          整理自已寫的正文
+                        </span>
+                      ) : (
+                        <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300 ring-1 ring-inset ring-amber-500/30">
+                          AI 提議的新劇情
+                        </span>
+                      )}
                       <span className="text-[10px] text-ink-600">
                         {entry.changes.length} 個欄位會變更
                       </span>

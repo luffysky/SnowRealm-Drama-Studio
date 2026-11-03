@@ -79,14 +79,15 @@ export const GET = handle(
       '',
     ]
 
-    let writtenCount = 0
+    /** Episode numbers that already have prose — those are summarised, not invented. */
+    const writtenNumbers: number[] = []
 
     for (const row of rows) {
       const label = `EP${String(row.number).padStart(3, '0')}`
       const prose = stripHtmlToText(row.prose).trim()
 
       if (prose) {
-        writtenCount += 1
+        writtenNumbers.push(row.number)
         /*
          * When the prose exists the task changes shape: the outline should
          * describe what was actually written, not invent a parallel version.
@@ -146,8 +147,16 @@ export const GET = handle(
     return jsonOk({
       sourceText: lines.join('\n').trim(),
       episodeCount: rows.length,
-      /** How many in the range already have prose — changes what to ask for. */
-      writtenCount,
+      /*
+       * Which episodes already have prose.
+       *
+       * The review step needs this to tell two very different outputs apart.
+       * An outline for a written episode *summarises* it; an outline for an
+       * empty one is the model *proposing* a story. They are read differently
+       * and adopted differently, and the dialog used to show them identically.
+       */
+      writtenNumbers,
+      writtenCount: writtenNumbers.length,
     })
   }
 )

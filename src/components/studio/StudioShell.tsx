@@ -23,6 +23,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
 import { CommandPalette } from '@/components/studio/CommandPalette'
+import { MilestoneBadge } from '@/components/studio/MilestoneBadge'
 import { useToast } from '@/components/ui/Toast'
 import type { SessionUser } from '@/lib/auth/session'
 import { apiFetch } from '@/lib/client-fetch'
@@ -478,9 +479,13 @@ function RailSection({
             className={cn(row, 'cursor-default text-ink-600 select-none hover:bg-stage-800/60 hover:text-ink-400')}
           >
             {label}
-            <span className="ml-auto shrink-0 rounded bg-stage-800 px-1.5 py-0.5 text-[10px] font-normal text-ink-600 ring-1 ring-inset ring-stage-700">
-              {section.milestone}
-            </span>
+            {section.milestone && (
+              <MilestoneBadge
+                milestone={section.milestone}
+                label={section.label}
+                className="ml-auto"
+              />
+            )}
           </span>
         )}
 
@@ -515,7 +520,9 @@ function RailLeaf({
         className={cn(row, 'cursor-default text-ink-700 select-none hover:bg-stage-800/60 hover:text-ink-500')}
       >
         <span className="truncate">{leaf.label}</span>
-        <span className="ml-auto shrink-0 text-[10px] text-ink-700">{leaf.milestone}</span>
+        {leaf.milestone && (
+          <MilestoneBadge milestone={leaf.milestone} label={leaf.label} className="ml-auto" />
+        )}
       </span>
     )
   }

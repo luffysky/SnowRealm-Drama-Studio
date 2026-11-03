@@ -1,10 +1,12 @@
 'use client'
 
 import { X } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import {
   useCallback,
   useEffect,
   useRef,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
@@ -73,6 +75,18 @@ export function Dialog({
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const restoreFocusRef = useRef<HTMLElement | null>(null)
+
+  /*
+   * `document` does not exist during the server render, and the portal needs
+   * it. `useSyncExternalStore` rather than an effect: setting state in one is
+   * what `react-hooks/set-state-in-effect` forbids, and this is exactly the
+   * "read a client-only value" case it is for.
+   */
+  const mounted = useSyncExternalStore(
+    subscribeNever,
+    () => true,
+    () => false
+  )
 
   // Remember what had focus so it can be restored when the dialog closes.
   useEffect(() => {
@@ -144,11 +158,22 @@ export function Dialog({
     [busy, onRequestClose]
   )
 
-  if (!open) return null
+  if (!open || !mounted) return null
 
   const labelId = `${title.replace(/\s+/g, '-')}-dialog-title`
 
-  return (
+  /*
+   * Rendered into `document.body`, not where it was written.
+   *
+   * `position: fixed` is relative to the viewport only while no ancestor has a
+   * transform, filter or backdrop-filter — any of those makes the ancestor the
+   * containing block instead. The navigation rail has `transition-transform`
+   * for its slide-over, so a dialog opened from a button inside it rendered
+   * trapped in a 256px column rather than centred on screen.
+   *
+   * Portalling fixes every dialog, including ones not yet written.
+   */
+  return createPortal(
     <div
       className={cn(
         'fixed inset-0 z-50 flex animate-fade-in',
@@ -216,6 +241,12 @@ export function Dialog({
           </footer>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   )
+}
+
+/** The document is there or it is not; there is nothing to subscribe to. */
+function subscribeNever() {
+  return () => {}
 }
