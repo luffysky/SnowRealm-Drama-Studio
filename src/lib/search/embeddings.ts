@@ -15,7 +15,35 @@ export const EMBEDDING_MODEL = process.env.VOYAGE_MODEL?.trim() || 'voyage-4'
 /** Must match the `real[]` length the index was built with. */
 export const EMBEDDING_DIMENSIONS = 1024
 
-const ENDPOINT = 'https://api.voyageai.com/v1/embeddings'
+/**
+ * Which host serves this key.
+ *
+ * Voyage was acquired by MongoDB, and the standalone dashboard no longer
+ * issues keys — new ones are created in MongoDB Atlas and authenticate against
+ * `ai.mongodb.com`, not `api.voyageai.com`. A key sent to the wrong host is
+ * simply rejected, so this is not a detail that can be left to the caller.
+ *
+ * Atlas keys carry their scope in the prefix: `al-eu-…` and `al-us-…` work
+ * *only* against their own geography's host, which is the whole point of
+ * scoping them. Keys issued before geographies existed are unscoped `al-…`.
+ * Anything else is a legacy `pa-…` key from voyageai.com, which still works
+ * against the original host.
+ *
+ * `VOYAGE_BASE_URL` overrides all of it, for a proxy or a future host.
+ */
+export function embeddingsEndpoint(apiKey: string): string {
+  const override = process.env.VOYAGE_BASE_URL?.trim()
+  if (override) return `${override.replace(/\/+$/, '')}/embeddings`
+
+  if (apiKey.startsWith('al-')) {
+    const geography = /^al-(eu|us)-/.exec(apiKey)?.[1]
+    return geography
+      ? `https://${geography}.ai.mongodb.com/v1/embeddings`
+      : 'https://ai.mongodb.com/v1/embeddings'
+  }
+
+  return 'https://api.voyageai.com/v1/embeddings'
+}
 
 /** Voyage caps a single request; batching keeps indexing within it. */
 const MAX_BATCH = 64
@@ -48,7 +76,7 @@ export async function embed(
   for (let i = 0; i < texts.length; i += MAX_BATCH) {
     const batch = texts.slice(i, i + MAX_BATCH)
 
-    const response = await fetch(ENDPOINT, {
+    const response = await fetch(embeddingsEndpoint(key), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -64,8 +92,14 @@ export async function embed(
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
+      const hint =
+        response.status === 401 || response.status === 403
+          ? `（金鑰與端點必須配對：Atlas 的 al- 金鑰走 ai.mongodb.com，` +
+            `voyageai.com 的 pa- 金鑰走 api.voyageai.com；` +
+            `目前送往 ${embeddingsEndpoint(key)}）`
+          : ''
       throw new Error(
-        `Voyage 回應 ${response.status}：${detail.slice(0, 200) || '沒有內容'}`
+        `Voyage 回應 ${response.status}：${detail.slice(0, 200) || '沒有內容'}${hint}`
       )
     }
 

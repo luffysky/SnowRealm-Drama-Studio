@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest'
+import { embeddingsEndpoint } from '@/lib/search/embeddings'
 import { testDatabaseReady } from './helpers/database'
 
 /**
@@ -14,6 +15,35 @@ import { testDatabaseReady } from './helpers/database'
  * scoping, the lexical half, chunk de-duplication and the links — plus the
  * promise that the UI is told which mode it got.
  */
+describe('embeddings endpoint', () => {
+  /*
+   * Voyage was acquired by MongoDB. New keys are issued in Atlas and only work
+   * against ai.mongodb.com; the old voyageai.com host rejects them. Sending a
+   * key to the wrong host fails with a 401 that looks like a bad key, so this
+   * mapping is worth pinning down.
+   */
+  it('sends an Atlas key to MongoDB and a legacy key to Voyage', () => {
+    expect(embeddingsEndpoint('al-abc123')).toBe('https://ai.mongodb.com/v1/embeddings')
+    expect(embeddingsEndpoint('pa-abc123')).toBe('https://api.voyageai.com/v1/embeddings')
+  })
+
+  it('honours a geography-scoped key', () => {
+    // A Europe-scoped key fails against the unscoped host, which is the point
+    // of scoping it.
+    expect(embeddingsEndpoint('al-eu-abc123')).toBe('https://eu.ai.mongodb.com/v1/embeddings')
+    expect(embeddingsEndpoint('al-us-abc123')).toBe('https://us.ai.mongodb.com/v1/embeddings')
+  })
+
+  it('lets VOYAGE_BASE_URL override everything, trailing slash or not', () => {
+    process.env.VOYAGE_BASE_URL = 'https://proxy.example.com/v1/'
+    try {
+      expect(embeddingsEndpoint('al-eu-abc')).toBe('https://proxy.example.com/v1/embeddings')
+    } finally {
+      delete process.env.VOYAGE_BASE_URL
+    }
+  })
+})
+
 const hasDb = testDatabaseReady()
 
 let reindexProject: typeof import('@/lib/search').reindexProject

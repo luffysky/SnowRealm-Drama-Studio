@@ -90,7 +90,45 @@ Voyage 按 token 計費。控制方式只有一個，但很有效：**內容沒�
 
 ---
 
-## 5. 沒有金鑰的時候
+## 5. 金鑰怎麼拿（2026-11 現況）
+
+**voyageai.com 的 dashboard 已經不發新金鑰了。** Voyage AI 被 MongoDB 併購，
+金鑰改在 MongoDB Atlas 建立：
+
+1. 到 <https://cloud.mongodb.com> 註冊／登入（不用開 cluster，
+   Model API Key 是獨立的服務）。
+2. 左側 **Services** 底下點 **Model API Keys**
+   （在專案層級是 **AI Model APIs → Model API Keys**）。
+3. **Create new model API key** → 取名字 → 選要綁的 project
+   （**綁定之後不能改**）→ 選 Cloud provider 與 Geography（都可以選 `any`）。
+4. 複製金鑰。**離開頁面後就看不到第二次。**
+5. 貼進 `.env.local` 的 `VOYAGE_API_KEY`。
+
+> 權限：組織層級要 Organization Owner，專案層級要 Project Owner 或
+> Project Model Owner。
+> Geography 綁定需要付費方案，免費試用期間只能用 `any`。
+
+### 金鑰前綴決定端點
+
+這是最容易踩的坑：**金鑰送錯主機會回 401，看起來就像金鑰是錯的。**
+
+| 前綴 | 來源 | 端點 |
+| --- | --- | --- |
+| `al-` | Atlas，未綁地區 | `ai.mongodb.com` |
+| `al-eu-` | Atlas，綁歐洲 | `eu.ai.mongodb.com` |
+| `al-us-` | Atlas，綁美國 | `us.ai.mongodb.com` |
+| `pa-` | 舊的 voyageai.com | `api.voyageai.com` |
+
+`src/lib/search/embeddings.ts` 的 `embeddingsEndpoint()` 依前綴自動選，
+不用手動設定；真的要指定就用 `VOYAGE_BASE_URL`。
+綁了地區的金鑰送到 `ai.mongodb.com` 一樣會失敗——這就是綁定的用意。
+
+模型與參數沒有變：`voyage-4`、預設 1024 維，`input_type` 收 `document` / `query`，
+`output_dimension` 可選 2048 / 1024 / 512 / 256。
+
+---
+
+## 6. 沒有金鑰的時候
 
 `VOYAGE_API_KEY` 沒設定時：
 
@@ -107,7 +145,7 @@ Voyage 按 token 計費。控制方式只有一個，但很有效：**內容沒�
 
 ---
 
-## 6. 介面
+## 7. 介面
 
 - `⌘K` / `Ctrl+K` 開啟，`Esc` 關閉，`↑↓` 選擇，`Enter` 開啟。
 - 結果直接連到內容所在的編輯器：小說章節連到
@@ -120,7 +158,7 @@ Voyage 按 token 計費。控制方式只有一個，但很有效：**內容沒�
 
 ---
 
-## 7. API
+## 8. API
 
 | 端點 | 用途 |
 | --- | --- |
@@ -135,7 +173,7 @@ Voyage 按 token 計費。控制方式只有一個，但很有效：**內容沒�
 
 ---
 
-## 8. 還沒做
+## 9. 還沒做
 
 - **自動重新索引**：目前要手動按「重建索引」。存檔時自動排入佇列會更好，
   但那需要一個背景任務，而 Hobby 方案的 cron 是一天一次。
