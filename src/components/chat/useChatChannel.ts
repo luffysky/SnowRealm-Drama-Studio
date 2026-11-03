@@ -197,7 +197,8 @@ export function useChatChannel({
       })
 
       source.addEventListener('call', (event) => {
-        setCall(JSON.parse((event as MessageEvent).data) as ChannelCall)
+        // `null` is a real value here: it means the call ended.
+        setCall(JSON.parse((event as MessageEvent).data) as ChannelCall | null)
       })
 
       source.addEventListener('signals', (event) => {

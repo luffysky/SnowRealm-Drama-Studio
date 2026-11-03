@@ -569,11 +569,63 @@ export type CallRow = {
  * for is the part peer-to-peer cannot do: telling the other person their phone
  * should be ringing.
  */
+/** A ringing call nobody answered. After this it is a missed call. */
+const RING_TIMEOUT_MS = 60_000
+/**
+ * How long a call may stay ACTIVE without anyone ending it.
+ *
+ * A browser that crashes, loses power or is force-quit never sends the PATCH
+ * that ends the call, so the row stays ACTIVE forever — and because only one
+ * live call is allowed per conversation, that one stuck row blocks every
+ * future call with 「已經有一通進行中的通話」 and no way to clear it from
+ * the UI. Four hours is longer than any call these two will have.
+ */
+const CALL_MAX_MS = 4 * 60 * 60 * 1000
+
+/**
+ * Closes calls that were left hanging, and returns how many.
+ *
+ * Runs before every dial rather than on a schedule: there is no cron for this
+ * and the only moment it matters is when someone is trying to call.
+ */
+async function expireStaleCalls(conversationId: string): Promise<void> {
+  const now = Date.now()
+
+  const live = await db
+    .select({
+      id: calls.id,
+      state: calls.state,
+      createdAt: calls.createdAt,
+      startedAt: calls.startedAt,
+    })
+    .from(calls)
+    .where(
+      and(eq(calls.conversationId, conversationId), inArray(calls.state, ['RINGING', 'ACTIVE']))
+    )
+
+  for (const call of live) {
+    const ringingTooLong =
+      call.state === 'RINGING' && now - call.createdAt.getTime() > RING_TIMEOUT_MS
+    const activeTooLong =
+      call.state === 'ACTIVE' &&
+      now - (call.startedAt ?? call.createdAt).getTime() > CALL_MAX_MS
+
+    if (!ringingTooLong && !activeTooLong) continue
+
+    await db
+      .update(calls)
+      .set({ state: ringingTooLong ? 'MISSED' : 'ENDED', endedAt: new Date() })
+      .where(eq(calls.id, call.id))
+  }
+}
+
 export async function startCall(input: {
   conversationId: string
   callerId: string
   video: boolean
 }): Promise<CallRow> {
+  await expireStaleCalls(input.conversationId)
+
   // One live call per conversation. A second would have both sides negotiating
   // two peer connections and hearing neither.
   const [existing] = await db
@@ -632,7 +684,14 @@ export async function setCallState(
    * Written here rather than by the client so it lands exactly once however
    * many tabs were open.
    */
-  if (state === 'ENDED' || state === 'MISSED' || state === 'DECLINED') {
+  /*
+   * Only once. Two tabs hanging up together, or a hang-up racing the other
+   * side's, would otherwise each write a 「通話結束」 line.
+   */
+  const alreadyClosed =
+    existing.state === 'ENDED' || existing.state === 'MISSED' || existing.state === 'DECLINED'
+
+  if (!alreadyClosed && (state === 'ENDED' || state === 'MISSED' || state === 'DECLINED')) {
     const seconds =
       row.startedAt && row.endedAt
         ? Math.max(0, Math.round((row.endedAt.getTime() - row.startedAt.getTime()) / 1000))
@@ -676,14 +735,22 @@ function toCallRow(row: typeof calls.$inferSelect): CallRow {
   }
 }
 
-/** The live call in this conversation, if there is one. */
+/**
+ * The most recent call in this conversation, whatever state it is in.
+ *
+ * Deliberately not "the live one". A hang-up has to reach the other side, and
+ * the only way to say 「你那通電話結束了」 is to name it — a bare null says
+ * 「現在沒有通話」, which is also true a second before someone dials and
+ * would tear down a call that was still being set up.
+ *
+ * Old calls are cheap to send: the row is small and only goes out when its
+ * state changes.
+ */
 export async function activeCall(conversationId: string): Promise<CallRow | null> {
   const [row] = await db
     .select()
     .from(calls)
-    .where(
-      and(eq(calls.conversationId, conversationId), inArray(calls.state, ['RINGING', 'ACTIVE']))
-    )
+    .where(eq(calls.conversationId, conversationId))
     .orderBy(desc(calls.createdAt))
     .limit(1)
 

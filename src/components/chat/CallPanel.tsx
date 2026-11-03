@@ -337,11 +337,21 @@ export function CallPanel({
         callIdRef.current = call.id
         setWithVideo(call.video)
         setPhase((current) => (current === 'idle' ? 'incoming' : current))
+        return
       }
 
-      if (call.state === 'ENDED' || call.state === 'DECLINED' || call.state === 'MISSED') {
-        teardown()
-      }
+      /*
+       * Only when it is *this* call that ended.
+       *
+       * The server reports the latest call whatever its state, so a finished
+       * one keeps arriving after the fact. Tearing down on any ended call
+       * would kill a new one the moment it was dialled, because the previous
+       * call's ENDED row is still the most recent until the new row lands.
+       */
+      const ended =
+        call.state === 'ENDED' || call.state === 'DECLINED' || call.state === 'MISSED'
+
+      if (ended && callIdRef.current === call.id) teardown()
     }, 0)
 
     return () => window.clearTimeout(timer)

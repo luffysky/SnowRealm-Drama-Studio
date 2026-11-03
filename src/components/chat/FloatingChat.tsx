@@ -193,27 +193,56 @@ export function FloatingChat({
 
   /* --------------------------------------------------------------- render */
 
+  /*
+   * Mounted whatever the widget is doing, including collapsed and hidden.
+   *
+   * It used to live inside the expanded panel, which quietly undid the whole
+   * point of moving it out of the chat page: with the ball collapsed there
+   * was no call panel in the tree, so the phone did not ring and dialling
+   * from the widget did nothing. Hiding it is a CSS concern; being mounted is
+   * not.
+   */
+  const callPanel = (
+    <CallPanel
+      conversationId={conversationId}
+      meId={meId}
+      partnerName={partner?.name ?? '對方'}
+      call={call}
+      setCall={setCall}
+      signalQueue={signalQueue}
+      iceServers={iceServers}
+    />
+  )
+
   // The full room is already on screen; a second live channel to the same
   // thread would double every query to show the same messages.
   if (!ready || pathname.startsWith('/chat')) return null
 
   if (state === 'hidden') {
     return (
-      <button
-        type="button"
-        onClick={() => persist('ball')}
-        aria-label="顯示對話"
-        title="顯示對話"
-        className="fixed right-2 bottom-2 z-30 grid size-7 place-items-center rounded-full bg-stage-800/70 text-ink-600 ring-1 ring-stage-700 transition-colors hover:text-ink-200"
-      >
-        <MessageSquare aria-hidden className="size-3.5" />
-      </button>
+      <>
+        {/* The dial buttons are hidden; the ringing panel is not. */}
+        <span className="hidden">{callPanel}</span>
+
+        <button
+          type="button"
+          onClick={() => persist('ball')}
+          aria-label="顯示對話"
+          title="顯示對話"
+          className="tap fixed right-2 bottom-2 z-30 grid size-7 place-items-center rounded-full bg-stage-800/70 text-ink-600 ring-1 ring-stage-700 transition-colors hover:text-ink-200"
+        >
+          <MessageSquare aria-hidden className="size-3.5" />
+        </button>
+      </>
     )
   }
 
   if (state === 'ball') {
     return (
       <div className="fixed right-4 bottom-4 z-40 flex items-center gap-1.5">
+        {/* Collapsed, but still able to ring. */}
+        <span className="hidden">{callPanel}</span>
+
         <button
           type="button"
           onClick={() => persist('hidden')}
@@ -273,15 +302,7 @@ export function FloatingChat({
           </span>
         </span>
 
-        <CallPanel
-          conversationId={conversationId}
-          meId={meId}
-          partnerName={partner?.name ?? '對方'}
-          call={call}
-          setCall={setCall}
-          signalQueue={signalQueue}
-          iceServers={iceServers}
-        />
+        {callPanel}
 
         <Link
           href="/chat"

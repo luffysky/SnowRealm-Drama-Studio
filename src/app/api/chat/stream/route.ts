@@ -54,6 +54,9 @@ export async function GET(request: Request) {
    */
   let changedSince = new Date(Date.now() - 10_000)
 
+  /** Last call state sent, so an unchanged one is not resent every tick. */
+  let lastCall = ''
+
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream<Uint8Array>({
@@ -116,8 +119,23 @@ export async function GET(request: Request) {
         try {
           send('state', await conversationState(conversationId))
 
+          /*
+           * Sent even when there is no call, because that *is* the news.
+           *
+           * `activeCall` only returns a RINGING or ACTIVE one, so hanging up
+           * made it null — and guarding on `if (call)` meant the event was
+           * never sent at all. The other side sat in a call that had ended,
+           * with its timer still running, until it reloaded.
+           *
+           * Only on a change, so an idle conversation is not sending a null
+           * twice a second for the lifetime of the connection.
+           */
           const call = await activeCall(conversationId)
-          if (call) send('call', call)
+          const signature = call ? `${call.id}:${call.state}` : 'none'
+          if (signature !== lastCall) {
+            lastCall = signature
+            send('call', call)
+          }
         } catch {
           // Same reasoning as above.
         }
