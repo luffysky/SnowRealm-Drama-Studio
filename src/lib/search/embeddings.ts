@@ -48,6 +48,18 @@ export function embeddingsEndpoint(apiKey: string): string {
 /** Voyage caps a single request; batching keeps indexing within it. */
 const MAX_BATCH = 64
 
+/**
+ * How long a call may spend waiting out a 429.
+ *
+ * A search has a user waiting on it, so it gives up almost immediately and
+ * falls back to keyword matching. Indexing can afford to wait — but not past
+ * Vercel Hobby's 60-second function limit, which is where 45s comes from.
+ */
+const QUERY_MAX_WAIT_MS = 2_000
+const INDEX_MAX_WAIT_MS = 45_000
+
+const MAX_ATTEMPTS = 5
+
 export function embeddingsConfigured(): boolean {
   return Boolean(process.env.VOYAGE_API_KEY?.trim())
 }
@@ -65,42 +77,50 @@ export type EmbeddingInputType = 'document' | 'query'
  */
 export async function embed(
   texts: string[],
-  inputType: EmbeddingInputType
+  inputType: EmbeddingInputType,
+  options: { maxWaitMs?: number } = {}
 ): Promise<number[][] | null> {
   const key = process.env.VOYAGE_API_KEY?.trim()
   if (!key) return null
   if (texts.length === 0) return []
+
+  /*
+   * How long this call may spend waiting out a 429 before giving up.
+   *
+   * The two sides want opposite things. A search must answer now, so it waits
+   * barely at all and falls back to keyword matching. Indexing is worth
+   * waiting for — on the free tier (3 requests per minute) the second batch
+   * *will* be throttled, and failing the whole reindex over it would mean the
+   * index could never be built at all.
+   */
+  const maxWaitMs = options.maxWaitMs ?? (inputType === 'query' ? QUERY_MAX_WAIT_MS : INDEX_MAX_WAIT_MS)
 
   const out: number[][] = []
 
   for (let i = 0; i < texts.length; i += MAX_BATCH) {
     const batch = texts.slice(i, i + MAX_BATCH)
 
-    const response = await fetch(embeddingsEndpoint(key), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${key}`,
+    const response = await requestWithRetry(
+      embeddingsEndpoint(key),
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model: EMBEDDING_MODEL,
+          input: batch,
+          input_type: inputType,
+          output_dimension: EMBEDDING_DIMENSIONS,
+        }),
       },
-      body: JSON.stringify({
-        model: EMBEDDING_MODEL,
-        input: batch,
-        input_type: inputType,
-        output_dimension: EMBEDDING_DIMENSIONS,
-      }),
-    })
+      maxWaitMs
+    )
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
-      const hint =
-        response.status === 401 || response.status === 403
-          ? `（金鑰與端點必須配對：Atlas 的 al- 金鑰走 ai.mongodb.com，` +
-            `voyageai.com 的 pa- 金鑰走 api.voyageai.com；` +
-            `目前送往 ${embeddingsEndpoint(key)}）`
-          : ''
-      throw new Error(
-        `Voyage 回應 ${response.status}：${detail.slice(0, 200) || '沒有內容'}${hint}`
-      )
+      throw new Error(describeFailure(response.status, detail, embeddingsEndpoint(key)))
     }
 
     const body = (await response.json()) as {
@@ -128,11 +148,73 @@ export async function embed(
   return out
 }
 
+/**
+ * POST, retrying throttles and transient server errors.
+ *
+ * `retry-after` is honoured when the server sends it; otherwise the wait
+ * doubles from one second, with jitter so two concurrent callers do not line
+ * up and collide again. Returns the last response rather than throwing, so the
+ * caller reports the real status.
+ */
+async function requestWithRetry(
+  url: string,
+  init: RequestInit,
+  maxWaitMs: number
+): Promise<Response> {
+  let waited = 0
+
+  for (let attempt = 1; ; attempt += 1) {
+    const response = await fetch(url, init)
+
+    const retryable = response.status === 429 || response.status >= 500
+    if (!retryable || attempt >= MAX_ATTEMPTS) return response
+
+    const header = Number(response.headers.get('retry-after'))
+    const suggested =
+      Number.isFinite(header) && header > 0
+        ? header * 1000
+        : 2 ** (attempt - 1) * 1000 + Math.random() * 250
+
+    // Never start a wait that would overrun the budget: sleeping 20s only to
+    // give up anyway wastes the caller's entire time slice.
+    if (waited + suggested > maxWaitMs) return response
+
+    // The body is not read on a retry; release it so the socket is reused.
+    await response.body?.cancel().catch(() => {})
+
+    await new Promise((resolve) => setTimeout(resolve, suggested))
+    waited += suggested
+  }
+}
+
+/** Turns a failed response into something actionable rather than a status code. */
+function describeFailure(status: number, detail: string, endpoint: string): string {
+  const body = detail.slice(0, 300) || '沒有內容'
+
+  if (status === 401 || status === 403) {
+    return (
+      `Voyage 回應 ${status}：金鑰被拒。金鑰與端點必須配對——` +
+      `Atlas 的 al- 金鑰走 ai.mongodb.com，voyageai.com 的 pa- 金鑰走 ` +
+      `api.voyageai.com；目前送往 ${endpoint}。原文：${body}`
+    )
+  }
+
+  if (status === 429) {
+    return (
+      `Voyage 回應 429：超過速率限制。未綁付款方式的帳號只有 3 RPM / 10K TPM，` +
+      `重建一次索引就會用完當分鐘的額度。原文：${body}`
+    )
+  }
+
+  return `Voyage 回應 ${status}：${body}`
+}
+
 /** One text. Convenience for the query side, which always embeds exactly one. */
 export async function embedOne(
   text: string,
-  inputType: EmbeddingInputType
+  inputType: EmbeddingInputType,
+  options: { maxWaitMs?: number } = {}
 ): Promise<number[] | null> {
-  const result = await embed([text], inputType)
+  const result = await embed([text], inputType, options)
   return result?.[0] ?? null
 }

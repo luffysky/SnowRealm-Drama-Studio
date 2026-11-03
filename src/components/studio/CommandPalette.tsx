@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  TriangleAlert,
   Users,
   X,
   type LucideIcon,
@@ -357,6 +358,7 @@ function Palette({ onClose }: { onClose: () => void }) {
         <Footer
           key={scopedTo ?? 'all'}
           semantic={result?.semantic ?? null}
+          semanticError={result?.semanticError ?? null}
           total={result?.total ?? 0}
           projectId={scopedTo}
         />
@@ -501,10 +503,13 @@ function Empty({ title, detail }: { title: string; detail: string }) {
  */
 function Footer({
   semantic,
+  semanticError,
   total,
   projectId,
 }: {
   semantic: boolean | null
+  /** Set when a key exists but the call failed — throttled, rejected, down. */
+  semanticError: string | null
   total: number
   projectId: string | null
 }) {
@@ -544,11 +549,22 @@ function Footer({
         indexed: number
         embedded: number
         skipped: number
+        error: string | null
       }
-      toast.success(
-        '索引已更新',
-        `${body.indexed} 段內容，其中 ${body.embedded} 段重新計算向量，${body.skipped} 段沿用舊的。`
-      )
+
+      if (body.error) {
+        // The keyword index is built; the vectors are not. Saying "done"
+        // would leave the reader wondering why semantic search still misses.
+        toast.warning(
+          '索引已建立，但向量沒算完',
+          `${body.indexed} 段內容已進索引，關鍵字搜尋可用。${body.error}`
+        )
+      } else {
+        toast.success(
+          '索引已更新',
+          `${body.indexed} 段內容，其中 ${body.embedded} 段重新計算向量，${body.skipped} 段沿用舊的。`
+        )
+      }
       const fresh = await fetch(`/api/projects/${projectId}/search/reindex`)
       if (fresh.ok) setStatus((await fresh.json()) as IndexStatus)
     } catch (cause) {
@@ -560,19 +576,27 @@ function Footer({
 
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-stage-700/70 bg-stage-900/80 px-3 py-2 text-[10px] text-ink-600">
-      <span className="flex items-center gap-1">
-        <Sparkles aria-hidden className="size-3" />
+      <span
+        className={cn('flex items-center gap-1', semanticError && 'text-amber-400')}
+        title={semanticError ?? undefined}
+      >
+        {semanticError ? (
+          <TriangleAlert aria-hidden className="size-3" />
+        ) : (
+          <Sparkles aria-hidden className="size-3" />
+        )}
         {/*
-          Before a search has run there is nothing to report, and claiming
-          semantic retrieval that may not be configured is the one thing this
-          footer exists to prevent. The index status answers it early when the
-          scope is a single project.
+          Three different states, three different sentences. Reporting a
+          throttled provider as "no key configured" sends the reader off to
+          check an environment variable that is perfectly fine.
         */}
-        {mode === null
-          ? '語意檢索・輸入一句話或關鍵字'
-          : mode
-            ? '語意＋關鍵字混合檢索'
-            : '僅關鍵字（尚未設定 VOYAGE_API_KEY）'}
+        {semanticError
+          ? '語意檢索暫時不可用，以下只有關鍵字結果'
+          : mode === null
+            ? '語意檢索・輸入一句話或關鍵字'
+            : mode
+              ? '語意＋關鍵字混合檢索'
+              : '僅關鍵字（尚未設定 VOYAGE_API_KEY）'}
       </span>
 
       {total > 0 && <span>共 {total} 筆來源</span>}

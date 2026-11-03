@@ -37,9 +37,50 @@ import {
 export type { SearchKind, SearchHit, SearchResult } from '@/lib/search/view'
 export { SEARCH_KIND_LABEL, SEARCH_KINDS, MATCHED_BY_LABEL } from '@/lib/search/view'
 
-/** Chunk size in characters. Long enough for context, short enough to locate. */
-const CHUNK_CHARS = 700
-const CHUNK_OVERLAP = 100
+/**
+ * Chunk size in characters.
+ *
+ * Measured, not guessed (`scripts/search-calibrate.ts` reproduces it). The
+ * same true query against the same passage at three chunk sizes:
+ *
+ *   694 字 -> 0.346     378 字 -> 0.397     208 字 -> 0.396
+ *
+ * and a query about something the passage does *not* contain moved the other
+ * way, 0.256 -> 0.232. A long chunk holds several topics and its vector is
+ * their average, so a short query matches the average rather than the passage;
+ * splitting the chunk widened the gap between a real hit and a near miss from
+ * 0.09 to 0.165. Below ~380 there is no further gain and context starts to be
+ * lost — 「他答應了」 means nothing without the sentence before it.
+ */
+const CHUNK_CHARS = 380
+const CHUNK_OVERLAP = 70
+
+/**
+ * Score floors.
+ *
+ * Measured, and re-measurable: `npx tsx scripts/search-calibrate.ts` prints
+ * the distribution and suggests this number. On this corpus, at 380-character
+ * chunks, the run that produced the value below was:
+ *
+ *   命中  0.3991  「沈知味被潑醒」
+ *   命中  0.5164  「三文錢的生意」
+ *   命中  0.4158  「想辦法賺到第一筆錢」
+ *   對照  0.3394  「她在繡房裡繡了一整幅嫁衣」   <- 同題材但文中沒有
+ *   對照  0.2309  「太空船降落在火星表面」
+ *   對照  0.1692  「兩軍在城外對陣，將軍下令放箭」
+ *
+ * 0.37 is the midpoint of the 0.339 / 0.399 gap. The margin is thin — the
+ * nearest false positive is a period-domestic scene, which really is close in
+ * meaning — so re-run the script once there is more than one chapter of prose.
+ *
+ * The value that was here before, 0.55, was a guess, and it sat above *every*
+ * real hit in the corpus: the semantic half was switched off and nothing said
+ * so, because the keyword half kept answering.
+ */
+const SEMANTIC_MIN = 0.37
+
+/** Trigram similarity is noise below this; exact containment scores 1. */
+const LEXICAL_MIN = 0.1
 
 /* -------------------------------------------------------------------------- */
 /* Indexing                                                                    */
@@ -66,6 +107,8 @@ export async function reindexProject(projectId: string): Promise<{
   embedded: number
   skipped: number
   semantic: boolean
+  /** Why embeddings are missing, when a key is configured but the call failed. */
+  error: string | null
 }> {
   const sources = await collect(projectId)
 
@@ -134,11 +177,26 @@ export async function reindexProject(projectId: string): Promise<{
   }
 
   let embeddings: number[][] | null = null
+  let error: string | null = null
+
   if (embeddingsConfigured() && needsEmbedding.length > 0) {
-    embeddings = await embed(
-      needsEmbedding.map((r) => r.content),
-      'document'
-    )
+    try {
+      embeddings = await embed(
+        needsEmbedding.map((r) => r.content),
+        'document'
+      )
+    } catch (cause) {
+      /*
+       * A throttled provider must not cost the whole index. The rows are
+       * written either way — the keyword half works without embeddings — and
+       * the reason is returned so the UI can say "索引建好了，但向量沒算完"
+       * rather than either lying or showing a 500.
+       *
+       * Chunks that failed keep no embedding, so the next reindex retries
+       * exactly those: the hash gate compares content, not vectors.
+       */
+      error = cause instanceof Error ? cause.message : String(cause)
+    }
   }
 
   const embeddingFor = new Map<string, number[]>()
@@ -196,6 +254,7 @@ export async function reindexProject(projectId: string): Promise<{
     embedded: embeddingFor.size,
     skipped: reusable.size,
     semantic: embeddingsConfigured(),
+    error,
   }
 }
 
@@ -449,10 +508,20 @@ export async function search(input: {
   const query = input.query.trim()
   const limit = input.limit ?? 20
   if (!query || input.projectIds.length === 0) {
-    return { hits: [], semantic: embeddingsConfigured(), total: 0 }
+    return { hits: [], semantic: embeddingsConfigured(), semanticError: null, total: 0 }
   }
 
-  const vector = await embedOne(query, 'query').catch(() => null)
+  /*
+   * A failed embedding must not be silent. Search still answers — the keyword
+   * half needs no provider — but the reason travels with the result, because
+   * "fewer results than expected" is indistinguishable from "that text does
+   * not exist" unless the UI says which happened.
+   */
+  let semanticError: string | null = null
+  const vector = await embedOne(query, 'query').catch((error: unknown) => {
+    semanticError = error instanceof Error ? error.message : String(error)
+    return null
+  })
 
   const kindFilter =
     input.kinds && input.kinds.length > 0
@@ -529,11 +598,8 @@ export async function search(input: {
       const lexical = Number(row.lexical) || 0
       const semantic = Number(row.semantic) || 0
 
-      // Thresholds: trigram similarity is noisy below ~0.1, and cosine over
-      // unrelated Chinese text sits around 0.3-0.5, so a low bar there would
-      // return the whole corpus.
-      const lexicalHit = lexical >= 0.1
-      const semanticHit = semantic >= 0.55
+      const lexicalHit = lexical >= LEXICAL_MIN
+      const semanticHit = semantic >= SEMANTIC_MIN
 
       return {
         id: row.id,
@@ -581,7 +647,7 @@ export async function search(input: {
       href: hrefFor(row.projectId, row.kind, row.refId, row.parentRefId),
     }))
 
-  return { hits, semantic: Boolean(vector), total: best.size }
+  return { hits, semantic: Boolean(vector), semanticError, total: best.size }
 }
 
 /**

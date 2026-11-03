@@ -54,8 +54,18 @@ export type SearchHit = {
 
 export type SearchResult = {
   hits: SearchHit[]
-  /** False when no embedding provider is configured: results are keyword-only. */
+  /** False when the semantic half did not run: results are keyword-only. */
   semantic: boolean
+  /**
+   * Why it did not run, when it was supposed to.
+   *
+   * Null covers both "it worked" and "no key is configured" — the first needs
+   * no explanation and the second already has one. This is for the third case:
+   * a key exists but the call failed (throttled, rejected, provider down).
+   * Without it the UI reports "no key configured", which sends the reader off
+   * to check an environment variable that is perfectly fine.
+   */
+  semanticError: string | null
   total: number
 }
 
