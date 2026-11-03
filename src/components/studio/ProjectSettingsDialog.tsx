@@ -10,6 +10,7 @@ import { Field, Input, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { cn } from '@/lib/utils'
+import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
  * 作品設定: the cover image and the three names.
@@ -327,7 +328,7 @@ function CoverPicker({
           {coverAssetId ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
-              src={`/api/files/${coverAssetId}`}
+              src={assetPreviewUrl(coverAssetId)}
               alt="作品封面"
               decoding="async"
               className="size-full object-cover"

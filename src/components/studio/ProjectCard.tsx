@@ -11,6 +11,7 @@ import {
 } from '@/lib/constants'
 import { formatFromBase, type CurrencyValue, type FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
+import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
  * One card in the 作品列表 grid (design 03).
@@ -115,7 +116,7 @@ export function ProjectCard({
         {project.coverAssetId ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={`/api/files/${project.coverAssetId}`}
+            src={assetPreviewUrl(project.coverAssetId)}
             alt=""
             loading="lazy"
             decoding="async"

@@ -24,6 +24,7 @@ import {
   toPercent,
 } from '@/lib/production'
 import { cn, formatRelativeZh } from '@/lib/utils'
+import { assetPreviewUrl } from '@/lib/asset-url'
 
 export const metadata: Metadata = { title: '工作室儀表板' }
 
@@ -247,7 +248,7 @@ function ProjectsPanel({ data }: { data: DashboardData }) {
               {project.coverAssetId ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={`/api/files/${project.coverAssetId}`}
+                  src={assetPreviewUrl(project.coverAssetId)}
                   alt=""
                   loading="lazy"
                   decoding="async"

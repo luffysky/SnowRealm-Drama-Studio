@@ -27,6 +27,12 @@ import type { AssetKindValue } from '@/lib/constants'
 const MULTIPART_THRESHOLD_BYTES = 64 * 1024 * 1024 // 64 MB
 const MULTIPART_PART_SIZE_BYTES = 16 * 1024 * 1024 // 16 MB; R2 minimum is 5 MB
 
+/** R2 refuses a multipart upload with more parts than this. */
+const MAX_PARTS = 10_000
+
+/** R2's per-part ceiling is 5 GiB; stay under it. */
+const MAX_PART_SIZE_BYTES = 4 * 1024 * 1024 * 1024
+
 let client: S3Client | null = null
 
 /**
@@ -134,8 +140,29 @@ export function shouldUseMultipart(sizeBytes: number): boolean {
   return sizeBytes > MULTIPART_THRESHOLD_BYTES
 }
 
+/**
+ * Part size and count for a multipart upload.
+ *
+ * The part size scales with the file. A fixed 16 MB part would cap any upload
+ * at 160 GB (10,000 × 16 MB) — not by refusing it, which would at least be
+ * visible, but by producing more parts than R2 accepts and failing somewhere
+ * in the middle of a long upload.
+ *
+ * Small files keep 16 MB parts: more, smaller parts mean a failed part costs
+ * less to retry, which matters on a home connection.
+ */
 export function planParts(sizeBytes: number): { partSize: number; totalParts: number } {
-  const partSize = MULTIPART_PART_SIZE_BYTES
+  const needed = Math.ceil(sizeBytes / MAX_PARTS)
+
+  // Round up to a whole MB so the numbers stay legible in logs and progress.
+  const megabyte = 1024 * 1024
+  const scaled = Math.ceil(needed / megabyte) * megabyte
+
+  const partSize = Math.min(
+    Math.max(MULTIPART_PART_SIZE_BYTES, scaled),
+    MAX_PART_SIZE_BYTES
+  )
+
   return { partSize, totalParts: Math.max(1, Math.ceil(sizeBytes / partSize)) }
 }
 
@@ -278,4 +305,6 @@ export async function deleteObject(objectKey: string): Promise<void> {
 export const R2_LIMITS = {
   multipartThresholdBytes: MULTIPART_THRESHOLD_BYTES,
   partSizeBytes: MULTIPART_PART_SIZE_BYTES,
+  maxParts: MAX_PARTS,
+  maxPartSizeBytes: MAX_PART_SIZE_BYTES,
 } as const

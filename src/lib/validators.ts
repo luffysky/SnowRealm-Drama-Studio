@@ -251,6 +251,20 @@ export const uploadRequestSchema = z.object({
   rootAssetId: uuid.nullable().optional(),
 })
 
+/** Step 1 of a preview upload: ask for a presigned destination. */
+export const previewBeginSchema = z.object({
+  contentType: z.string().trim().min(1).max(160),
+  sizeBytes: z.coerce.number().int().min(1).max(8 * 1024 * 1024),
+  width: z.coerce.number().int().min(1).max(100_000).nullable().optional(),
+  height: z.coerce.number().int().min(1).max(100_000).nullable().optional(),
+  /** How it was produced: encoder, quality, scale. Kept for provenance. */
+  params: z.record(z.string(), z.unknown()).optional(),
+})
+
+export const previewCompleteSchema = z.object({
+  variantId: uuid,
+})
+
 export const uploadCompleteSchema = z.object({
   uploadSessionId: uuid,
   /** Required for a multipart upload; omitted for a single PUT. */

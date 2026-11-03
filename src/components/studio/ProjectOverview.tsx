@@ -36,6 +36,7 @@ import {
 import type { ProjectOverview as ProjectOverviewData } from '@/lib/project-overview'
 import { STAGES_PER_EPISODE, toPercent } from '@/lib/production'
 import { cn, formatBytes, formatRelativeZh } from '@/lib/utils'
+import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
  * 作品總覽 (design 04).
@@ -401,7 +402,7 @@ function EpisodePanel({ project }: { project: ProjectOverviewData }) {
                   {episode.coverAssetId ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={`/api/files/${episode.coverAssetId}`}
+                      src={assetPreviewUrl(episode.coverAssetId)}
                       alt=""
                       loading="lazy"
                       decoding="async"

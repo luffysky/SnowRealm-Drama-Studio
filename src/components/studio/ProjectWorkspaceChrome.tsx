@@ -13,6 +13,7 @@ import {
   type ProjectTab,
 } from '@/lib/navigation'
 import { cn } from '@/lib/utils'
+import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
  * The project workspace header: breadcrumb, title, project switcher and the
@@ -78,7 +79,7 @@ export function ProjectWorkspaceChrome({
         {project.coverAssetId ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={`/api/files/${project.coverAssetId}`}
+            src={assetPreviewUrl(project.coverAssetId)}
             alt=""
             decoding="async"
             className="hidden h-20 w-32 shrink-0 rounded-lg object-cover ring-1 ring-stage-700 sm:block lg:h-24 lg:w-40"
@@ -241,7 +242,7 @@ function ProjectSwitcher({
                   {sibling.coverAssetId ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={`/api/files/${sibling.coverAssetId}`}
+                      src={assetPreviewUrl(sibling.coverAssetId)}
                       alt=""
                       decoding="async"
                       className="h-6 w-10 shrink-0 rounded object-cover"

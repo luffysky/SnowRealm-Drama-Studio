@@ -13,6 +13,7 @@ import {
   type CharacterTierValue,
 } from '@/lib/constants'
 import { cn, formatRelativeZh } from '@/lib/utils'
+import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
  * 角色資料庫 (designs 10, 11).
@@ -393,7 +394,7 @@ function Portrait({
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={`/api/files/${character.keyVisualAssetId}`}
+        src={assetPreviewUrl(character.keyVisualAssetId)}
         alt=""
         loading="lazy"
         decoding="async"

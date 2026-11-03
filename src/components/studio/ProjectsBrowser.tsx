@@ -26,6 +26,7 @@ import {
 } from '@/lib/constants'
 import { formatFromBase, type CurrencyValue, type FxRates } from '@/lib/money'
 import { cn, formatRelativeZh } from '@/lib/utils'
+import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
  * 作品列表 (design 03): filter pills, filter bar, card grid, detail rail.
@@ -452,7 +453,7 @@ function DetailRail({
           {project.coverAssetId ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={`/api/files/${project.coverAssetId}`}
+              src={assetPreviewUrl(project.coverAssetId)}
               alt=""
               loading="lazy"
               decoding="async"

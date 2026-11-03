@@ -30,6 +30,7 @@ import {
   type ProductionStageStatus,
 } from '@/lib/production'
 import { cn } from '@/lib/utils'
+import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
  * 集數管理 (design 05).
@@ -431,7 +432,7 @@ function CardView({
               {row.coverAssetId ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={`/api/files/${row.coverAssetId}`}
+                  src={assetPreviewUrl(row.coverAssetId)}
                   alt=""
                   loading="lazy"
                   decoding="async"
@@ -656,7 +657,7 @@ function DetailRail({ episode, projectId }: { episode: SerialisedEpisode | null;
         {episode.coverAssetId ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={`/api/files/${episode.coverAssetId}`}
+            src={assetPreviewUrl(episode.coverAssetId)}
             alt=""
             decoding="async"
             className="absolute inset-0 size-full object-cover"

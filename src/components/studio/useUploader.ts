@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { AssetKindValue } from '@/lib/constants'
 import { apiFetch } from '@/lib/client-fetch'
+import { makeImagePreview } from '@/lib/image-preview'
 
 /**
  * Browser-side upload driver.
@@ -140,6 +141,17 @@ export function useUploader(options: UseUploaderOptions) {
 
         patch(item.id, { status: 'done', progress: 1 })
         options.onComplete?.(begin.assetId, item.file)
+
+        /*
+         * The compressed copy, after the master is safely stored
+         * (`docs/STORAGE.md`). Deliberately not awaited into the upload's
+         * status: the file is already uploaded, and a preview that fails is a
+         * slower grid, not a lost asset. Hence the swallowed error — the
+         * master is unaffected either way.
+         */
+        if (item.kind === 'IMAGE' || item.kind === 'STICKER') {
+          void uploadPreview(begin.assetId, item.file).catch(() => {})
+        }
       } catch (error) {
         if (controller.signal.aborted) {
           patch(item.id, { status: 'cancelled' })
@@ -224,6 +236,45 @@ export function useUploader(options: UseUploaderOptions) {
       done: items.filter((i) => i.status === 'done').length,
     },
   }
+}
+
+/**
+ * Builds and stores the small copy of an image.
+ *
+ * Never throws to the caller: every outcome short of success is "no preview",
+ * and the UI falls back to the master automatically.
+ */
+async function uploadPreview(assetId: string, file: File): Promise<void> {
+  const preview = await makeImagePreview(file)
+  if (!preview) return
+
+  const begin = await apiFetch(`/api/assets/${assetId}/preview`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      contentType: preview.blob.type,
+      sizeBytes: preview.blob.size,
+      width: preview.width,
+      height: preview.height,
+      params: preview.params,
+    }),
+  })
+  if (!begin.ok) return
+
+  const { variantId, url } = (await begin.json()) as { variantId: string; url: string }
+
+  const put = await fetch(url, {
+    method: 'PUT',
+    headers: { 'content-type': preview.blob.type },
+    body: preview.blob,
+  })
+  if (!put.ok) return
+
+  await apiFetch(`/api/assets/${assetId}/preview`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ variantId }),
+  })
 }
 
 async function uploadInParts(input: {

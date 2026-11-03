@@ -1,6 +1,14 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { assetLinks, assets, episodes, projects, shots, uploadSessions } from '@/db/schema'
+import {
+  assetLinks,
+  assets,
+  assetVariants,
+  episodes,
+  projects,
+  shots,
+  uploadSessions,
+} from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import {
   ACCEPTED_MIME_EXACT,
@@ -426,11 +434,39 @@ export async function presignAssetDownload(input: {
   user: SessionUser
   assetId: string
   asAttachment?: boolean
-}): Promise<{ url: string; expiresInSec: number; asset: AssetRow }> {
+  /** Serve the small preview instead of the master, when one exists. */
+  preview?: boolean
+}): Promise<{ url: string; expiresInSec: number; asset: AssetRow; servedPreview: boolean }> {
   const asset = await loadAssetForUser(input.assetId, input.user)
 
   if (asset.uploadStatus !== 'COMPLETED') {
     throw ApiError.badRequest('此素材尚未完成上傳')
+  }
+
+  /*
+   * A preview is an optimisation, never a requirement: an asset uploaded
+   * before previews existed, or one whose preview failed, still has to render.
+   * So a missing preview silently serves the master rather than 404ing.
+   *
+   * Never for a download — `?download=1` must hand over the real file.
+   */
+  if (input.preview && !input.asAttachment) {
+    const [variant] = await db
+      .select()
+      .from(assetVariants)
+      .where(
+        and(
+          eq(assetVariants.assetId, asset.id),
+          eq(assetVariants.kind, 'PREVIEW'),
+          eq(assetVariants.uploadStatus, 'COMPLETED')
+        )
+      )
+      .limit(1)
+
+    if (variant) {
+      const signed = await presignGet({ objectKey: variant.objectKey })
+      return { ...signed, asset, servedPreview: true }
+    }
   }
 
   const { url, expiresInSec } = await presignGet({
@@ -438,7 +474,7 @@ export async function presignAssetDownload(input: {
     ...(input.asAttachment ? { downloadName: asset.name } : {}),
   })
 
-  return { url, expiresInSec, asset }
+  return { url, expiresInSec, asset, servedPreview: false }
 }
 
 /** Deletes the R2 object and the row. OWNER-only; caller checks the permission. */
@@ -532,4 +568,138 @@ export async function deleteAsset(input: {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Derivatives                                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Preview derivatives (`docs/STORAGE.md`).
+ *
+ * The master is kept exactly as uploaded — it is what gets delivered and
+ * re-edited, and a re-encode is not reversible. Alongside it the browser
+ * stores a small WebP/AVIF copy, and that is what every grid, card and
+ * thumbnail loads.
+ *
+ * The saving is in what gets *read*, not only in what gets stored: an episode
+ * list showing 120 covers used to pull 120 full-size PNGs.
+ *
+ * Only images get one. Video is already compressed, and re-encoding it in a
+ * browser is not practical.
+ */
+
+const PREVIEW_MAX_BYTES = 8 * 1024 * 1024
+
+export type VariantRow = typeof assetVariants.$inferSelect
+
+/** Presigns a single PUT for a preview. Previews are small; no multipart. */
+export async function beginVariantUpload(input: {
+  user: SessionUser
+  assetId: string
+  contentType: string
+  sizeBytes: number
+  width?: number | null
+  height?: number | null
+  params?: Record<string, unknown>
+}): Promise<{ variantId: string; url: string; objectKey: string }> {
+  assertR2Configured()
+
+  const asset = await loadAssetForUser(input.assetId, input.user)
+
+  if (asset.kind !== 'IMAGE' && asset.kind !== 'STICKER') {
+    throw ApiError.badRequest('只有圖片才會產生預覽檔')
+  }
+  if (!input.contentType.startsWith('image/')) {
+    throw ApiError.badRequest('預覽檔必須是圖片')
+  }
+  if (input.sizeBytes <= 0 || input.sizeBytes > PREVIEW_MAX_BYTES) {
+    throw ApiError.badRequest('預覽檔大小不合理')
+  }
+  /*
+   * A "preview" larger than its master is not a preview. This happens with
+   * small or already-optimised originals, and storing it would cost space to
+   * make things slower.
+   */
+  if (asset.sizeBytes > 0 && input.sizeBytes >= asset.sizeBytes) {
+    throw ApiError.badRequest('預覽檔沒有比原檔小，不值得存')
+  }
+
+  const extension = input.contentType === 'image/avif' ? '.avif' : '.webp'
+  const objectKey = `projects/${asset.projectId}/preview/${crypto.randomUUID()}${extension}`
+
+  const [variant] = await db
+    .insert(assetVariants)
+    .values({
+      assetId: asset.id,
+      kind: 'PREVIEW',
+      objectKey,
+      mimeType: input.contentType,
+      sizeBytes: input.sizeBytes,
+      width: input.width ?? null,
+      height: input.height ?? null,
+      params: input.params ?? null,
+      uploadStatus: 'PENDING',
+      createdById: input.user.id,
+    })
+    .onConflictDoUpdate({
+      // One preview per asset: regenerating replaces rather than piles up.
+      target: [assetVariants.assetId, assetVariants.kind],
+      set: {
+        objectKey,
+        mimeType: input.contentType,
+        sizeBytes: input.sizeBytes,
+        width: input.width ?? null,
+        height: input.height ?? null,
+        params: input.params ?? null,
+        uploadStatus: 'PENDING',
+        createdAt: new Date(),
+      },
+    })
+    .returning()
+
+  if (!variant) throw ApiError.badRequest('無法建立預覽檔紀錄')
+
+  const { url } = await presignPut({ objectKey, contentType: input.contentType })
+
+  return { variantId: variant.id, url, objectKey }
+}
+
+/** Confirms the bytes arrived, so nothing ever points at a missing object. */
+export async function finishVariantUpload(input: {
+  user: SessionUser
+  assetId: string
+  variantId: string
+}): Promise<VariantRow> {
+  const asset = await loadAssetForUser(input.assetId, input.user)
+
+  const [variant] = await db
+    .select()
+    .from(assetVariants)
+    .where(and(eq(assetVariants.id, input.variantId), eq(assetVariants.assetId, asset.id)))
+    .limit(1)
+
+  if (!variant) throw ApiError.notFound('找不到這個預覽檔')
+
+  const head = await headObject(variant.objectKey)
+  if (!head) {
+    await db
+      .update(assetVariants)
+      .set({ uploadStatus: 'FAILED' })
+      .where(eq(assetVariants.id, variant.id))
+    throw ApiError.badRequest('預覽檔上傳未完成：R2 找不到該物件')
+  }
+
+  const [updated] = await db
+    .update(assetVariants)
+    .set({
+      uploadStatus: 'COMPLETED',
+      sizeBytes: head.sizeBytes,
+      checksum: head.etag,
+    })
+    .where(eq(assetVariants.id, variant.id))
+    .returning()
+
+  if (!updated) throw ApiError.notFound('找不到這個預覽檔')
+  return updated
 }
