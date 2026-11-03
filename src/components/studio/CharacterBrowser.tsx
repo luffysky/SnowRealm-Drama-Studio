@@ -1,6 +1,6 @@
 'use client'
 
-import { Crown, Network, Plus, Search, Trash2, UserRound } from 'lucide-react'
+import { Crown, Loader2, Network, Pencil, Plus, Search, Trash2, UserRound } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -260,20 +260,11 @@ export function CharacterBrowser({
               <Portrait character={selected} size="lg" />
 
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-base font-semibold text-ink-50">{selected.name}</h3>
-                  <span
-                    className={cn(
-                      'rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset',
-                      selected.tier === 'LEAD'
-                        ? 'bg-gilt-400/15 text-gilt-300 ring-gilt-500/50'
-                        : 'bg-stage-800 text-ink-400 ring-stage-700'
-                    )}
-                  >
-                    {selected.tier === 'LEAD' && <Crown aria-hidden className="mr-0.5 inline size-3" />}
-                    {CHARACTER_TIER_LABEL[selected.tier]}
-                  </span>
-                </div>
+                <IdentityEditor
+                  key={selected.id}
+                  projectId={projectId}
+                  character={selected}
+                />
 
                 {selected.alias && (
                   <p className="text-[11px] text-ink-400">{selected.alias}</p>
@@ -380,6 +371,132 @@ export function CharacterBrowser({
 }
 
 /* -------------------------------------------------------------------------- */
+
+/**
+ * 角色名稱與定位，就地編輯.
+ *
+ * These two were display-only while everything else on the page was editable,
+ * which is how a project ends up with a lead called 「沈知夏」 when the prose
+ * says 「沈知味」 — the typo was visible on every screen and fixable on none.
+ *
+ * It matters more than an ordinary field: the character list is sent as
+ * context with every AI request, so a wrong name is repeated back by the model
+ * or stops it to ask, and either way costs a paid call.
+ */
+function IdentityEditor({
+  projectId,
+  character,
+}: {
+  projectId: string
+  character: CharacterItem
+}) {
+  const toast = useToast()
+  const router = useRouter()
+
+  const [editingName, setEditingName] = useState(false)
+  const [name, setName] = useState(character.name)
+  const [saving, setSaving] = useState(false)
+
+  async function patch(body: Record<string, string>, label: string) {
+    setSaving(true)
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/characters/${character.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+      router.refresh()
+    } catch (error) {
+      toast.error(`${label}儲存失敗`, error instanceof Error ? error.message : undefined)
+      // Put the field back, so the screen never shows a value that was not saved.
+      setName(character.name)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function commitName() {
+    const next = name.trim()
+    setEditingName(false)
+
+    if (!next) {
+      setName(character.name)
+      return
+    }
+    if (next === character.name) return
+
+    void patch({ name: next }, '名稱')
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {editingName ? (
+        <input
+          autoFocus
+          value={name}
+          maxLength={60}
+          disabled={saving}
+          onChange={(event) => setName(event.target.value)}
+          onBlur={commitName}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              event.currentTarget.blur()
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              setName(character.name)
+              setEditingName(false)
+            }
+          }}
+          aria-label="角色名稱"
+          className="min-w-0 flex-1 rounded-md bg-stage-950 px-2 py-1 text-base font-semibold text-ink-50 ring-1 ring-inset ring-accent-500 focus:outline-none"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditingName(true)}
+          title="點一下改名"
+          className="group flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-stage-800"
+        >
+          <span className="truncate text-base font-semibold text-ink-50">{character.name}</span>
+          <Pencil
+            aria-hidden
+            className="size-3 shrink-0 text-ink-700 opacity-0 transition-opacity group-hover:opacity-100"
+          />
+        </button>
+      )}
+
+      <label className="flex shrink-0 items-center gap-1">
+        <span className="sr-only">角色定位</span>
+        {character.tier === 'LEAD' && (
+          <Crown aria-hidden className="size-3 text-gilt-300" />
+        )}
+        <select
+          value={character.tier}
+          disabled={saving}
+          onChange={(event) => void patch({ tier: event.target.value }, '定位')}
+          className={cn(
+            'cursor-pointer rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset transition-colors',
+            'focus:ring-2 focus:ring-accent-500 focus:outline-none disabled:opacity-60',
+            character.tier === 'LEAD'
+              ? 'bg-gilt-400/15 text-gilt-300 ring-gilt-500/50'
+              : 'bg-stage-800 text-ink-400 ring-stage-700 hover:text-ink-200'
+          )}
+        >
+          {CHARACTER_TIERS.map((tier) => (
+            <option key={tier} value={tier} className="bg-stage-850 text-ink-200">
+              {CHARACTER_TIER_LABEL[tier]}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {saving && <Loader2 aria-hidden className="size-3 animate-spin text-ink-500" />}
+    </div>
+  )
+}
 
 function Portrait({
   character,

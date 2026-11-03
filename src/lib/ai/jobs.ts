@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, isNull } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   aiJobAttempts,
@@ -88,7 +88,21 @@ export async function buildContext(input: {
         body: worldEntries.body,
       })
       .from(worldEntries)
-      .where(and(eq(worldEntries.projectId, projectId), eq(worldEntries.isCanon, true)))
+      /*
+       * Soft-deleted rows are excluded here as well as in the UI.
+       *
+       * They were not, and it showed: two placeholder characters the pair had
+       * already deleted kept arriving as canon, and the model — correctly —
+       * stopped to ask who they were. A deletion the AI cannot see is a
+       * deletion that still costs money on every call.
+       */
+      .where(
+        and(
+          eq(worldEntries.projectId, projectId),
+          eq(worldEntries.isCanon, true),
+          isNull(worldEntries.deletedAt)
+        )
+      )
       .limit(60)
 
     if (rows.length > 0) context.worldEntries = rows
@@ -103,7 +117,7 @@ export async function buildContext(input: {
         personality: characters.personality,
       })
       .from(characters)
-      .where(eq(characters.projectId, projectId))
+      .where(and(eq(characters.projectId, projectId), isNull(characters.deletedAt)))
       .limit(60)
 
     if (rows.length > 0) {
