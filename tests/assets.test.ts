@@ -364,3 +364,100 @@ describe.skipIf(!hasDb)('asset centre overview', () => {
     await db.delete(schema.assets).where(eq(schema.assets.id, foreign!.id))
   })
 })
+
+describe.skipIf(!hasDb)('music library', () => {
+  const trackIds: string[] = []
+
+  it('pages, filters and searches in SQL', async () => {
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { inArray } = await import('drizzle-orm')
+    const { listMusic } = await import('@/lib/music-library')
+
+    // Three tracks that differ in every dimension the filters use.
+    const fixtures = [
+      { title: '主題曲', category: 'OP' as const, genre: '古風', mood: '磅礡' },
+      { title: '市集喧嘩', category: 'BGM' as const, genre: '生活', mood: '輕快' },
+      { title: '灶火暖心', category: 'BGM' as const, genre: '日常', mood: '溫馨' },
+    ]
+
+    for (const fixture of fixtures) {
+      const [asset] = await db
+        .insert(schema.assets)
+        .values({
+          projectId,
+          kind: 'MUSIC' as const,
+          name: `${fixture.title}.mp3`,
+          title: fixture.title,
+          objectKey: `tests/${crypto.randomUUID()}.mp3`,
+          uploadStatus: 'COMPLETED' as const,
+          durationSec: 180,
+        })
+        .returning({ id: schema.assets.id })
+
+      trackIds.push(asset!.id)
+      createdAssetIds.push(asset!.id)
+
+      await db.insert(schema.audioMetadata).values({
+        assetId: asset!.id,
+        category: fixture.category,
+        genreTags: [fixture.genre],
+        moodTags: [fixture.mood],
+        artist: '測試樂手',
+      })
+    }
+
+    const all = await listMusic(projectId, { perPage: 50 })
+    expect(all.rows.length).toBeGreaterThanOrEqual(3)
+
+    const bgm = await listMusic(projectId, { category: 'BGM', perPage: 50 })
+    expect(bgm.rows.every((row) => row.category === 'BGM')).toBe(true)
+    expect(bgm.rows.length).toBeGreaterThanOrEqual(2)
+
+    const byMood = await listMusic(projectId, { mood: '溫馨', perPage: 50 })
+    expect(byMood.rows.every((row) => row.moodTags.includes('溫馨'))).toBe(true)
+
+    const searched = await listMusic(projectId, { q: '市集', perPage: 50 })
+    expect(searched.rows.some((row) => row.title === '市集喧嘩')).toBe(true)
+
+    await db.delete(schema.audioMetadata).where(inArray(schema.audioMetadata.assetId, trackIds))
+  })
+
+  it('clamps a page past the end rather than returning nothing', async () => {
+    // Narrowing a filter while on page 9 would otherwise strand the reader.
+    const { listMusic } = await import('@/lib/music-library')
+
+    const result = await listMusic(projectId, { page: 999, perPage: 5 })
+
+    expect(result.page).toBe(result.pageCount)
+  })
+
+  it('never lists a track whose upload did not finish', async () => {
+    /*
+     * 「無音檔不顯示假曲目」. A PENDING row has no audio behind it, so a
+     * library that listed it would offer a play button that cannot work.
+     */
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+    const { listMusic } = await import('@/lib/music-library')
+
+    const [pending] = await db
+      .insert(schema.assets)
+      .values({
+        projectId,
+        kind: 'MUSIC' as const,
+        name: 'half-uploaded.mp3',
+        title: '沒傳完的歌',
+        objectKey: `tests/${crypto.randomUUID()}.mp3`,
+        uploadStatus: 'PENDING' as const,
+      })
+      .returning({ id: schema.assets.id })
+
+    const result = await listMusic(projectId, { perPage: 50 })
+
+    expect(result.rows.some((row) => row.assetId === pending!.id)).toBe(false)
+
+    await db.delete(schema.assets).where(eq(schema.assets.id, pending!.id))
+  })
+})

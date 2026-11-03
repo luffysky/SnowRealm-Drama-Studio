@@ -38,7 +38,7 @@ export function AssetCenterNav({
     { key: 'all', label: '全部素材', segment: 'all', ready: false, milestone: 'M3' },
     { key: 'image', label: '圖片', segment: 'image', ready: false, milestone: 'M3', count: counts.IMAGE },
     { key: 'video', label: '影片', segment: 'video', ready: false, milestone: 'M3', count: counts.VIDEO },
-    { key: 'music', label: '音樂', segment: 'music', ready: false, milestone: 'M3', count: counts.MUSIC },
+    { key: 'music', label: '音樂', segment: 'music', ready: true, count: counts.MUSIC },
     { key: 'sfx', label: '音效', segment: 'sfx', ready: false, milestone: 'M3', count: counts.SFX },
     { key: 'voice', label: '配音', segment: 'voice', ready: false, milestone: 'M3', count: counts.VOICE },
     { key: 'licenses', label: '授權管理', segment: 'licenses', ready: false, milestone: 'M3' },
