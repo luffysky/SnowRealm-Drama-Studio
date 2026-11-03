@@ -725,3 +725,37 @@ export const callSignalSchema = z.object({
 export const callStateSchema = z.object({
   state: z.enum(['ACTIVE', 'ENDED', 'DECLINED', 'MISSED']),
 })
+
+/**
+ * 個人資料 (Z85).
+ *
+ * Every field optional, but an empty edit is rejected — it would bump
+ * `updated_at` and write an activity line for nothing.
+ *
+ * `account` may be an empty string on purpose: that means 「只用 Email
+ * 登入」, and the unique index is partial so two blank handles do not collide.
+ */
+export const profileUpdateSchema = z
+  .object({
+    /** Omitted means yourself. Anyone else needs `member.manage`. */
+    userId: uuid.optional(),
+    name: z.string().trim().min(1, '名字不能空白').max(60).optional(),
+    email: z.string().trim().email('Email 格式不正確').max(160).optional(),
+    account: z
+      .string()
+      .trim()
+      .max(40)
+      .regex(/^[A-Za-z0-9._-]*$/, '帳號只能用英數字與 . _ -')
+      .optional(),
+    title: z.string().trim().max(60).optional(),
+    color: z
+      .string()
+      .trim()
+      .regex(/^#[0-9a-fA-F]{6}$/, '顏色要是 #RRGGBB')
+      .optional(),
+    displayCurrency: z.enum(CURRENCIES).optional(),
+  })
+  .refine(
+    (value) => Object.keys(value).filter((key) => key !== 'userId').length > 0,
+    { message: '沒有要變更的欄位' }
+  )

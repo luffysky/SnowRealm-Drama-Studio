@@ -157,7 +157,7 @@ export const NAV_SECTIONS: NavSection[] = [
 
 /** Rail-only entries, pinned to the foot of the tree. */
 export const NAV_FOOTER: NavLeaf[] = [
-  { key: 'profile', label: '個人設定', href: '/settings/profile', ready: false, milestone: 'M4', design: 22 },
+  { key: 'profile', label: '個人設定', href: '/settings/profile', ready: true, design: 22 },
 ]
 
 /* -------------------------------------------------------------------------- */
