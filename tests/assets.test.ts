@@ -276,3 +276,90 @@ describe.skipIf(!hasDb)('project isolation', () => {
     expect(rows.every((row) => row.projectId === projectId)).toBe(true)
   })
 })
+
+describe.skipIf(!hasDb)('asset centre overview', () => {
+  it('lists every kind, including the empty ones', async () => {
+    /*
+     * The acceptance test for design 81 is explicit: an empty library shows 0.
+     * Hiding a category because it has no files reads as "not supported",
+     * which is a different claim from "none yet".
+     */
+    const { getAssetCenter } = await import('@/lib/asset-center')
+    const { ASSET_KINDS } = await import('@/lib/constants')
+
+    const data = await getAssetCenter(projectId)
+
+    expect(data.byKind.map((row) => row.kind)).toEqual([...ASSET_KINDS])
+  })
+
+  it('counts only finished uploads', async () => {
+    // A PENDING row has no bytes behind it; counting it would overstate both
+    // the library and the storage bill.
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+    const { getAssetCenter } = await import('@/lib/asset-center')
+
+    const before = await getAssetCenter(projectId)
+
+    const [pending] = await db
+      .insert(schema.assets)
+      .values({
+        projectId,
+        kind: 'VIDEO' as const,
+        name: 'never-finished.mp4',
+        objectKey: `tests/${crypto.randomUUID()}.mp4`,
+        sizeBytes: 999_999,
+        uploadStatus: 'PENDING' as const,
+      })
+      .returning({ id: schema.assets.id })
+
+    createdAssetIds.push(pending!.id)
+
+    const after = await getAssetCenter(projectId)
+
+    expect(after.total).toBe(before.total)
+    expect(after.sizeBytes).toBe(before.sizeBytes)
+
+    await db.delete(schema.assets).where(eq(schema.assets.id, pending!.id))
+  })
+
+  it('charges nothing while inside the free tier', async () => {
+    // R2 gives 10 GB a month free; a few test files must not produce a bill.
+    const { getAssetCenter } = await import('@/lib/asset-center')
+
+    const data = await getAssetCenter(projectId)
+
+    expect(data.sizeBytes).toBeLessThan(10 * 1024 ** 3)
+    expect(data.estimatedMonthlyUsd).toBe(0)
+  })
+
+  it('never reports another project’s assets', async () => {
+    if (!otherProjectId) return
+
+    const { getAssetCenter } = await import('@/lib/asset-center')
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+
+    const before = await getAssetCenter(projectId)
+
+    const [foreign] = await db
+      .insert(schema.assets)
+      .values({
+        projectId: otherProjectId,
+        kind: 'IMAGE' as const,
+        name: 'other-project.png',
+        objectKey: `tests/${crypto.randomUUID()}.png`,
+        sizeBytes: 1234,
+        uploadStatus: 'COMPLETED' as const,
+      })
+      .returning({ id: schema.assets.id })
+
+    const after = await getAssetCenter(projectId)
+
+    expect(after.total).toBe(before.total)
+
+    await db.delete(schema.assets).where(eq(schema.assets.id, foreign!.id))
+  })
+})
