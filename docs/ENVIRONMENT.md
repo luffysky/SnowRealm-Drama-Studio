@@ -134,17 +134,19 @@ SnowRealm Drama Studio V1 — Neon PostgreSQL + Cloudflare R2 + Vercel
 本系統的大型素材是由瀏覽器拿到 presigned URL 後**直接 PUT 到 R2**，不經過 Vercel（避免 serverless function 的請求大小與執行時間限制）。這屬於跨來源請求，必須在 bucket 上設定 CORS，否則上傳會被瀏覽器攔下。
 
 1. bucket 頁面 → **Settings** → **CORS policy** → **Add CORS policy**
-2. 貼入以下內容，並把 `AllowedOrigins` 換成你的實際網域：
+2. 貼入以下內容（`AllowedOrigins` 已填入本專案的實際網域）：
 
 ```json
 [
   {
     "AllowedOrigins": [
       "http://localhost:3400",
-      "https://你的專案.vercel.app"
+      "http://127.0.0.1:3400",
+      "https://dramastudio-neon.vercel.app",
+      "https://dreama.snowrealm.pet"
     ],
-    "AllowedMethods": ["GET", "PUT", "HEAD"],
-    "AllowedHeaders": ["content-type", "content-length"],
+    "AllowedMethods": ["GET", "PUT"],
+    "AllowedHeaders": ["content-type"],
     "ExposeHeaders": ["etag"],
     "MaxAgeSeconds": 3600
   }
@@ -152,10 +154,16 @@ SnowRealm Drama Studio V1 — Neon PostgreSQL + Cloudflare R2 + Vercel
 ```
 
 說明：
-- `PUT` 給單檔與 multipart 分段上傳；`GET` 給下載與預覽；`HEAD` 給上傳前的檔案存在性檢查
-- `etag` 必須 expose，multipart upload 完成時需要收集每個分段的 ETag 才能合併
-- 之後若綁自訂網域，記得把新網域加進 `AllowedOrigins`
-- Vercel 的 preview 部署網址每次不同，若需要在 preview 測上傳，可暫時加入 `https://*.vercel.app`，但正式環境建議只列明確網域
+- **`localhost` 與 `127.0.0.1` 在瀏覽器眼中是兩個不同的來源**，本機開發兩個都要列，否則換個寫法開頁面就會被擋
+- `PUT` 給單檔上傳與 multipart 分段上傳（`src/components/studio/useUploader.ts` 的 `putWithProgress`）
+- `GET` 給瀏覽器跟著 `/api/files/[assetId]` 的 307 轉址去取檔。`<img>`、`<video>` 這類標籤本身不需要 CORS，但用 `fetch()` 下載時需要
+- **不需要 `HEAD`**：上傳完成後的存在性檢查（`headObject`）是伺服器端用 S3 SDK 發的，不經過瀏覽器，也就不經過 CORS
+- `AllowedHeaders` 只需要 `content-type`。`content-length` 是瀏覽器自己帶的禁用標頭，寫了也不會出現在 preflight
+- **不要**把 `authorization` 加進去。presigned URL 的簽章在 query string 裡，不走 Authorization 標頭；列了只會擴大允許範圍
+- `etag` 必須 expose，multipart 合併時要收集每個分段的 ETag
+- 之後若再綁新的自訂網域，記得把它加進 `AllowedOrigins`
+- Vercel 的 preview 網址每次不同。要在 preview 測上傳就暫時加 `https://*.vercel.app`，正式環境只列明確網域
+- **`AllowedOrigins` 不要寫 `*`**。CORS 擋不住有簽章的人，但 `*` 等於允許任何網站在使用者登入狀態下對你的 bucket 發請求
 
 ### 2.5 Preview 環境建議用另一個 bucket
 
@@ -401,7 +409,7 @@ npm run test:smoke            # 對執行中的伺服器做端對端測試
    npm run db:seed
    ```
    完成後記得把 `.env.local` 改回 dev branch。
-2. 回到 2.4 節，把正式網域加進 R2 的 CORS `AllowedOrigins`
+2. 確認 2.4 節的 CORS `AllowedOrigins` 已包含要上線的網域（`dramastudio-neon.vercel.app` 與 `dreama.snowrealm.pet` 已列入）
 3. 用 Owner 帳號登入，確認可以上傳一張圖片並正常顯示
 
 ---
