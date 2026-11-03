@@ -83,10 +83,10 @@ describe('editor modules', () => {
   })
 
   it('describes every module, because the toggle menu shows it', () => {
-    for (const module of EDITOR_MODULES) {
-      expect(module.label.length).toBeGreaterThan(0)
-      expect(module.description.length).toBeGreaterThan(0)
-      expect(isEditorModuleId(module.id)).toBe(true)
+    for (const entry of EDITOR_MODULES) {
+      expect(entry.label.length).toBeGreaterThan(0)
+      expect(entry.description.length).toBeGreaterThan(0)
+      expect(isEditorModuleId(entry.id)).toBe(true)
     }
   })
 })
