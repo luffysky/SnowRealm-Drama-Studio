@@ -164,28 +164,60 @@ describe('secret encryption', () => {
 })
 
 describe('R2 object keys', () => {
-  it('never puts the original filename in the key', () => {
+  it('carries a readable, harmless fragment of the filename', () => {
+    /*
+     * This rule changed deliberately (2026-11-04). The key used to be UUID
+     * only, which guaranteed three things: no collision, no traversal, no
+     * leaked title. The first two still hold. The third was traded away so
+     * that browsing the bucket answers "what is this file" without the
+     * database — the console is where you look when something is wrong, and
+     * two columns of UUIDs answer nothing.
+     *
+     * The trade is narrow: keys appear in presigned URLs, which are
+     * short-lived and only minted for a member who can already download the
+     * file itself.
+     */
     const key = buildObjectKey({
       projectId: '11111111-1111-4111-8111-111111111111',
       kind: 'IMAGE',
       filename: '第7集 定妝照.png',
     })
 
-    expect(key).not.toContain('定妝照')
+    expect(key).toContain('定妝照')
+    // Whitespace and punctuation still never survive into a key.
     expect(key).not.toContain(' ')
     expect(key).toMatch(
-      /^projects\/11111111-1111-4111-8111-111111111111\/image\/[0-9a-f-]{36}\.png$/
+      /^projects\/11111111-1111-4111-8111-111111111111\/originals\/image\/_project\/[0-9a-f-]{36}__[^/]+\.png$/
     )
   })
 
-  it('cannot be escaped by a traversal filename', () => {
+  it('still cannot be escaped by a traversal filename', () => {
+    // The part that must never regress: a key with no `..` and no extra
+    // slashes cannot climb out of its prefix.
     const key = buildObjectKey({
       projectId: '11111111-1111-4111-8111-111111111111',
       kind: 'VIDEO',
-      filename: '../../../etc/passwd',
+      filename: '../../../etc/passwd.mp4',
     })
+
     expect(key).not.toContain('..')
-    expect(key.startsWith('projects/11111111-1111-4111-8111-111111111111/video/')).toBe(true)
+    expect(
+      key.startsWith('projects/11111111-1111-4111-8111-111111111111/originals/video/')
+    ).toBe(true)
+
+    // Exactly the segments the builder intends: nothing the filename added.
+    expect(key.split('/')).toHaveLength(6)
+  })
+
+  it('groups by episode when one is known', () => {
+    const key = buildObjectKey({
+      projectId: '11111111-1111-4111-8111-111111111111',
+      kind: 'VIDEO',
+      filename: 'take.mp4',
+      episodeNumber: 7,
+    })
+
+    expect(key).toContain('/originals/video/ep007/')
   })
 
   it('extracts only safe extensions', () => {

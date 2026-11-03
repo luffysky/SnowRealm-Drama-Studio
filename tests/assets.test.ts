@@ -103,7 +103,7 @@ describe('buildObjectKey', () => {
      */
     const key = buildObjectKey({ projectId: 'abc', kind: 'IMAGE', filename: 'a.png' })
 
-    expect(key.startsWith('projects/abc/')).toBe(true)
+    expect(key.startsWith('projects/abc/originals/')).toBe(true)
     expect(key.endsWith('.png')).toBe(true)
   })
 
@@ -111,7 +111,8 @@ describe('buildObjectKey', () => {
     const image = buildObjectKey({ projectId: 'p', kind: 'IMAGE', filename: 'a.png' })
     const music = buildObjectKey({ projectId: 'p', kind: 'MUSIC', filename: 'a.mp3' })
 
-    expect(image.split('/')[2]).not.toBe(music.split('/')[2])
+    expect(image).toContain('/originals/image/')
+    expect(music).toContain('/originals/music/')
   })
 })
 
