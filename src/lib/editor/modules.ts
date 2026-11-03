@@ -32,6 +32,9 @@ export const EDITOR_MODULE_IDS = [
   'table',
   'typography',
   'focus',
+  'outline',
+  'findReplace',
+  'aiSelection',
   'screenplay',
 ] as const
 export type EditorModuleId = (typeof EDITOR_MODULE_IDS)[number]
@@ -129,6 +132,27 @@ export const EDITOR_MODULES: readonly EditorModule[] = [
     description: '淡化非當前段落，長時間寫作比較不費眼。',
     surfaces: EDITOR_SURFACES,
     defaultOn: [],
+  },
+  {
+    id: 'outline',
+    label: '章節目錄',
+    description: '依標題自動產生側邊目錄，點一下跳到該段。長篇才看得出價值。',
+    surfaces: EDITOR_SURFACES,
+    defaultOn: ['NOVEL'],
+  },
+  {
+    id: 'findReplace',
+    label: '尋找與取代',
+    description: '含「全部取代」。角色改名時這是唯一不會漏字的方法。',
+    surfaces: EDITOR_SURFACES,
+    defaultOn: EDITOR_SURFACES,
+  },
+  {
+    id: 'aiSelection',
+    label: 'AI 選取選單',
+    description: '選一段字後浮出續寫、改寫、潤稿等動作。產出一律先比對再採用，不會直接蓋掉。',
+    surfaces: EDITOR_SURFACES,
+    defaultOn: EDITOR_SURFACES,
   },
   {
     id: 'screenplay',

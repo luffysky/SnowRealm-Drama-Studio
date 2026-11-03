@@ -24,6 +24,7 @@ import {
   toPercent,
 } from '@/lib/production'
 import { cn, formatRelativeZh } from '@/lib/utils'
+import { AltTitles } from '@/components/studio/AltTitles'
 import { assetPreviewUrl } from '@/lib/asset-url'
 
 export const metadata: Metadata = { title: '工作室儀表板' }
@@ -277,6 +278,10 @@ function ProjectsPanel({ data }: { data: DashboardData }) {
                     </span>
                   )}
                 </div>
+
+                {/* A name set in 作品設定 that appears nowhere looks like one
+                    that was never saved. */}
+                <AltTitles project={project} compact />
 
                 <div className="flex items-center gap-2">
                   <span className="shrink-0 text-[11px] text-ink-500 tabular-nums">

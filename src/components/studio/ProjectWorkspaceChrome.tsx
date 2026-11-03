@@ -4,8 +4,8 @@ import { Check, ChevronDown, ChevronRight, Film } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
+import { AltTitles } from '@/components/studio/AltTitles'
 import { ProjectSettingsDialog } from '@/components/studio/ProjectSettingsDialog'
-import { dramaTitleOf, novelTitleOf } from '@/lib/project-titles'
 import {
   activeProjectTabKey,
   PROJECT_TABS,
@@ -123,7 +123,13 @@ export function ProjectWorkspaceChrome({
             </span>
           </div>
 
-          <TitleLine project={project} />
+          <AltTitles
+            project={{
+              title: project.title,
+              novelTitle: project.novelTitle ?? '',
+              dramaTitle: project.dramaTitle ?? '',
+            }}
+          />
 
           <p className="line-clamp-2 max-w-3xl text-xs leading-relaxed text-ink-400">
             {logline || (
@@ -137,41 +143,6 @@ export function ProjectWorkspaceChrome({
 
       <TabStrip projectId={project.id} activeKey={activeKey} />
     </header>
-  )
-}
-
-/**
- * 小說書名 / 短劇劇名, shown only when they differ from the work's name.
- *
- * On a project where all three match, printing the same name three times is
- * noise — so this renders nothing rather than three identical rows.
- */
-function TitleLine({ project }: { project: WorkspaceProject }) {
-  const names = {
-    title: project.title,
-    novelTitle: project.novelTitle ?? '',
-    dramaTitle: project.dramaTitle ?? '',
-  }
-
-  const novel = novelTitleOf(names)
-  const drama = dramaTitleOf(names)
-  if (novel === project.title && drama === project.title) return null
-
-  return (
-    <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-[11px] text-ink-500">
-      {novel !== project.title && (
-        <div className="flex gap-1">
-          <dt>小說</dt>
-          <dd className="text-ink-300">{novel}</dd>
-        </div>
-      )}
-      {drama !== project.title && (
-        <div className="flex gap-1">
-          <dt>短劇</dt>
-          <dd className="text-ink-300">{drama}</dd>
-        </div>
-      )}
-    </dl>
   )
 }
 

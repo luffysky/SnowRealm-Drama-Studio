@@ -11,6 +11,7 @@ import {
 } from '@/lib/constants'
 import { formatFromBase, type CurrencyValue, type FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
+import { AltTitles } from '@/components/studio/AltTitles'
 import { assetPreviewUrl } from '@/lib/asset-url'
 
 /**
@@ -35,6 +36,9 @@ export type ProjectCardData = {
   isFavourite: boolean
   /** Cover image, served through /api/files which checks the session first. */
   coverAssetId: string | null
+  /** Empty = same as `title`. */
+  novelTitle: string
+  dramaTitle: string
 }
 
 export function ProjectCard({
@@ -165,9 +169,10 @@ export function ProjectCard({
           <Heart aria-hidden className={cn('size-3.5', favourite && 'fill-current')} />
         </span>
 
-        <h3 className="absolute right-3 bottom-2 left-3 truncate text-base font-semibold text-ink-50">
-          {project.title}
-        </h3>
+        <div className="absolute right-3 bottom-2 left-3">
+          <h3 className="truncate text-base font-semibold text-ink-50">{project.title}</h3>
+          <AltTitles project={project} compact />
+        </div>
       </div>
 
       {/* body */}

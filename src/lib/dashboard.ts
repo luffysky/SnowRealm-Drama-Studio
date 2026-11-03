@@ -33,6 +33,9 @@ import { visibleProjects } from '@/lib/project-access'
 export type DashboardProject = {
   id: string
   title: string
+  /** Empty = same as `title`. Read through `@/lib/project-titles`. */
+  novelTitle: string
+  dramaTitle: string
   status: ProjectStatusValue
   tags: string[]
   coverAssetId: string | null
@@ -102,6 +105,8 @@ export async function getDashboard(userId: string, trendDays = 30): Promise<Dash
     .select({
       id: projects.id,
       title: projects.title,
+      novelTitle: projects.novelTitle,
+      dramaTitle: projects.dramaTitle,
       status: projects.status,
       tags: projects.tags,
       coverAssetId: projects.coverAssetId,
@@ -276,6 +281,8 @@ export async function getDashboard(userId: string, trendDays = 30): Promise<Dash
     return {
       id: row.id,
       title: row.title,
+      novelTitle: row.novelTitle,
+      dramaTitle: row.dramaTitle,
       status: row.status,
       tags: row.tags,
       coverAssetId: row.coverAssetId,

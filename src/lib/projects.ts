@@ -28,6 +28,9 @@ import { aggregateProgress, STAGES_PER_EPISODE } from '@/lib/production'
 export type ProjectCard = {
   id: string
   title: string
+  /** Empty = same as `title`. Read through `@/lib/project-titles`. */
+  novelTitle: string
+  dramaTitle: string
   slug: string
   status: ProjectStatusValue
   tags: string[]
@@ -89,6 +92,8 @@ export async function listProjects(
     .select({
       id: projects.id,
       title: projects.title,
+      novelTitle: projects.novelTitle,
+      dramaTitle: projects.dramaTitle,
       slug: projects.slug,
       status: projects.status,
       tags: projects.tags,
@@ -208,6 +213,8 @@ export async function listProjects(
     return {
       id: row.id,
       title: row.title,
+      novelTitle: row.novelTitle,
+      dramaTitle: row.dramaTitle,
       slug: row.slug,
       status: row.status,
       tags: row.tags,
@@ -396,10 +403,11 @@ export type ProjectEdit = {
 /**
  * 作品設定: renames and the cover.
  *
- * The cover is checked rather than trusted. `cover_asset_id` has no foreign
- * key (it predates this function), so an id from another project — or one that
- * never finished uploading — would be accepted by the database and then render
- * as a broken image, or worse, read across the project boundary.
+ * The cover is checked rather than trusted. No asset reference in this schema
+ * carries a foreign key — not here, not on episodes, characters or shots
+ * (`npx tsx scripts/db-verify.ts` lists them) — so the database would accept
+ * an id from another project, or one whose upload never finished, and it
+ * would render as a broken image or read across the project boundary.
  *
  * Returns null when the project is not visible to this member, so the caller
  * answers 404 rather than distinguishing "forbidden" from "no such project".

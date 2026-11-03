@@ -73,10 +73,14 @@ function toCardData(card: {
   spend: number
   isFavourite: boolean
   coverAssetId: string | null
+  novelTitle: string
+  dramaTitle: string
 }): ProjectCardData {
   return {
     id: card.id,
     title: card.title,
+    novelTitle: card.novelTitle,
+    dramaTitle: card.dramaTitle,
     status: card.status,
     tags: card.tags,
     isFlagship: card.isFlagship,
