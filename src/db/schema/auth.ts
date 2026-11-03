@@ -36,6 +36,11 @@ export const users = pgTable(
     role: roleEnum('role').notNull().default('OWNER'),
     /** Accent colour identifying this member across assignee chips. */
     color: text('color').notNull().default('#a78bfa'),
+    /**
+     * Which currency this member reads totals in. A display preference only —
+     * stored amounts never change, they are converted on render.
+     */
+    displayCurrency: text('display_currency').notNull().default('TWD'),
     avatarAssetId: uuid('avatar_asset_id'),
     active: boolean('active').notNull().default(true),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),

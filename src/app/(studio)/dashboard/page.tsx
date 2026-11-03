@@ -17,6 +17,7 @@ import {
   Video,
   Wallet,
 } from 'lucide-react'
+import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
 import { db } from '@/db'
 import {
@@ -50,6 +51,8 @@ import {
   type ExpenseCategoryValue,
   type StageValue,
 } from '@/lib/constants'
+import { conversionNote, formatFromBase } from '@/lib/money'
+import { getFxRates } from '@/lib/settings'
 import { formatRelativeZh } from '@/lib/utils'
 
 export const metadata: Metadata = { title: '總儀表板' }
@@ -64,6 +67,9 @@ export const metadata: Metadata = { title: '總儀表板' }
  */
 export default async function DashboardPage() {
   const user = await getSessionUser()
+  if (!user) redirect('/login')
+
+  const fx = await getFxRates()
 
   const [project] = await db
     .select()
@@ -179,7 +185,7 @@ export default async function DashboardPage() {
   const aiTotal = aiRows.reduce((sum, r) => sum + Number(r.n), 0)
   const aiMax = Math.max(1, ...aiRows.map((r) => Number(r.n)))
 
-  const spendUsd = Number(monthSpend[0]?.total ?? 0)
+  const spend = Number(monthSpend[0]?.total ?? 0)
   const slices = buildSlices(expenseRows)
   const slicesTotal = slices.reduce((s, x) => s + x.value, 0)
 
@@ -275,9 +281,9 @@ export default async function DashboardPage() {
         />
         <StatTile
           label="本月 AI 成本"
-          value={spendUsd > 0 ? `US$${spendUsd.toFixed(2)}` : 'US$0'}
+          value={formatFromBase(spend, user.displayCurrency, fx)}
           icon={<CircleDollarSign aria-hidden className="size-3.5" />}
-          hint="已結算金額"
+          hint={conversionNote(user.displayCurrency, fx) ?? '已結算金額'}
         />
         <StatTile
           label="待審核項目"
@@ -346,7 +352,7 @@ export default async function DashboardPage() {
           <DonutChart
             slices={slices}
             centerLabel="本月總支出"
-            centerValue={slicesTotal > 0 ? `US$${slicesTotal.toFixed(2)}` : 'US$0'}
+            centerValue={formatFromBase(slicesTotal, user.displayCurrency, fx)}
             emptyMessage="本月尚無支出紀錄"
           />
         </Panel>

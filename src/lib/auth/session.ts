@@ -5,6 +5,7 @@ import { db } from '@/db'
 import { sessions, users } from '@/db/schema'
 import { env } from '@/lib/env'
 import type { RoleValue } from '@/lib/constants'
+import { isCurrency, type CurrencyValue } from '@/lib/money'
 
 export const SESSION_COOKIE = 'srds_session'
 const SESSION_TTL_DAYS = 30
@@ -17,6 +18,8 @@ export type SessionUser = {
   title: string
   role: RoleValue
   color: string
+  /** Which currency this member reads money in. Display only. */
+  displayCurrency: CurrencyValue
 }
 
 type TokenPayload = {
@@ -98,6 +101,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       title: users.title,
       role: users.role,
       color: users.color,
+      displayCurrency: users.displayCurrency,
       active: users.active,
     })
     .from(sessions)
@@ -120,6 +124,8 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     title: row.title,
     role: row.role,
     color: row.color,
+    // A hand-edited column must not break every page; fall back to the base.
+    displayCurrency: isCurrency(row.displayCurrency) ? row.displayCurrency : 'TWD',
   }
 }
 

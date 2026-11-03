@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CURRENCIES } from '@/lib/money'
 import {
   ASSET_KINDS,
   CAMERA_MOVES,
@@ -396,3 +397,8 @@ export function confirmNameSchema(expected: string) {
     confirmName: z.literal(expected, { message: `請輸入「${expected}」以確認` }),
   })
 }
+
+/** Which currency a member reads totals in. Display preference only. */
+export const displayCurrencySchema = z.object({
+  currency: z.enum(CURRENCIES, { message: '不支援的幣別' }),
+})

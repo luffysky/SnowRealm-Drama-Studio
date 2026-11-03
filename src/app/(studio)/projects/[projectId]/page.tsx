@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { ProjectOverview } from '@/components/studio/ProjectOverview'
 import { getSessionUser } from '@/lib/auth/session'
 import { getProjectOverview } from '@/lib/project-overview'
+import { getFxRates } from '@/lib/settings'
 
 type Params = { params: Promise<{ projectId: string }> }
 
@@ -27,8 +28,11 @@ export default async function ProjectOverviewPage({ params }: Params) {
   if (!user) redirect('/login')
 
   const { projectId } = await params
-  const project = await getProjectOverview(projectId, user.id)
+  const [project, fx] = await Promise.all([
+    getProjectOverview(projectId, user.id),
+    getFxRates(),
+  ])
   if (!project) notFound()
 
-  return <ProjectOverview project={project} />
+  return <ProjectOverview project={project} currency={user.displayCurrency} fx={fx} />
 }

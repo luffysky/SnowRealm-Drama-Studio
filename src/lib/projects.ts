@@ -39,8 +39,8 @@ export type ProjectCard = {
   dueDate: Date | null
   startDate: Date | null
   /** Settled spend in the project's reporting currency. */
-  spendUsd: number
-  budgetUsd: number | null
+  spend: number
+  budget: number | null
   isFavourite: boolean
   updatedAt: Date
 }
@@ -186,8 +186,8 @@ export async function listProjects(
       progress: stageTotal > 0 ? stageDone / stageTotal : 0,
       startDate: row.startDate,
       dueDate: row.dueDate,
-      spendUsd: spendBy.get(row.id) ?? 0,
-      budgetUsd: budgetBy.has(row.id) ? budgetBy.get(row.id)! : null,
+      spend: spendBy.get(row.id) ?? 0,
+      budget: budgetBy.has(row.id) ? budgetBy.get(row.id)! : null,
       isFavourite: favouriteIds.has(row.id),
       updatedAt: row.updatedAt,
     }

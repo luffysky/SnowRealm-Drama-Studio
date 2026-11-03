@@ -9,6 +9,7 @@ import {
   PROJECT_STATUS_STYLE,
   type ProjectStatusValue,
 } from '@/lib/constants'
+import { formatFromBase, type CurrencyValue, type FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
 /**
@@ -29,16 +30,20 @@ export type ProjectCardData = {
   plannedEpisodes: number
   progress: number
   dueDate: string | null
-  spendUsd: number
+  spend: number
   isFavourite: boolean
 }
 
 export function ProjectCard({
   project,
+  currency,
+  fx,
   selected,
   onSelect,
 }: {
   project: ProjectCardData
+  currency: CurrencyValue
+  fx: FxRates
   selected: boolean
   onSelect: (id: string) => void
 }) {
@@ -203,7 +208,7 @@ export function ProjectCard({
           </span>
           <span className="ml-auto inline-flex items-center gap-1">
             <Coins aria-hidden className="size-3" />
-            {project.spendUsd > 0 ? `US$${project.spendUsd.toFixed(2)}` : '—'}
+            {project.spend > 0 ? formatFromBase(project.spend, currency, fx) : '—'}
           </span>
         </div>
       </div>

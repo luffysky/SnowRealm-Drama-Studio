@@ -25,6 +25,12 @@ import { useToast } from '@/components/ui/Toast'
 import type { SessionUser } from '@/lib/auth/session'
 import { apiFetch } from '@/lib/client-fetch'
 import {
+  CURRENCIES,
+  CURRENCY_LABEL,
+  CURRENCY_SYMBOL,
+  type CurrencyValue,
+} from '@/lib/money'
+import {
   activeProjectId,
   activeSectionKey,
   isActiveHref,
@@ -243,6 +249,8 @@ function UserChip({ user }: { user: SessionUser }) {
               <p className="truncate text-xs font-medium text-ink-100">{user.name}</p>
               <p className="truncate text-[10px] text-ink-500">{user.email}</p>
             </div>
+
+            <CurrencyPicker current={user.displayCurrency} />
             <button
               type="button"
               role="menuitem"
@@ -256,6 +264,71 @@ function UserChip({ user }: { user: SessionUser }) {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * Which currency this member reads totals in.
+ *
+ * A per-member display preference, not a data change: amounts stay in the
+ * currency they were recorded in and are converted on render, so one member
+ * reading in USD cannot alter what the other sees.
+ */
+function CurrencyPicker({ current }: { current: CurrencyValue }) {
+  const router = useRouter()
+  const toast = useToast()
+  const [pending, setPending] = useState<CurrencyValue | null>(null)
+  const [value, setValue] = useState(current)
+
+  async function choose(next: CurrencyValue) {
+    if (next === value || pending) return
+
+    const previous = value
+    setValue(next) // optimistic
+    setPending(next)
+
+    try {
+      const response = await apiFetch('/api/settings/currency', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ currency: next }),
+      })
+      if (!response.ok) throw new Error(await response.text())
+
+      // Server Components hold the formatted figures; re-render them.
+      router.refresh()
+    } catch {
+      setValue(previous)
+      toast.error('幣別切換失敗', '請稍後再試')
+    } finally {
+      setPending(null)
+    }
+  }
+
+  return (
+    <div className="border-b border-stage-700/70 px-3 py-2">
+      <p className="mb-1.5 text-[10px] text-ink-600">顯示幣別</p>
+      <div className="flex gap-1" role="group" aria-label="顯示幣別">
+        {CURRENCIES.map((code) => (
+          <button
+            key={code}
+            type="button"
+            onClick={() => void choose(code)}
+            aria-pressed={value === code}
+            title={CURRENCY_LABEL[code]}
+            disabled={pending !== null}
+            className={cn(
+              'flex-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-60',
+              value === code
+                ? 'bg-accent-600/25 text-ink-50 ring-1 ring-inset ring-accent-500/50'
+                : 'text-ink-400 hover:bg-stage-800 hover:text-ink-100'
+            )}
+          >
+            {CURRENCY_SYMBOL[code]}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

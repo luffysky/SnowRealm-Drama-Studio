@@ -2,6 +2,8 @@ import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { budgets, usageLedger } from '@/db/schema'
 import { ApiError } from '@/lib/api'
+import { convert, formatMoney, isCurrency, type CurrencyValue } from '@/lib/money'
+import { getFxRates } from '@/lib/settings'
 
 /**
  * Consumption ledger and budget enforcement
@@ -133,8 +135,18 @@ export async function spendForPeriod(
   projectId: string,
   period: string = periodOf()
 ): Promise<SpendSummary> {
-  const [actualRow] = await db
-    .select({ total: sql<string>`coalesce(sum(${usageLedger.amount}), 0)` })
+  /*
+   * Summed per currency, not with a bare `sum(amount)`.
+   *
+   * Ledger rows carry their own `currency`. Adding them without looking at it
+   * treats NT$1 and US$1 as the same number — which is exactly how a cap ends
+   * up roughly 30x too loose.
+   */
+  const actualRows = await db
+    .select({
+      currency: usageLedger.currency,
+      total: sql<string>`coalesce(sum(${usageLedger.amount}), 0)`,
+    })
     .from(usageLedger)
     .where(
       and(
@@ -143,10 +155,14 @@ export async function spendForPeriod(
         eq(usageLedger.kind, 'ACTUAL')
       )
     )
+    .groupBy(usageLedger.currency)
 
   // Estimates that no ACTUAL row has settled yet.
-  const [committedRow] = await db
-    .select({ total: sql<string>`coalesce(sum(${usageLedger.amount}), 0)` })
+  const committedRows = await db
+    .select({
+      currency: usageLedger.currency,
+      total: sql<string>`coalesce(sum(${usageLedger.amount}), 0)`,
+    })
     .from(usageLedger)
     .where(
       and(
@@ -160,9 +176,26 @@ export async function spendForPeriod(
         )`
       )
     )
+    .groupBy(usageLedger.currency)
 
-  const actualUsd = Number(actualRow?.total ?? 0)
-  const committedUsd = Number(committedRow?.total ?? 0)
+  const fx = await getFxRates()
+
+  /** Sums per-currency subtotals into USD, the currency AI costs are quoted in. */
+  function toUsd(rows: { currency: string; total: string }[]): number {
+    let sum = 0
+    for (const row of rows) {
+      const amount = Number(row.total)
+      if (!amount) continue
+      if (!isCurrency(row.currency)) {
+        throw new Error(`用量帳本出現不支援的幣別：${row.currency}`)
+      }
+      sum += convert(amount, row.currency, 'USD', fx)
+    }
+    return sum
+  }
+
+  const actualUsd = toUsd(actualRows)
+  const committedUsd = toUsd(committedRows)
 
   return {
     period,
@@ -193,11 +226,13 @@ export async function checkBudget(input: {
 }): Promise<BudgetVerdict> {
   const period = input.period ?? periodOf()
   const summary = await spendForPeriod(input.projectId, period)
+  const fx = await getFxRates()
 
   // Most specific cap wins: category+period, then category, then project-wide.
   const caps = await db
     .select({
       amount: budgets.amount,
+      currency: budgets.currency,
       category: budgets.category,
       period: budgets.period,
       alertThresholdPct: budgets.alertThresholdPct,
@@ -216,14 +251,28 @@ export async function checkBudget(input: {
   const cap = applicable[0]
   if (!cap) return { allowed: true, summary }
 
-  const capUsd = Number(cap.amount)
+  /*
+   * The cap is stored in whatever currency it was entered in (`budgets.currency`
+   * defaults to TWD) while AI costs are quoted in USD. Comparing the two raw
+   * numbers silently multiplies the cap by the exchange rate.
+   */
+  const capCurrency: CurrencyValue = isCurrency(cap.currency) ? cap.currency : 'TWD'
+  const capAmount = Number(cap.amount)
+  const capUsd = convert(capAmount, capCurrency, 'USD', fx)
+
+  /** The cap as entered, plus its USD equivalent when those differ. */
+  const capLabel =
+    capCurrency === 'USD'
+      ? formatMoney(capUsd, 'USD')
+      : `${formatMoney(capAmount, capCurrency)}（約 ${formatMoney(capUsd, 'USD')}，匯率日期 ${fx.asOf}）`
+
   const projected = summary.totalUsd + input.additionalUsd
 
   if (projected > capUsd) {
     return {
       allowed: false,
       reason:
-        `本期（${period}）預算上限為 US$${capUsd.toFixed(2)}，` +
+        `本期（${period}）預算上限為 ${capLabel}，` +
         `目前已發生 US$${summary.actualUsd.toFixed(2)}、已承諾 US$${summary.committedUsd.toFixed(2)}，` +
         `這筆任務預估 US$${input.additionalUsd.toFixed(2)}，合計將超出上限。`,
       summary,

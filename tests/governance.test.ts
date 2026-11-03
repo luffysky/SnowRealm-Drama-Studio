@@ -24,7 +24,15 @@ let usage: typeof import('@/lib/usage')
 let projectId: string
 let userId: string
 
-const user = { id: '', email: '', name: '測試', title: '', role: 'OWNER' as const, color: '#fff' }
+const user = {
+  id: '',
+  email: '',
+  name: '測試',
+  title: '',
+  role: 'OWNER' as const,
+  color: '#fff',
+  displayCurrency: 'TWD' as const,
+}
 
 beforeAll(async () => {
   if (!hasDb) return
@@ -301,6 +309,35 @@ describe.skipIf(!hasDb)('budget enforcement (spec v2 §6.7)', () => {
     await expect(
       usage.assertWithinBudget({ projectId, additionalUsd: 5 })
     ).rejects.toThrow(/超出上限/)
+  })
+
+  it('treats a NT$ cap as NT$, not as the same number of dollars', async () => {
+    /*
+     * The regression this exists for: `budgets.currency` defaults to TWD while
+     * the usage ledger is written in USD, and the gate used to compare the two
+     * raw numbers. A NT$3,000 cap (~US$93) was therefore enforced as US$3,000 —
+     * about 32x too permissive. Every other test here sets currency:'USD'
+     * explicitly, which is why none of them caught it.
+     */
+    await db.insert(schema.budgets).values({
+      projectId,
+      category: 'AI_API',
+      period: usage.periodOf(),
+      amount: '3000.0000',
+      currency: 'TWD',
+    })
+
+    const underCap = await usage.checkBudget({ projectId, additionalUsd: 50 })
+    expect(underCap.allowed).toBe(true)
+
+    const overCap = await usage.checkBudget({ projectId, additionalUsd: 200 })
+    expect(overCap.allowed).toBe(false)
+    if (!overCap.allowed) {
+      // ~93, not 3000.
+      expect(overCap.capUsd).toBeLessThan(200)
+      // The refusal must name the cap as it was entered.
+      expect(overCap.reason).toContain('NT$3,000')
+    }
   })
 
   it('counts committed-but-unsettled work against the cap', async () => {

@@ -78,8 +78,8 @@ export type ProjectOverview = {
   dueDate: Date | null
   /** Whole days until dueDate; negative when overdue, null when unset. */
   daysRemaining: number | null
-  budgetUsd: number | null
-  spendUsd: number
+  budget: number | null
+  spend: number
   owner: { name: string; title: string; color: string } | null
   techLead: { name: string; title: string; color: string } | null
   workflow: WorkflowStep[]
@@ -284,8 +284,8 @@ export async function getProjectOverview(
     startDate: detail.startDate,
     dueDate: detail.dueDate,
     daysRemaining,
-    budgetUsd: detail.budgetUsd,
-    spendUsd: detail.spendUsd,
+    budget: detail.budget,
+    spend: detail.spend,
     owner: memberOf(projectRow[0]?.ownerId),
     techLead: memberOf(projectRow[0]?.techLeadId),
     workflow,

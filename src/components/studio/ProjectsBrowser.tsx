@@ -24,6 +24,7 @@ import {
   type ProjectSortValue,
   type ProjectStatusValue,
 } from '@/lib/constants'
+import { formatFromBase, type CurrencyValue, type FxRates } from '@/lib/money'
 import { cn, formatRelativeZh } from '@/lib/utils'
 
 /**
@@ -41,7 +42,7 @@ export type ProjectDetailData = ProjectCardData & {
   ownerName: string | null
   techLeadName: string | null
   startDate: string | null
-  budgetUsd: number | null
+  budget: number | null
   doneEpisodes: number
   arcs: { id: string; index: number; title: string; plannedEpisodes: number }[]
   recentActivity: { id: string; summary: string; userName: string; createdAt: string }[]
@@ -51,10 +52,14 @@ export function ProjectsBrowser({
   projects,
   details,
   counts,
+  currency,
+  fx,
 }: {
   projects: ProjectCardData[]
   details: Record<string, ProjectDetailData>
   counts: Record<string, number>
+  currency: CurrencyValue
+  fx: FxRates
 }) {
   const [status, setStatus] = useState<ProjectStatusValue | 'ALL'>('ALL')
   const [search, setSearch] = useState('')
@@ -145,6 +150,8 @@ export function ProjectsBrowser({
                 <ProjectCard
                   key={project.id}
                   project={project}
+                  currency={currency}
+                  fx={fx}
                   selected={project.id === selectedId}
                   onSelect={setSelectedId}
                 />
@@ -159,7 +166,7 @@ export function ProjectsBrowser({
           )}
         </div>
 
-        <DetailRail project={selected} />
+        <DetailRail project={selected} currency={currency} fx={fx} />
       </div>
     </div>
   )
@@ -366,7 +373,15 @@ function ProjectTable({
   )
 }
 
-function DetailRail({ project }: { project: ProjectDetailData | undefined }) {
+function DetailRail({
+  project,
+  currency,
+  fx,
+}: {
+  project: ProjectDetailData | undefined
+  currency: CurrencyValue
+  fx: FxRates
+}) {
   if (!project) {
     return (
       <aside className="panel hidden rounded-xl bg-stage-900 ring-1 ring-stage-700 xl:block">
@@ -410,18 +425,18 @@ function DetailRail({ project }: { project: ProjectDetailData | undefined }) {
     {
       icon: <Coins aria-hidden className="size-3.5" />,
       label: '製作預算',
-      value: project.budgetUsd !== null ? `US$${project.budgetUsd.toFixed(2)}` : '未設定',
+      value: project.budget !== null ? formatFromBase(project.budget, currency, fx) : '未設定',
     },
     {
       icon: <Coins aria-hidden className="size-3.5" />,
       label: '目前支出',
       value:
-        project.spendUsd > 0
-          ? `US$${project.spendUsd.toFixed(2)}` +
-            (project.budgetUsd
-              ? `（${Math.round((project.spendUsd / project.budgetUsd) * 100)}%）`
+        project.spend > 0
+          ? formatFromBase(project.spend, currency, fx) +
+            (project.budget
+              ? `（${Math.round((project.spend / project.budget) * 100)}%）`
               : '')
-          : 'US$0',
+          : formatFromBase(0, currency, fx),
     },
   ]
 

@@ -34,6 +34,24 @@ export const activities = pgTable(
   ]
 )
 
+/**
+ * Installation-wide settings, as one row per key.
+ *
+ * A key/value table rather than a one-row table with a column per setting:
+ * settings arrive one at a time over the life of the project, and a new key
+ * should not need a migration. Values are JSON so a setting can be a scalar or
+ * a small object (the FX rates are an object).
+ *
+ * Known keys:
+ *   `fx.rates` — { base, rates, asOf, source }, see src/lib/money.ts
+ */
+export const appSettings = pgTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  updatedById: uuid('updated_by_id').references(() => users.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 /** A requested export (novel / script / storyboard / cost report). */
 export const exports = pgTable(
   'exports',

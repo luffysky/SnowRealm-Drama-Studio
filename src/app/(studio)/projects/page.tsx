@@ -7,6 +7,7 @@ import {
 import type { ProjectCardData } from '@/components/studio/ProjectCard'
 import { getSessionUser } from '@/lib/auth/session'
 import { getProjectDetail, listProjects } from '@/lib/projects'
+import { getFxRates } from '@/lib/settings'
 
 export const metadata: Metadata = { title: '作品列表' }
 
@@ -24,7 +25,7 @@ export default async function ProjectsPage() {
   const user = await getSessionUser()
   if (!user) redirect('/login')
 
-  const { cards, counts } = await listProjects(user.id)
+  const [{ cards, counts }, fx] = await Promise.all([listProjects(user.id), getFxRates()])
 
   const details: Record<string, ProjectDetailData> = {}
   for (const card of cards) {
@@ -38,7 +39,7 @@ export default async function ProjectsPage() {
       ownerName: detail.ownerName,
       techLeadName: detail.techLeadName,
       startDate: detail.startDate?.toISOString() ?? null,
-      budgetUsd: detail.budgetUsd,
+      budget: detail.budget,
       doneEpisodes: detail.doneEpisodes,
       arcs: detail.arcs,
       recentActivity: detail.recentActivity.map((a) => ({
@@ -53,6 +54,8 @@ export default async function ProjectsPage() {
       projects={cards.map(toCardData)}
       details={details}
       counts={counts}
+      currency={user.displayCurrency}
+      fx={fx}
     />
   )
 }
@@ -67,7 +70,7 @@ function toCardData(card: {
   plannedEpisodes: number
   progress: number
   dueDate: Date | null
-  spendUsd: number
+  spend: number
   isFavourite: boolean
 }): ProjectCardData {
   return {
@@ -80,7 +83,7 @@ function toCardData(card: {
     plannedEpisodes: card.plannedEpisodes,
     progress: card.progress,
     dueDate: card.dueDate?.toISOString() ?? null,
-    spendUsd: card.spendUsd,
+    spend: card.spend,
     isFavourite: card.isFavourite,
   }
 }

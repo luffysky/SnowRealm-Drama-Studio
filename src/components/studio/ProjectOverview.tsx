@@ -32,6 +32,12 @@ import {
   type AssetKindValue,
   type EpisodeStatusValue,
 } from '@/lib/constants'
+import {
+  conversionNote,
+  formatFromBase,
+  type CurrencyValue,
+  type FxRates,
+} from '@/lib/money'
 import type { ProjectOverview as ProjectOverviewData } from '@/lib/project-overview'
 import { cn, formatBytes, formatRelativeZh } from '@/lib/utils'
 
@@ -63,12 +69,20 @@ const PROJECT_TABS: ProjectTab[] = [
   { key: 'settings', label: '設定', milestone: 'M4' },
 ]
 
-export function ProjectOverview({ project }: { project: ProjectOverviewData }) {
+export function ProjectOverview({
+  project,
+  currency,
+  fx,
+}: {
+  project: ProjectOverviewData
+  currency: CurrencyValue
+  fx: FxRates
+}) {
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
       <Hero project={project} />
       <TabStrip />
-      <StatCards project={project} />
+      <StatCards project={project} currency={currency} fx={fx} />
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
@@ -217,7 +231,15 @@ function TabStrip() {
 /* Stat cards                                                                  */
 /* -------------------------------------------------------------------------- */
 
-function StatCards({ project }: { project: ProjectOverviewData }) {
+function StatCards({
+  project,
+  currency,
+  fx,
+}: {
+  project: ProjectOverviewData
+  currency: CurrencyValue
+  fx: FxRates
+}) {
   const pct = Math.round(project.progress * 100)
   const planned = project.plannedEpisodes || project.episodeCount
 
@@ -230,8 +252,8 @@ function StatCards({ project }: { project: ProjectOverviewData }) {
   const waiting = (project.episodesByStatus.PLANNED ?? 0) + (project.episodesByStatus.ON_HOLD ?? 0)
 
   const spendPct =
-    project.budgetUsd && project.budgetUsd > 0
-      ? Math.round((project.spendUsd / project.budgetUsd) * 100)
+    project.budget && project.budget > 0
+      ? Math.round((project.spend / project.budget) * 100)
       : null
 
   return (
@@ -277,12 +299,16 @@ function StatCards({ project }: { project: ProjectOverviewData }) {
 
       <StatCard icon={<Coins className="size-3.5" />} title="製作預算">
         <p className="text-xl font-semibold text-ink-50">
-          {project.budgetUsd ? `US$${project.budgetUsd.toLocaleString('en-US')}` : '未設定'}
+          {project.budget ? formatFromBase(project.budget, currency, fx) : '未設定'}
         </p>
         <p className="mt-2 text-[11px] text-ink-500">
-          已支出 US${project.spendUsd.toFixed(2)}
+          已支出 {formatFromBase(project.spend, currency, fx)}
           {spendPct !== null && `（${spendPct}%）`}
         </p>
+        {/* A converted figure without its rate and date is an unsourced claim. */}
+        {conversionNote(currency, fx) && (
+          <p className="mt-1 text-[10px] text-ink-600">{conversionNote(currency, fx)}</p>
+        )}
         {spendPct !== null && (
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stage-800">
             <div
