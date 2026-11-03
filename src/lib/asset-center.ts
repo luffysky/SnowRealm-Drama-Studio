@@ -1,7 +1,8 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { assetLicenses, assets, episodes, users } from '@/db/schema'
+import { assetLicenses, assets, episodes, usageLedger, users } from '@/db/schema'
 import { ASSET_KINDS, type AssetKindValue } from '@/lib/constants'
+import { getStorageCost } from '@/lib/settings'
 
 /**
  * 素材資產中心總覽 (design 81, Z4).
@@ -14,9 +15,11 @@ import { ASSET_KINDS, type AssetKindValue } from '@/lib/constants'
  * (`docs/STORAGE.md`), so that is what this reports instead.
  */
 
-/** R2 Standard, USD per GB-month. The first 10 GB each month are free. */
-const STORAGE_USD_PER_GB_MONTH = 0.015
-const FREE_TIER_GB = 10
+/*
+ * The storage rate comes from `app_settings` (`getStorageCost()`), because
+ * Cloudflare's price changes and a hardcoded one would make this page report
+ * the wrong bill with nothing on screen to say it was stale. `docs/HARDCODED.md`.
+ */
 
 export type KindSummary = {
   kind: AssetKindValue
@@ -48,8 +51,15 @@ export type EpisodeUsage = {
 export type AssetCenterData = {
   total: number
   sizeBytes: number
-  /** Estimated monthly storage cost in USD, after the free tier. */
+  /** Storage after the free tier, in USD. */
+  storageUsd: number
+  /** This calendar month's AI spend from `usage_ledger`, in USD. */
+  aiUsd: number
+  /** The two added together — what the month actually costs. */
   estimatedMonthlyUsd: number
+  /** When the storage rate was quoted, so a stale one is visibly stale. */
+  costAsOf: string
+  costSource: string
   byKind: KindSummary[]
   recent: RecentAsset[]
   episodes: EpisodeUsage[]
@@ -57,7 +67,19 @@ export type AssetCenterData = {
 }
 
 export async function getAssetCenter(projectId: string): Promise<AssetCenterData> {
-  const [kindRows, recentRows, episodeRows, licenseRow] = await Promise.all([
+  // `YYYY-MM` in Asia/Taipei: the ledger's `period` is written in that zone,
+  // and asking the server's UTC clock would roll the month over eight hours
+  // early and report an empty figure for most of the 1st.
+  const period = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+  })
+    .format(new Date())
+    .slice(0, 7)
+
+  const [cost, kindRows, recentRows, episodeRows, licenseRow, aiRow] = await Promise.all([
+    getStorageCost(),
     db
       .select({
         kind: assets.kind,
@@ -151,7 +173,28 @@ export async function getAssetCenter(projectId: string): Promise<AssetCenterData
       .from(assetLicenses)
       .innerJoin(assets, eq(assets.id, assetLicenses.assetId))
       .where(and(eq(assets.projectId, projectId), isNull(assetLicenses.deletedAt))),
+
+    /*
+     * This month's AI spend. ACTUAL only: an ESTIMATE is superseded by the
+     * ACTUAL row that settles it, and summing both would double-count every
+     * finished job.
+     */
+    db
+      .select({
+        usd: sql<number>`coalesce(sum(${usageLedger.amount}), 0)`.mapWith(Number),
+      })
+      .from(usageLedger)
+      .where(
+        and(
+          eq(usageLedger.projectId, projectId),
+          eq(usageLedger.period, period),
+          eq(usageLedger.kind, 'ACTUAL'),
+          eq(usageLedger.currency, 'USD')
+        )
+      ),
   ])
+
+  const aiUsd = aiRow[0]?.usd ?? 0
 
   const counts = new Map(kindRows.map((row) => [row.kind, row]))
 
@@ -169,12 +212,22 @@ export async function getAssetCenter(projectId: string): Promise<AssetCenterData
 
   const sizeBytes = byKind.reduce((sum, row) => sum + row.sizeBytes, 0)
   const gigabytes = sizeBytes / 1024 ** 3
-  const billable = Math.max(0, gigabytes - FREE_TIER_GB)
+  const billable = Math.max(0, gigabytes - cost.freeTierGb)
+  const storageUsd = billable * cost.usdPerGbMonth
 
   return {
     total: byKind.reduce((sum, row) => sum + row.count, 0),
     sizeBytes,
-    estimatedMonthlyUsd: billable * STORAGE_USD_PER_GB_MONTH,
+    storageUsd,
+    aiUsd,
+    /*
+     * Storage *and* AI. This used to be storage alone, which understated the
+     * bill by whatever the AI had cost — and the AI is the larger half.
+     * `usage_ledger` had the figure the whole time; nothing read it.
+     */
+    estimatedMonthlyUsd: storageUsd + aiUsd,
+    costAsOf: cost.asOf,
+    costSource: cost.source,
     byKind,
     recent: recentRows.map((row) => ({ ...row, hasPreview: Boolean(row.hasPreview) })),
     episodes: episodeRows,

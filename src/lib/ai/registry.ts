@@ -2,7 +2,8 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { aiProviders } from '@/db/schema'
 import { decryptSecret } from '@/lib/crypto'
-import { createAnthropicAdapter } from './anthropic'
+import { BUILT_IN_PRICING, createAnthropicAdapter } from './anthropic'
+import { getModelPricing, getTaskProfiles } from '@/lib/settings'
 import type { AiAdapter, AiTaskKind, MediaAdapter } from './types'
 
 /**
@@ -31,7 +32,28 @@ function keyFor(row: ProviderRow): string | null {
   return null
 }
 
-export function adapterFor(row: ProviderRow): AiAdapter | null {
+/**
+ * Rates and per-task settings from `app_settings`, merged over the built-in
+ * tables.
+ *
+ * Fetched by the async callers and handed to `adapterFor`, which stays
+ * synchronous: it is called from several places that are not async, and making
+ * it await would push a database round trip into all of them.
+ */
+export async function aiOverrides(): Promise<AiOverrides> {
+  const [pricing, taskProfiles] = await Promise.all([
+    getModelPricing(BUILT_IN_PRICING),
+    getTaskProfiles({}),
+  ])
+  return { pricing, taskProfiles }
+}
+
+export type AiOverrides = {
+  pricing: Record<string, { input: number; output: number; cacheRead: number }>
+  taskProfiles: Record<string, { model?: string; effort: 'low' | 'medium' | 'high' }>
+}
+
+export function adapterFor(row: ProviderRow, overrides?: AiOverrides): AiAdapter | null {
   switch (row.kind) {
     case 'ANTHROPIC':
       return createAnthropicAdapter({
@@ -39,6 +61,8 @@ export function adapterFor(row: ProviderRow): AiAdapter | null {
         defaultModel: row.defaultModel || undefined,
         baseUrl: row.baseUrl || undefined,
         enabled: row.enabled,
+        ...(overrides?.pricing ? { pricing: overrides.pricing } : {}),
+        ...(overrides?.taskProfiles ? { taskProfiles: overrides.taskProfiles } : {}),
       })
     case 'IMAGE_GENERIC':
     case 'VIDEO_GENERIC':
@@ -56,7 +80,7 @@ export async function loadProvider(providerId: string): Promise<{
 } | null> {
   const [row] = await db.select().from(aiProviders).where(eq(aiProviders.id, providerId)).limit(1)
   if (!row) return null
-  return { row, adapter: adapterFor(row) }
+  return { row, adapter: adapterFor(row, await aiOverrides()) }
 }
 
 /**
@@ -68,9 +92,10 @@ export async function resolveAdapterForTask(task: AiTaskKind): Promise<{
   adapter: AiAdapter
 } | null> {
   const rows = await db.select().from(aiProviders).where(eq(aiProviders.enabled, true))
+  const overrides = await aiOverrides()
 
   for (const row of rows) {
-    const adapter = adapterFor(row)
+    const adapter = adapterFor(row, overrides)
     if (!adapter) continue
     if (!adapter.supportedTasks.includes(task)) continue
     const status = await adapter.status()
@@ -85,8 +110,11 @@ export async function resolveAdapterForTask(task: AiTaskKind): Promise<{
  * ANTHROPIC_API_KEY directly, so the studio works before anyone opens the
  * provider settings dialog.
  */
-export function envOnlyAnthropicAdapter(): AiAdapter {
-  return createAnthropicAdapter({})
+export function envOnlyAnthropicAdapter(overrides?: AiOverrides): AiAdapter {
+  return createAnthropicAdapter({
+    ...(overrides?.pricing ? { pricing: overrides.pricing } : {}),
+    ...(overrides?.taskProfiles ? { taskProfiles: overrides.taskProfiles } : {}),
+  })
 }
 
 /**

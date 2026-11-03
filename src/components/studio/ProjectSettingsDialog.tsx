@@ -8,6 +8,11 @@ import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
 import { Field, Input, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
+import {
+  PROJECT_STATUS_LABEL,
+  PROJECT_STATUSES,
+  type ProjectStatusValue,
+} from '@/lib/constants'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { acceptFor, familyOf, resolveMimeType } from '@/lib/media-types'
 import { cn } from '@/lib/utils'
@@ -36,6 +41,11 @@ export type ProjectSettings = {
   novelTitle: string
   dramaTitle: string
   logline: string
+  synopsis: string
+  tags: string[]
+  status: ProjectStatusValue
+  targetMinSec: number
+  targetMaxSec: number
   coverAssetId: string | null
 }
 
@@ -92,7 +102,19 @@ function SettingsForm({
   const [novelTitle, setNovelTitle] = useState(project.novelTitle)
   const [dramaTitle, setDramaTitle] = useState(project.dramaTitle)
   const [logline, setLogline] = useState(project.logline)
+  const [synopsis, setSynopsis] = useState(project.synopsis)
+  // Edited as one line of text, the same way the create form takes it.
+  const [tagText, setTagText] = useState(project.tags.join(' '))
+  const [status, setStatus] = useState<ProjectStatusValue>(project.status)
+  const [targetMinSec, setTargetMinSec] = useState(String(project.targetMinSec))
+  const [targetMaxSec, setTargetMaxSec] = useState(String(project.targetMaxSec))
   const [coverAssetId, setCoverAssetId] = useState(project.coverAssetId)
+
+  const tags = tagText
+    .split(/[,，、\s]+/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 8)
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -102,6 +124,11 @@ function SettingsForm({
     novelTitle !== project.novelTitle ||
     dramaTitle !== project.dramaTitle ||
     logline !== project.logline ||
+    synopsis !== project.synopsis ||
+    tags.join(' ') !== project.tags.join(' ') ||
+    status !== project.status ||
+    Number(targetMinSec) !== project.targetMinSec ||
+    Number(targetMaxSec) !== project.targetMaxSec ||
     coverAssetId !== project.coverAssetId
 
   async function save() {
@@ -122,6 +149,11 @@ function SettingsForm({
           novelTitle: novelTitle.trim(),
           dramaTitle: dramaTitle.trim(),
           logline: logline.trim(),
+          synopsis: synopsis.trim(),
+          tags,
+          status,
+          targetMinSec: Number(targetMinSec) || 120,
+          targetMaxSec: Number(targetMaxSec) || 180,
           coverAssetId,
         }),
       })
@@ -148,7 +180,7 @@ function SettingsForm({
         onClose()
       }}
       title="作品設定"
-      description="封面、作品名稱，以及小說與短劇各自的名稱。"
+      description="封面、名稱、簡介、類型、狀態與片長——新增作品填過的都在這裡改。"
       busy={saving}
       footer={
         <div className="flex w-full items-center justify-between gap-3">
@@ -240,6 +272,65 @@ function SettingsForm({
             placeholder="一句話說清楚這部作品在講什麼。"
           />
         </Field>
+
+        <Field
+          label="簡介"
+          description="書架、片單與作品卡都會讀這段。"
+          hint={<span className="text-[10px] text-ink-600">{synopsis.length} / 8000</span>}
+        >
+          <Textarea
+            value={synopsis}
+            maxLength={8000}
+            rows={4}
+            onChange={(event) => setSynopsis(event.target.value)}
+            placeholder="故事的起承轉合、主角是誰、觀眾為什麼要看下去。"
+          />
+        </Field>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="類型標籤" description="用逗號或空白分隔，最多 8 個。">
+            <Input
+              value={tagText}
+              onChange={(event) => setTagText(event.target.value)}
+              placeholder="古風 愛情 權謀"
+            />
+          </Field>
+
+          <Field label="狀態">
+            <select
+              value={status}
+              onChange={(event) => setStatus(event.target.value as ProjectStatusValue)}
+              className="h-9 w-full rounded-lg bg-stage-900 px-2 text-xs text-ink-100 ring-1 ring-inset ring-stage-700 outline-none focus:ring-2 focus:ring-accent-500"
+            >
+              {PROJECT_STATUSES.map((key) => (
+                <option key={key} value={key} className="bg-stage-850">
+                  {PROJECT_STATUS_LABEL[key]}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="單集片長下限（秒）">
+            <Input
+              type="number"
+              min={10}
+              max={3600}
+              value={targetMinSec}
+              onChange={(event) => setTargetMinSec(event.target.value)}
+            />
+          </Field>
+          <Field label="單集片長上限（秒）">
+            <Input
+              type="number"
+              min={10}
+              max={3600}
+              value={targetMaxSec}
+              onChange={(event) => setTargetMaxSec(event.target.value)}
+            />
+          </Field>
+        </div>
 
         {error && (
           <p role="alert" className="text-[11px] text-rose-400">

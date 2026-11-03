@@ -66,6 +66,19 @@ export default async function ProjectWorkspaceLayout({
         statusClassName={PROJECT_STATUS_STYLE[project.status]}
         tags={project.tags}
         logline={project.logline}
+        settings={{
+          id: project.id,
+          title: project.title,
+          novelTitle: project.novelTitle,
+          dramaTitle: project.dramaTitle,
+          logline: project.logline,
+          synopsis: project.synopsis,
+          tags: project.tags,
+          status: project.status,
+          targetMinSec: project.targetMinSec,
+          targetMaxSec: project.targetMaxSec,
+          coverAssetId: project.coverAssetId,
+        }}
         canWrite={can(user, 'project.write')}
       />
 

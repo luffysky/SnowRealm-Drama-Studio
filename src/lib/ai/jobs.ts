@@ -14,7 +14,7 @@ import {
 } from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
-import { adapterFor, envOnlyAnthropicAdapter } from './registry'
+import { adapterFor, aiOverrides, envOnlyAnthropicAdapter } from './registry'
 import type { AiAdapter, AiContext, AiTaskKind } from './types'
 
 /**
@@ -142,7 +142,7 @@ export async function adapterForTask(
     const [row] = await db.select().from(aiProviders).where(eq(aiProviders.id, providerId)).limit(1)
     if (!row) throw ApiError.notFound('找不到指定的 AI 供應商')
 
-    const adapter = adapterFor(row)
+    const adapter = adapterFor(row, await aiOverrides())
     if (!adapter) {
       throw ApiError.notConfigured(`${row.label} 這類供應商尚未實作適配器，目前無法使用。`)
     }
@@ -153,14 +153,16 @@ export async function adapterForTask(
   }
 
   const rows = await db.select().from(aiProviders).where(eq(aiProviders.enabled, true))
+  const overrides = await aiOverrides()
+
   for (const row of rows) {
-    const adapter = adapterFor(row)
+    const adapter = adapterFor(row, overrides)
     if (!adapter || !adapter.supportedTasks.includes(task)) continue
     const status = await adapter.status()
     if (status.available) return { adapter, providerId: row.id }
   }
 
-  const fallback = envOnlyAnthropicAdapter()
+  const fallback = envOnlyAnthropicAdapter(overrides)
   const status = await fallback.status()
   if (status.available && fallback.supportedTasks.includes(task)) {
     return { adapter: fallback, providerId: null }

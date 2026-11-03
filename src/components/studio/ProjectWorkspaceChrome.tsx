@@ -6,7 +6,10 @@ import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { AltTitles } from '@/components/studio/AltTitles'
 import { MilestoneBadge } from '@/components/studio/MilestoneBadge'
-import { ProjectSettingsDialog } from '@/components/studio/ProjectSettingsDialog'
+import {
+  ProjectSettingsDialog,
+  type ProjectSettings,
+} from '@/components/studio/ProjectSettingsDialog'
 import {
   activeProjectTabKey,
   PROJECT_TABS,
@@ -47,6 +50,7 @@ export function ProjectWorkspaceChrome({
   statusClassName,
   tags,
   logline,
+  settings,
   canWrite,
 }: {
   project: WorkspaceProject
@@ -56,6 +60,12 @@ export function ProjectWorkspaceChrome({
   statusClassName: string
   tags: string[]
   logline: string
+  /**
+   * Everything 作品設定 edits. Separate from `project`, which is the
+   * switcher's shape and deliberately small — the switcher lists every work
+   * the member can open, and does not need their synopses.
+   */
+  settings: ProjectSettings
   /** Whether this member may open 作品設定. */
   canWrite: boolean
 }) {
@@ -110,17 +120,7 @@ export function ProjectWorkspaceChrome({
             )}
 
             <span className="ml-auto shrink-0">
-              <ProjectSettingsDialog
-                project={{
-                  id: project.id,
-                  title: project.title,
-                  novelTitle: project.novelTitle ?? '',
-                  dramaTitle: project.dramaTitle ?? '',
-                  logline,
-                  coverAssetId: project.coverAssetId,
-                }}
-                canWrite={canWrite}
-              />
+              <ProjectSettingsDialog project={settings} canWrite={canWrite} />
             </span>
           </div>
 

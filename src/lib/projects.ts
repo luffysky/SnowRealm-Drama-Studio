@@ -396,8 +396,14 @@ export type ProjectEdit = {
   dramaTitle?: string
   logline?: string
   synopsis?: string
+  tags?: string[]
+  status?: ProjectStatusValue
+  targetMinSec?: number
+  targetMaxSec?: number
   /** An asset id to use as the cover, or null to clear it. */
   coverAssetId?: string | null
+  /** The book cover. null clears it, meaning 「沿用作品封面」. */
+  novelCoverAssetId?: string | null
 }
 
 /**
@@ -430,11 +436,16 @@ export async function updateProject(
 
   if (!existing) return null
 
-  if (edit.coverAssetId) {
+  // Both covers get the same check, for the same reason: no asset column in
+  // this schema carries a foreign key, so the database would accept an id
+  // from another project or one whose upload never finished.
+  for (const candidate of [edit.coverAssetId, edit.novelCoverAssetId]) {
+    if (!candidate) continue
+
     const [asset] = await db
       .select({ id: assets.id, kind: assets.kind, status: assets.uploadStatus })
       .from(assets)
-      .where(and(eq(assets.id, edit.coverAssetId), eq(assets.projectId, projectId)))
+      .where(and(eq(assets.id, candidate), eq(assets.projectId, projectId)))
       .limit(1)
 
     if (!asset) {
@@ -456,7 +467,14 @@ export async function updateProject(
       ...(edit.dramaTitle !== undefined ? { dramaTitle: edit.dramaTitle } : {}),
       ...(edit.logline !== undefined ? { logline: edit.logline } : {}),
       ...(edit.synopsis !== undefined ? { synopsis: edit.synopsis } : {}),
+      ...(edit.tags !== undefined ? { tags: edit.tags } : {}),
+      ...(edit.status !== undefined ? { status: edit.status } : {}),
+      ...(edit.targetMinSec !== undefined ? { targetMinSec: edit.targetMinSec } : {}),
+      ...(edit.targetMaxSec !== undefined ? { targetMaxSec: edit.targetMaxSec } : {}),
       ...(edit.coverAssetId !== undefined ? { coverAssetId: edit.coverAssetId } : {}),
+      ...(edit.novelCoverAssetId !== undefined
+        ? { novelCoverAssetId: edit.novelCoverAssetId }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(projects.id, projectId))

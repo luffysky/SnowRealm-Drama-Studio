@@ -314,10 +314,23 @@ export const projectUpdateSchema = z
     dramaTitle: z.string().trim().max(120).optional(),
     logline: z.string().trim().max(400).optional(),
     synopsis: z.string().trim().max(8000).optional(),
+    tags: z.array(z.string().trim().min(1).max(20)).max(8).optional(),
+    status: z.enum(PROJECT_STATUSES).optional(),
+    targetMinSec: z.coerce.number().int().min(10).max(3600).optional(),
+    targetMaxSec: z.coerce.number().int().min(10).max(3600).optional(),
     /** null clears the cover. */
     coverAssetId: uuid.nullable().optional(),
+    /** null clears it, which means 「沿用作品封面」. */
+    novelCoverAssetId: uuid.nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: '沒有要變更的欄位' })
+  .refine(
+    (value) =>
+      value.targetMinSec === undefined ||
+      value.targetMaxSec === undefined ||
+      value.targetMinSec <= value.targetMaxSec,
+    { message: '片長下限不可大於上限', path: ['targetMinSec'] }
+  )
 
 /** Step 1 of an upload: ask the server for a presigned destination. */
 export const uploadRequestSchema = z.object({

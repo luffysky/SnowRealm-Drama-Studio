@@ -45,10 +45,25 @@
   --color-ink-100: #e6e1fa;
   --color-ink-200: #cfc8ee;
   --color-ink-300: #b3aad9;
-  --color-ink-400: #8e84b8;
-  --color-ink-500: #6f6698;
-  --color-ink-600: #554d78;
-  --color-ink-700: #3e3759;
+  /*
+   * Measured with the WCAG AA formula against stage-800 (#1b1339) — the
+   * lightest of the three panel backgrounds, so passing there passes on all
+   * of them. Calibrating against stage-900 alone left ink-600 failing on the
+   * panels that actually use it.
+   *
+   * These four were 5.65 / 3.71 / 2.50 / 1.74 — so ink-600 and ink-700
+   * failed AA outright, and between them they carried 283 labels, hints and
+   * counters. Worse, almost all of that is set at 10–11px, which needs more
+   * contrast than body text, not less. 「選填」 on the project settings
+   * dialog was literally invisible.
+   *
+   * The ladder still steps, so the hierarchy survives:
+   *   400 emphasised secondary · 500 secondary · 600 supporting · 700 disabled
+   */
+  --color-ink-400: #a69fc7;
+  --color-ink-500: #948db3;
+  --color-ink-600: #857dab; /* AA floor for body text */
+  --color-ink-700: #6f639f; /* disabled / decorative only */
 
   --font-sans:
     'Inter', 'Noto Sans TC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang TC',

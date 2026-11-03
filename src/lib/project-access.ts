@@ -30,7 +30,11 @@ export type ProjectAccess = {
   tags: string[]
   isFlagship: boolean
   coverAssetId: string | null
+  novelCoverAssetId: string | null
   logline: string
+  synopsis: string
+  targetMinSec: number
+  targetMaxSec: number
   createdAt: Date
 }
 
@@ -73,7 +77,11 @@ export async function findAccessibleProject(
       tags: projects.tags,
       isFlagship: projects.isFlagship,
       coverAssetId: projects.coverAssetId,
+      novelCoverAssetId: projects.novelCoverAssetId,
       logline: projects.logline,
+      synopsis: projects.synopsis,
+      targetMinSec: projects.targetMinSec,
+      targetMaxSec: projects.targetMaxSec,
       createdAt: projects.createdAt,
     })
     .from(projects)

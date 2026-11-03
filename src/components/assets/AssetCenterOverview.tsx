@@ -106,14 +106,19 @@ export function AssetCenterOverview({
         />
         <Stat
           icon={<Database aria-hidden className="size-3.5 text-accent-400" />}
-          label="估算月費"
-          value={
-            data.estimatedMonthlyUsd > 0
-              ? formatMoney(convert(data.estimatedMonthlyUsd, 'USD', currency, fx), currency)
-              : formatMoney(0, currency)
-          }
+          label="本月花費"
+          value={formatMoney(convert(data.estimatedMonthlyUsd, 'USD', currency, fx), currency)}
           unit=""
-          hint="R2 每月前 10 GB 免費，之後約 $0.015/GB。對外流量不計費。"
+          /*
+            Storage and AI shown apart. One combined number hid which half was
+            growing — and for a long time this counted only storage, which is
+            the smaller half.
+          */
+          hint={
+            `儲存 ${formatMoney(convert(data.storageUsd, 'USD', currency, fx), currency)}` +
+            `・AI ${formatMoney(convert(data.aiUsd, 'USD', currency, fx), currency)}` +
+            `（費率更新於 ${data.costAsOf}）`
+          }
         />
         <Stat
           icon={<ShieldCheck aria-hidden className="size-3.5 text-accent-400" />}

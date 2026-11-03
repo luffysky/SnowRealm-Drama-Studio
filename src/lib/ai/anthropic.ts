@@ -85,7 +85,17 @@ export type AnthropicAdapterConfig = {
   defaultModel?: string
   baseUrl?: string
   enabled?: boolean
+  /**
+   * Rates and per-task settings read from `app_settings`, merged over the
+   * built-in tables by the caller. Passed in rather than read here so the
+   * adapter stays synchronous and free of database imports.
+   */
+  pricing?: Record<string, { input: number; output: number; cacheRead: number }>
+  taskProfiles?: Record<string, { model?: string; effort: 'low' | 'medium' | 'high' }>
 }
+
+/** The built-in table, exported so the settings layer can merge over it. */
+export { PRICING as BUILT_IN_PRICING }
 
 export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiAdapter {
   const resolvedKey = config.apiKey || process.env.ANTHROPIC_API_KEY || null
@@ -105,8 +115,11 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
     })
   }
 
+  const pricing = { ...PRICING, ...(config.pricing ?? {}) }
+  const taskProfiles = config.taskProfiles ?? {}
+
   function priceFor(modelId: string) {
-    return PRICING[modelId] ?? null
+    return pricing[modelId] ?? null
   }
 
   return {
@@ -218,7 +231,12 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
              * think hard costs latency and output tokens for no gain. The
              * caller can still override.
              */
-            output_config: { effort: request.effort ?? TASK_EFFORT[request.task] ?? 'high' },
+            output_config: {
+              // Explicit request wins, then the configured profile, then the
+              // built-in judgement call.
+              effort:
+                request.effort ?? taskProfiles[request.task]?.effort ?? TASK_EFFORT[request.task] ?? 'high',
+            },
             messages: [
               {
                 role: 'user',
