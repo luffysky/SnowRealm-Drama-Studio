@@ -41,6 +41,15 @@ export type AiAssistantProps = {
   episodeId?: string | null
   /** The text the task operates on; also the left side of the diff. */
   sourceText: string
+  /**
+   * Per-task override of `sourceText`.
+   *
+   * Not every task on a surface operates on the same text. 依小說生成劇本 sits
+   * in the script editor but must be handed the *novel* — it used to receive
+   * the current scene, so the model was asked to adapt a novel it had never
+   * been shown, and correctly refused to invent one.
+   */
+  sourceTextByTask?: Partial<Record<AiJobKindValue, string>>
   tasks: AiTask[]
   currency: CurrencyValue
   fx: FxRates
@@ -85,6 +94,7 @@ export function AiAssistant({
   projectId,
   episodeId,
   sourceText,
+  sourceTextByTask,
   tasks,
   currency,
   fx,
@@ -106,18 +116,21 @@ export function AiAssistant({
   const [chosen, setChosen] = useState(0)
   const [applying, setApplying] = useState(false)
 
+  /** What this task actually reads. */
+  const activeSource = sourceTextByTask?.[task] ?? sourceText
+
   const body = useCallback(
     () => ({
       task,
       projectId,
       episodeId: episodeId ?? null,
-      sourceText,
+      sourceText: activeSource,
       userInstruction: instruction.trim() || undefined,
       includeWorld: true,
       includeCharacters: true,
       candidates: 1,
     }),
-    [task, projectId, episodeId, sourceText, instruction]
+    [task, projectId, episodeId, activeSource, instruction]
   )
 
   async function runEstimate() {
@@ -321,7 +334,7 @@ export function AiAssistant({
         <button
           type="button"
           onClick={() => void runEstimate()}
-          disabled={!sourceText.trim() && task !== 'PROJECT_PLAN'}
+          disabled={!activeSource.trim() && task !== 'PROJECT_PLAN'}
           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-stage-800 px-3 py-2 text-xs text-ink-200 ring-1 ring-inset ring-stage-700 transition-colors hover:text-ink-50 disabled:opacity-50"
         >
           估算成本
@@ -440,7 +453,7 @@ export function AiAssistant({
 
           <div className="max-h-80 overflow-y-auto rounded-lg bg-stage-850 p-2 ring-1 ring-inset ring-stage-700">
             <DiffViewer
-              before={sourceText}
+              before={activeSource}
               after={candidates[chosen]?.content ?? ''}
               beforeLabel="目前內容"
               afterLabel={candidates[chosen]?.label ?? '候選'}
