@@ -22,6 +22,7 @@ import {
 import {
   abortMultipart,
   assertR2Configured,
+  buildDerivedKey,
   buildObjectKey,
   completeMultipart,
   deleteObject,
@@ -158,19 +159,24 @@ export async function beginUpload(input: {
   // would strand a PENDING asset and upload session that nothing ever cleans up.
   assertR2Configured()
 
+  let episodeNumber: number | null = null
+
   if (input.episodeId) {
     const [ep] = await db
-      .select({ id: episodes.id })
+      .select({ id: episodes.id, number: episodes.number })
       .from(episodes)
       .where(and(eq(episodes.id, input.episodeId), eq(episodes.projectId, input.projectId)))
       .limit(1)
     if (!ep) throw ApiError.badRequest('指定的集數不屬於這個作品')
+    // Used only to group the object in the bucket; the row is authoritative.
+    episodeNumber = ep.number
   }
 
   const objectKey = buildObjectKey({
     projectId: input.projectId,
     kind: input.kind,
     filename: input.filename,
+    episodeNumber,
   })
 
   const version = input.rootAssetId ? await nextVersionFor(input.rootAssetId) : 1
@@ -681,8 +687,11 @@ export async function beginVariantUpload(input: {
   }
 
   const extension = input.contentType === 'image/avif' ? '.avif' : match.ext
-  const folder = match.kind === 'WAVEFORM' ? 'waveform' : 'preview'
-  const objectKey = `projects/${asset.projectId}/${folder}/${crypto.randomUUID()}${extension}`
+  const objectKey = buildDerivedKey({
+    projectId: asset.projectId,
+    kind: match.kind === 'WAVEFORM' ? 'waveform' : 'preview',
+    extension,
+  })
 
   const [variant] = await db
     .insert(assetVariants)

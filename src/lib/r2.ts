@@ -116,18 +116,77 @@ const KIND_FOLDER: Record<AssetKindValue, string> = {
 }
 
 /**
- * Builds the object key. The filename never appears in the key — only a UUID —
- * so a key can never collide, leak a title, or carry a path traversal. The
- * original name is kept in the `assets.name` column instead.
+ * Builds the object key.
+ *
+ * The bucket is browsed by humans — when something looks wrong, the R2 console
+ * is where you go — so the layout has to answer "what is this" without the
+ * database:
+ *
+ *   projects/<projectId>/originals/image/ep001/<uuid>__市集-概念圖.png
+ *   projects/<projectId>/originals/music/_project/<uuid>__主題曲.mp3
+ *   projects/<projectId>/derived/preview/<uuid>.webp
+ *
+ * - `originals` vs `derived` keeps masters apart from things a machine can
+ *   regenerate. Previously `preview/` sat beside `image/` and `video/`, which
+ *   made it look like another kind of asset.
+ * - The episode folder matters at this scale: 120 episodes of stills in one
+ *   flat `image/` folder is not a folder, it is a haystack. Assets with no
+ *   episode go to `_project`, which sorts to the top.
+ * - The UUID still comes first and is still what guarantees uniqueness. The
+ *   readable part is a *suffix*, sanitised, and never read back — the
+ *   authoritative name remains `assets.name`.
+ *
+ * Keys are immutable once written: the database points at them, and renaming
+ * an object in S3 means copy-and-delete. Changing this function only affects
+ * new uploads, which is why old keys in other shapes keep working.
  */
 export function buildObjectKey(input: {
   projectId: string
   kind: AssetKindValue
   filename: string
+  /** Groups the file under its episode when known. */
+  episodeNumber?: number | null
 }): string {
   const ext = extensionOf(input.filename)
   const folder = KIND_FOLDER[input.kind] ?? 'other'
-  return `projects/${input.projectId}/${folder}/${crypto.randomUUID()}${ext}`
+  const scope =
+    input.episodeNumber != null
+      ? `ep${String(input.episodeNumber).padStart(3, '0')}`
+      : '_project'
+
+  const label = slugForKey(input.filename)
+  const suffix = label ? `__${label}` : ''
+
+  return `projects/${input.projectId}/originals/${folder}/${scope}/${crypto.randomUUID()}${suffix}${ext}`
+}
+
+/** Where a derived file lives. Never mixed in with the originals. */
+export function buildDerivedKey(input: {
+  projectId: string
+  kind: 'preview' | 'waveform'
+  extension: string
+}): string {
+  return `projects/${input.projectId}/derived/${input.kind}/${crypto.randomUUID()}${input.extension}`
+}
+
+/**
+ * A readable, harmless fragment of the original filename.
+ *
+ * Everything that could make a key dangerous is removed rather than escaped:
+ * no slashes, no dots, no control characters, no leading dashes. CJK is kept —
+ * the files here are named in Chinese, and a key of nothing but hyphens would
+ * defeat the point of putting a name in at all. S3 keys are UTF-8 and the SDK
+ * percent-encodes them when signing.
+ */
+export function slugForKey(filename: string): string {
+  const base = filename.replace(/\.[A-Za-z0-9]{1,12}$/, '')
+
+  return base
+    .normalize('NFKC')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48)
 }
 
 /** Lower-cased extension including the dot, or '' when there isn't a safe one. */
