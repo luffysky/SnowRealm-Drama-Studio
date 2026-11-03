@@ -191,7 +191,7 @@ function IconButton({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="ml-auto-none rounded-md p-1.5 text-ink-500 transition-colors hover:bg-stage-800 hover:text-ink-100 disabled:opacity-40"
+      className="shrink-0 rounded-md p-1.5 text-ink-500 transition-colors hover:bg-stage-800 hover:text-ink-100 disabled:opacity-40"
     >
       {children}
     </button>

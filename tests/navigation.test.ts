@@ -91,6 +91,27 @@ describe('project workspace tabs', () => {
     expect(activeProjectTabKey(`/projects/${PROJECT_ID}/episodes/12`, PROJECT_ID)).toBe('episodes')
   })
 
+  it('highlights the editor the writer is in, not 集數管理', () => {
+    /*
+     * The per-episode editors hang off `/episodes/[id]`, but the writer is in
+     * the novel or the script. Highlighting 集數管理 while they are plainly
+     * writing prose reads as "it keeps sending me back to the episode list".
+     */
+    const episode = '22222222-2222-4222-8222-222222222222'
+
+    expect(
+      activeProjectTabKey(`/projects/${PROJECT_ID}/episodes/${episode}/novel`, PROJECT_ID)
+    ).toBe('novel')
+    expect(
+      activeProjectTabKey(`/projects/${PROJECT_ID}/episodes/${episode}/script`, PROJECT_ID)
+    ).toBe('scripts')
+
+    // The list itself, and an episode detail route, still belong to 集數管理.
+    expect(activeProjectTabKey(`/projects/${PROJECT_ID}/episodes/${episode}`, PROJECT_ID)).toBe(
+      'episodes'
+    )
+  })
+
   it('returns null for another project or an unknown segment', () => {
     const other = '11111111-1111-4111-8111-111111111111'
     expect(activeProjectTabKey(`/projects/${other}/episodes`, PROJECT_ID)).toBeNull()

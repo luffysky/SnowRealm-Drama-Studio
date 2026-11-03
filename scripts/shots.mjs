@@ -3,6 +3,7 @@
  *
  *   node scripts/shots.mjs --base http://127.0.0.1:3400 --out .shots /dashboard /projects
  *   node scripts/shots.mjs --click 作品設定 /projects/<id>     # 開啟對話框再截圖
+ *   node scripts/shots.mjs --viewport /path                    # 只截可見範圍
  *
  * Why this exists: "手機也要順" cannot be verified by reading Tailwind class
  * names. This drives a real Chrome over the DevTools Protocol, signs in the way
@@ -47,12 +48,17 @@ function arg(name, fallback) {
  * Windows path before Node ever sees it, so `login` is the safer spelling and
  * both are accepted.
  */
+/** Flags that stand alone; everything else with `--` consumes the next arg. */
+const BOOLEAN_FLAGS = new Set(['--viewport'])
+
 function paths() {
   const out = []
   for (let i = 2; i < process.argv.length; i += 1) {
     const value = process.argv[i]
     if (value.startsWith('--')) {
-      i += 1
+      // A boolean flag takes no value; skipping one here silently swallowed
+      // the path that followed it.
+      if (!BOOLEAN_FLAGS.has(value)) i += 1
       continue
     }
     out.push(value.startsWith('/') ? value : `/${value}`)
@@ -234,6 +240,14 @@ async function main() {
    */
   const clickText = arg('click', null)
 
+  /*
+   * `--viewport` captures only what fits on screen. The default full-page
+   * capture is right for checking a whole layout, but on a 10,000-pixel-tall
+   * page it makes the top of the screen unreadable — which is exactly where
+   * the toolbar and panels being checked usually are.
+   */
+  const viewportOnly = process.argv.includes('--viewport')
+
   const cookies = await signIn(base)
   console.log('  已登入\n')
 
@@ -288,7 +302,13 @@ async function main() {
               expression: `(() => {
                 const wanted = ${JSON.stringify(clickText)}
                 const nodes = [...document.querySelectorAll('button, a, [role="button"]')]
-                const hit = nodes.find((node) => (node.innerText || '').includes(wanted))
+                // Icon-only buttons carry their name in aria-label or title,
+                // not in innerText.
+                const hit = nodes.find((node) =>
+                  [node.innerText, node.getAttribute('aria-label'), node.getAttribute('title')]
+                    .filter(Boolean)
+                    .some((text) => text.includes(wanted))
+                )
                 if (!hit) return 'not-found'
                 hit.click()
                 return 'clicked'
@@ -305,7 +325,7 @@ async function main() {
 
         const { data } = await client.send(
           'Page.captureScreenshot',
-          { format: 'png', captureBeyondViewport: true },
+          { format: 'png', captureBeyondViewport: !viewportOnly },
           sessionId
         )
 

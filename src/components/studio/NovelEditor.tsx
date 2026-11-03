@@ -6,10 +6,12 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
+import type { AiSelectionAction } from '@/components/editor/AiSelectionMenu'
 import { RichTextEditor } from '@/components/editor/RichTextEditor'
 import { AiAssistant } from '@/components/studio/AiAssistant'
 import { countHtmlChars } from '@/components/editor/extensions'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import type { AiJobKindValue } from '@/lib/constants'
 import type { EditorModuleId } from '@/lib/editor/modules'
 import type { CurrencyValue, FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -101,6 +103,17 @@ export function NovelEditor({
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [creating, setCreating] = useState(false)
+
+  /*
+   * What the AI panel should work on. Null means the whole chapter; a
+   * selection from the editor's floating menu narrows it, which is both
+   * cheaper and far more likely to come back usable — a 潤稿 of 4,000
+   * characters mostly pays to re-read context it was not asked to change.
+   */
+  const [aiScope, setAiScope] = useState<{ text: string; nonce: number } | null>(null)
+  const [aiRequest, setAiRequest] = useState<{ task: AiJobKindValue; nonce: number } | null>(
+    null
+  )
 
   const active = chapters.find((c) => c.id === activeId) ?? null
 
@@ -319,6 +332,11 @@ export function NovelEditor({
           onDirty={() => setState('dirty')}
           onSave={(content, title) => save(active.id, content, title)}
           onKeepVersion={keepVersion}
+          onAiAction={(task, text) => {
+            const nonce = Date.now()
+            setAiScope({ text, nonce })
+            setAiRequest({ task, nonce })
+          }}
         />
       ) : (
         <section className="panel flex min-h-0 min-w-0 flex-col rounded-xl bg-stage-900 ring-1 ring-stage-700">
@@ -340,17 +358,30 @@ export function NovelEditor({
           </header>
           <div className="p-4">
             <AiAssistant
+              /* A new selection action is a new run: remount rather than
+                 sync a prop into state. */
+              key={aiRequest?.nonce ?? 'whole-chapter'}
+              {...(aiRequest ? { initialTask: aiRequest.task } : {})}
               projectId={projectId}
               episodeId={episodeId}
               /* The AI works on the chapter in front of the reader, not the
                  whole episode — a 4,000-character continuation prompt that
                  includes nine other chapters mostly pays for context. */
-              sourceText={active?.content ?? ''}
+              sourceText={aiScope?.text ?? active?.content ?? ''}
               currency={currency}
               fx={fx}
               providerReady={providerReady}
               providerDetail={providerDetail}
-              onAdopted={() => router.refresh()}
+              {...(aiScope
+                ? {
+                    scopeLabel: `只處理你選取的 ${aiScope.text.length} 字，不是整章。採用時仍會與整章比對。`,
+                  }
+                : {})}
+              onAdopted={() => {
+                setAiScope(null)
+                setAiRequest(null)
+                router.refresh()
+              }}
               tasks={[
                 {
                   kind: 'NOVEL_CONTINUE',
@@ -439,6 +470,7 @@ function ChapterPane({
   onDirty,
   onSave,
   onKeepVersion,
+  onAiAction,
 }: {
   chapter: ChapterData
   state: SaveState
@@ -450,6 +482,7 @@ function ChapterPane({
   onDirty: () => void
   onSave: (content: string, title: string) => void | Promise<void>
   onKeepVersion: () => void | Promise<void>
+  onAiAction: (task: AiSelectionAction, selectedText: string) => void
 }) {
   const [content, setContent] = useState(chapter.content)
   const [title, setTitle] = useState(chapter.title)
@@ -517,6 +550,7 @@ function ChapterPane({
           onDirty()
         }}
         onToggleModule={onToggleModule}
+        onAiAction={onAiAction}
       />
 
       <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stage-700/60 px-4 py-2.5 text-[11px] text-ink-500">

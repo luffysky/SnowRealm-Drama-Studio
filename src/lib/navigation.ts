@@ -188,7 +188,24 @@ export function activeProjectTabKey(pathname: string, projectId: string): string
   const rest = pathname.slice(base.length).replace(/^\//, '')
   if (rest === '') return 'overview'
 
-  const segment = rest.split('/')[0]
+  const parts = rest.split('/')
+  const segment = parts[0]
+
+  /*
+   * The per-episode editors hang off `/episodes/[id]` but belong to the tab
+   * for what they edit, not to 集數管理.
+   *
+   * Matching only the first segment highlighted 集數管理 while the writer was
+   * plainly inside the novel editor — which reads as "it keeps sending me
+   * back to the episode list", because the one piece of UI that says where
+   * you are was saying exactly that.
+   */
+  if (segment === 'episodes' && parts.length >= 3) {
+    const leaf = parts[2]
+    if (leaf === 'novel') return 'novel'
+    if (leaf === 'script') return 'scripts'
+  }
+
   return PROJECT_TABS.find((tab) => tab.segment && tab.segment === segment)?.key ?? null
 }
 

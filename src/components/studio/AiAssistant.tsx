@@ -49,6 +49,19 @@ export type AiAssistantProps = {
   /** Null when no provider is configured; the panel then explains instead. */
   providerReady: boolean
   providerDetail?: string
+  /**
+   * Which task starts selected.
+   *
+   * Set by the editor's selection menu. The panel is remounted (keyed) when
+   * that changes rather than syncing it into state from a prop, and the
+   * estimate is deliberately *not* started automatically: auto-running it
+   * would turn a mis-click in a floating menu into a request that costs
+   * money. Preselecting the task and letting the writer press 估算成本 keeps
+   * the decision explicit and costs one click.
+   */
+  initialTask?: AiJobKindValue
+  /** What the task will run on, when it is narrower than the whole chapter. */
+  scopeLabel?: string
 }
 
 type Phase = 'idle' | 'estimating' | 'estimated' | 'running' | 'review' | 'failed'
@@ -78,10 +91,14 @@ export function AiAssistant({
   onAdopted,
   providerReady,
   providerDetail,
+  initialTask,
+  scopeLabel,
 }: AiAssistantProps) {
   const toast = useToast()
 
-  const [task, setTask] = useState<AiJobKindValue>(tasks[0]?.kind ?? 'NOVEL_CONTINUE')
+  const [task, setTask] = useState<AiJobKindValue>(
+    initialTask ?? tasks[0]?.kind ?? 'NOVEL_CONTINUE'
+  )
   const [instruction, setInstruction] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [estimate, setEstimate] = useState<{ usd: number; tokens: number } | null>(null)
@@ -255,6 +272,12 @@ export function AiAssistant({
 
   return (
     <div className="flex flex-col gap-3">
+      {scopeLabel && (
+        <p className="rounded-lg bg-accent-600/10 px-2.5 py-1.5 text-[10px] leading-relaxed text-accent-200 ring-1 ring-inset ring-accent-500/30">
+          {scopeLabel}
+        </p>
+      )}
+
       {/* ---- task picker ------------------------------------------------- */}
       <div className="flex flex-col gap-1.5">
         {tasks.map((option) => (

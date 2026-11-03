@@ -15,9 +15,11 @@ import {
   List,
   ListOrdered,
   ListTodo,
+  ListTree,
   Minus,
   Quote,
   Redo2,
+  Search,
   SlidersHorizontal,
   Strikethrough,
   Table as TableIcon,
@@ -25,7 +27,10 @@ import {
   Undo2,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { AiSelectionMenu, type AiSelectionAction } from '@/components/editor/AiSelectionMenu'
 import { buildExtensions } from '@/components/editor/extensions'
+import { FindReplace } from '@/components/editor/FindReplace'
+import { OutlinePanel } from '@/components/editor/OutlinePanel'
 import {
   SCRIPT_BLOCK_LABEL,
   SCRIPT_BLOCK_SHORTCUT,
@@ -60,6 +65,13 @@ export type RichTextEditorProps = {
   /** Rendered beside the toolbar's module button. */
   toolbarExtra?: ReactNode
   onToggleModule?: (id: EditorModuleId, next: boolean) => void
+  /**
+   * Called when an AI action is picked from the selection menu.
+   *
+   * The menu never edits the document: it hands the passage up so the AI panel
+   * can run the usual estimate → run → diff → adopt. See `AiSelectionMenu`.
+   */
+  onAiAction?: (action: AiSelectionAction, selectedText: string) => void
 }
 
 export function RichTextEditor({
@@ -70,7 +82,10 @@ export function RichTextEditor({
   onChange,
   toolbarExtra,
   onToggleModule,
+  onAiAction,
 }: RichTextEditorProps) {
+  const [findOpen, setFindOpen] = useState(false)
+  const [tocOpen, setTocOpen] = useState(true)
   const enabled = useMemo(() => new Set(enabledModules), [enabledModules])
 
   const extensions = useMemo(
@@ -100,17 +115,45 @@ export function RichTextEditor({
     )
   }
 
+  const showToc = enabled.has('outline') && tocOpen
+  const showFind = enabled.has('findReplace') && findOpen
+
   return (
-    <>
+    /* `editor-shell` is the positioning context the selection menu measures
+       against; it must not be removed. */
+    <div
+      className="editor-shell relative flex min-h-0 flex-1 flex-col"
+      onKeyDown={(event) => {
+        if (!enabled.has('findReplace')) return
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+          event.preventDefault()
+          setFindOpen(true)
+        }
+      }}
+    >
       <Toolbar
         editor={editor}
         enabled={enabled}
         surface={surface}
         onToggleModule={onToggleModule}
         extra={toolbarExtra}
+        findOpen={findOpen}
+        onToggleFind={() => setFindOpen((value) => !value)}
+        tocOpen={tocOpen}
+        onToggleToc={() => setTocOpen((value) => !value)}
       />
-      <EditorContent editor={editor} className="min-h-0 flex-1 overflow-y-auto" />
-    </>
+
+      {showFind && <FindReplace editor={editor} onClose={() => setFindOpen(false)} />}
+
+      <div className="flex min-h-0 flex-1">
+        {showToc && <OutlinePanel editor={editor} />}
+        <EditorContent editor={editor} className="min-h-0 flex-1 overflow-y-auto" />
+      </div>
+
+      {enabled.has('aiSelection') && onAiAction && (
+        <AiSelectionMenu editor={editor} onAction={onAiAction} />
+      )}
+    </div>
   )
 }
 
@@ -122,12 +165,20 @@ function Toolbar({
   surface,
   onToggleModule,
   extra,
+  findOpen,
+  onToggleFind,
+  tocOpen,
+  onToggleToc,
 }: {
   editor: Editor
   enabled: ReadonlySet<EditorModuleId>
   surface: EditorSurface
   onToggleModule?: (id: EditorModuleId, next: boolean) => void
   extra?: ReactNode
+  findOpen: boolean
+  onToggleFind: () => void
+  tocOpen: boolean
+  onToggleToc: () => void
 }) {
   // Re-render on selection changes so the active states are honest.
   const [, force] = useState(0)
@@ -347,6 +398,25 @@ function Toolbar({
       )}
 
       <div className="ml-auto flex items-center gap-1">
+        {enabled.has('outline') && (
+          <Button
+            label="章節目錄"
+            active={tocOpen}
+            onClick={onToggleToc}
+            // Hidden on narrow screens because the panel itself is: a toggle
+            // for something that cannot appear is worse than no toggle.
+            className="hidden xl:inline-flex"
+          >
+            <ListTree className="size-3.5" />
+          </Button>
+        )}
+
+        {enabled.has('findReplace') && (
+          <Button label="尋找與取代（Ctrl+F）" active={findOpen} onClick={onToggleFind}>
+            <Search className="size-3.5" />
+          </Button>
+        )}
+
         {extra}
         {onToggleModule && (
           <ModuleMenu surface={surface} enabled={enabled} onToggle={onToggleModule} />
@@ -440,12 +510,14 @@ function Button({
   active,
   disabled,
   onClick,
+  className,
   children,
 }: {
   label: string
   active?: boolean
   disabled?: boolean
   onClick: () => void
+  className?: string
   children: ReactNode
 }) {
   return (
@@ -458,6 +530,7 @@ function Button({
       onClick={onClick}
       className={cn(
         'grid size-7 place-items-center rounded-md transition-colors',
+        className,
         disabled
           ? 'cursor-default text-ink-700'
           : active
