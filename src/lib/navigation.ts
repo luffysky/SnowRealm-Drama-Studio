@@ -159,7 +159,7 @@ export const PROJECT_TABS: ProjectTab[] = [
   { key: 'assets', label: '素材管理', segment: 'assets', ready: false, milestone: 'M3', design: 14 },
   { key: 'production', label: '製作流程', segment: 'production', ready: true, design: 17 },
   { key: 'reviews', label: '審核發布', segment: 'reviews', ready: false, milestone: 'M4', design: 58 },
-  { key: 'versions', label: '版本紀錄', segment: 'versions', ready: false, milestone: 'M2', design: 8 },
+  { key: 'versions', label: '版本紀錄', segment: 'versions', ready: true, design: 8 },
 ]
 
 /**
