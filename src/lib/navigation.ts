@@ -150,7 +150,7 @@ export type ProjectTab = {
  */
 export const PROJECT_TABS: ProjectTab[] = [
   { key: 'overview', label: '總覽', segment: '', ready: true, design: 4 },
-  { key: 'episodes', label: '集數管理', segment: 'episodes', ready: false, milestone: 'M1', design: 5 },
+  { key: 'episodes', label: '集數管理', segment: 'episodes', ready: true, design: 5 },
   { key: 'novel', label: '小說編輯', segment: 'novel', ready: false, milestone: 'M2', design: 6 },
   { key: 'scripts', label: '劇本工坊', segment: 'scripts', ready: false, milestone: 'M2', design: 7 },
   { key: 'world', label: '世界觀', segment: 'world', ready: false, milestone: 'M2', design: 9 },

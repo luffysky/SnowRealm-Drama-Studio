@@ -62,6 +62,22 @@ export const PRODUCTION_STAGE_SHORT: Record<ProductionStageKey, string> = {
   release: '發',
 }
 
+/**
+ * Two-character label for the dense nine-cell strip, as design 05 uses:
+ * 劇情 小說 劇本 分鏡 素材 影像 後製 審核 發佈.
+ */
+export const PRODUCTION_STAGE_ABBR: Record<ProductionStageKey, string> = {
+  story_planning: '劇情',
+  novel: '小說',
+  script: '劇本',
+  storyboard: '分鏡',
+  assets: '素材',
+  video: '影像',
+  postproduction: '後製',
+  review: '審核',
+  release: '發佈',
+}
+
 /** `01`–`09`, as the design numbers them. */
 export function stageOrdinal(key: ProductionStageKey): string {
   return String(PRODUCTION_STAGE_KEYS.indexOf(key) + 1).padStart(2, '0')
