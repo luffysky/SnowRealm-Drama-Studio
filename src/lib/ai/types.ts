@@ -9,6 +9,8 @@
 
 export type AiTaskKind =
   | 'PROJECT_PLAN'
+  | 'OUTLINE_GENERATE'
+  | 'OUTLINE_REVIEW'
   | 'NOVEL_CONTINUE'
   | 'NOVEL_REWRITE'
   | 'NOVEL_POLISH'

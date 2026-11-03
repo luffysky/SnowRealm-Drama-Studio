@@ -1,44 +1,80 @@
-import { FileText, PenLine } from 'lucide-react'
+import { BookOpen, FileText, PenLine } from 'lucide-react'
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { OutlineBoard } from '@/components/studio/OutlineBoard'
 import { EmptyState } from '@/components/ui/StateViews'
+import { adapterForTask } from '@/lib/ai/jobs'
 import { getSessionUser } from '@/lib/auth/session'
+import { can } from '@/lib/auth/rbac'
+import { listOutline } from '@/lib/episodes'
 import { requireProjectPage } from '@/lib/project-access'
 import { novelTitleOf } from '@/lib/project-titles'
+import { getFxRates } from '@/lib/settings'
 import { novelIndex } from '@/lib/writing'
-import { cn, formatRelativeZh } from '@/lib/utils'
 
 export const metadata: Metadata = { title: '小說編輯' }
 
 type Params = { params: Promise<{ projectId: string }> }
 
 /**
- * Project-level novel index (spec v3 §11.1「作品級 /novel 是索引入口」).
+ * 小說工作台 — the project-level novel surface.
  *
- * Deliberately not an editor: the prose lives in one place, per episode, at
- * `/episodes/[episodeId]/novel`. This page only says which episodes have been
- * written and sends you there — 「不得造成兩份正文」.
+ * What was here before listed all 120 episodes as identical cards, which made
+ * it a second copy of 集數管理: you clicked 小說編輯 and landed on something
+ * that looked like the episode list, because it was one.
+ *
+ * A writer arriving here wants one of three things: carry on where they left
+ * off, see how far the book has got, or work on the outline. So that is what
+ * this page is, and the full 120-episode directory stays in 集數管理 where it
+ * belongs. The prose itself still lives at `/episodes/[episodeId]/novel`,
+ * one document per episode — spec v3 §11.1「不得造成兩份正文」.
  */
-export default async function NovelIndexPage({ params }: Params) {
+export default async function NovelWorkbenchPage({ params }: Params) {
   const user = await getSessionUser()
   if (!user) redirect('/login')
 
   const { projectId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const rows = await novelIndex(project.id)
-  const novelTitle = novelTitleOf(project)
+  const [rows, outline, fx, provider] = await Promise.all([
+    novelIndex(project.id),
+    listOutline(project.id),
+    getFxRates(),
+    providerStatus(),
+  ])
 
+  const novelTitle = novelTitleOf(project)
   const written = rows.filter((row) => row.charCount > 0)
   const totalChars = rows.reduce((n, row) => n + row.charCount, 0)
+
+  /*
+   * Where 「繼續寫作」 goes: the episode touched most recently, or the first
+   * one not yet started. Landing a writer on EP001 every time is why the old
+   * page felt like a directory rather than a desk.
+   */
+  const lastEdited = rows
+    .filter((row) => row.updatedAt && row.charCount > 0)
+    .sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0))[0]
+  const firstUnwritten = rows.find((row) => row.charCount === 0)
+  const resume = lastEdited ?? firstUnwritten ?? rows[0]
+
+  const outlineRows = outline.map((row) => ({
+    id: row.id,
+    number: row.number,
+    title: row.title,
+    logline: row.logline,
+    synopsis: row.synopsis,
+    status: row.status,
+    charCount: row.charCount,
+  }))
 
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
       <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h2 className="inline-flex items-center gap-2 text-sm font-semibold text-ink-100">
           <PenLine aria-hidden className="size-4 text-accent-400" />
-          小說編輯
+          小說工作台
         </h2>
         {/*
           The novel can be published under a different name from the work and
@@ -50,10 +86,6 @@ export default async function NovelIndexPage({ params }: Params) {
             書名<span className="ml-1 text-ink-200">{novelTitle}</span>
           </p>
         )}
-        <p className="text-[11px] text-ink-500">
-          共 {rows.length} 集・已動筆 {written.length} 集・總字數{' '}
-          {totalChars.toLocaleString('en-US')} 字
-        </p>
       </header>
 
       {rows.length === 0 ? (
@@ -64,46 +96,154 @@ export default async function NovelIndexPage({ params }: Params) {
           className="py-20"
         />
       ) : (
-        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {rows.map((row) => (
-            <li key={row.episodeId}>
-              <Link
-                href={`/projects/${project.id}/episodes/${row.episodeId}/novel`}
-                className="panel flex h-full flex-col gap-1.5 rounded-lg bg-stage-900 p-3 ring-1 ring-stage-700 transition-all hover:ring-stage-600"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-medium text-ink-300 tabular-nums">
-                    EP{String(row.number).padStart(3, '0')}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-xs text-ink-200">
-                    {row.title || <span className="text-ink-600">未命名</span>}
-                  </span>
-                  <span
-                    className={cn(
-                      'shrink-0 rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset',
-                      row.charCount > 0
-                        ? 'bg-emerald-950 text-emerald-300 ring-emerald-800'
-                        : 'bg-stage-800 text-ink-500 ring-stage-700'
-                    )}
-                  >
-                    {row.charCount > 0 ? '已動筆' : '未開始'}
-                  </span>
-                </div>
+        <>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+            <ResumeCard projectId={project.id} resume={resume} />
 
-                <p className="text-[10px] text-ink-600 tabular-nums">
-                  {row.chapterCount} 章・{row.charCount.toLocaleString('en-US')} 字
-                  {row.updatedAt && row.charCount > 0 && (
-                    <>
-                      ・{formatRelativeZh(row.updatedAt)}
-                      {row.lastEditorName && `・${row.lastEditorName}`}
-                    </>
-                  )}
-                </p>
-              </Link>
-            </li>
-          ))}
-        </ul>
+            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-4">
+              <Stat label="總字數" value={totalChars.toLocaleString('en-US')} unit="字" />
+              <Stat label="已動筆" value={`${written.length}`} unit={`/ ${rows.length} 集`} />
+              <Stat
+                label="已寫大綱"
+                value={`${outline.filter((row) => row.logline.trim() || row.synopsis.trim()).length}`}
+                unit={`/ ${outline.length} 集`}
+              />
+              <Stat
+                label="平均每集"
+                value={
+                  written.length > 0
+                    ? Math.round(totalChars / written.length).toLocaleString('en-US')
+                    : '—'
+                }
+                unit="字"
+              />
+            </dl>
+          </div>
+
+          <OutlineBoard
+            projectId={project.id}
+            episodes={outlineRows}
+            canWrite={can(user, 'episode.write')}
+            currency={user.displayCurrency}
+            fx={fx}
+            providerReady={provider.available}
+            {...(provider.detail ? { providerDetail: provider.detail } : {})}
+          />
+
+          {written.length > 0 && <RecentlyEdited projectId={project.id} rows={written} />}
+        </>
       )}
     </div>
   )
+}
+
+function ResumeCard({
+  projectId,
+  resume,
+}: {
+  projectId: string
+  resume: { episodeId: string; number: number; title: string; charCount: number } | undefined
+}) {
+  if (!resume) return null
+
+  const label = `EP${String(resume.number).padStart(3, '0')}`
+  const started = resume.charCount > 0
+
+  return (
+    <Link
+      href={`/projects/${projectId}/episodes/${resume.episodeId}/novel`}
+      className="panel group flex flex-col justify-between gap-3 rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700 transition-all hover:ring-accent-500/50"
+    >
+      <div className="flex items-center gap-2">
+        <BookOpen aria-hidden className="size-4 text-accent-400" />
+        <span className="text-xs font-semibold text-ink-100">
+          {started ? '繼續寫作' : '開始寫作'}
+        </span>
+      </div>
+
+      <div>
+        <p className="text-sm font-medium text-ink-50">
+          {label}
+          <span className="ml-2 text-xs font-normal text-ink-400">
+            {resume.title || '未命名'}
+          </span>
+        </p>
+        <p className="mt-0.5 text-[11px] text-ink-600">
+          {started ? `已寫 ${resume.charCount.toLocaleString('en-US')} 字` : '尚未動筆'}
+        </p>
+      </div>
+    </Link>
+  )
+}
+
+function Stat({ label, value, unit }: { label: string; value: string; unit: string }) {
+  return (
+    <div className="panel flex flex-col gap-0.5 rounded-xl bg-stage-900 p-3 ring-1 ring-stage-700">
+      <dt className="text-[10px] text-ink-600">{label}</dt>
+      <dd className="text-lg leading-tight font-semibold text-ink-50 tabular-nums">
+        {value}
+        <span className="ml-1 text-[10px] font-normal text-ink-500">{unit}</span>
+      </dd>
+    </div>
+  )
+}
+
+function RecentlyEdited({
+  projectId,
+  rows,
+}: {
+  projectId: string
+  rows: {
+    episodeId: string
+    number: number
+    title: string
+    charCount: number
+    lastEditorName: string | null
+    updatedAt: Date | null
+  }[]
+}) {
+  const recent = [...rows]
+    .sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0))
+    .slice(0, 6)
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-xs font-semibold text-ink-300">最近編輯</h3>
+      <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {recent.map((row) => (
+          <li key={row.episodeId}>
+            <Link
+              href={`/projects/${projectId}/episodes/${row.episodeId}/novel`}
+              className="panel flex items-center gap-2 rounded-lg bg-stage-900 px-3 py-2 ring-1 ring-stage-700 transition-all hover:ring-stage-600"
+            >
+              <span className="text-[11px] font-medium text-ink-300 tabular-nums">
+                EP{String(row.number).padStart(3, '0')}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-ink-200">
+                {row.title || <span className="text-ink-600">未命名</span>}
+              </span>
+              <span className="shrink-0 text-[10px] text-ink-600">
+                {row.charCount.toLocaleString('en-US')} 字
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/** Whether a text provider is configured, and why not when it isn't. */
+async function providerStatus(): Promise<{ available: boolean; detail?: string }> {
+  try {
+    const resolved = await adapterForTask('OUTLINE_GENERATE', null)
+    if (!resolved) return { available: false, detail: '尚未設定任何可用的 AI 供應商。' }
+    const status = await resolved.adapter.status()
+    return { available: status.available, detail: status.detail }
+  } catch (error) {
+    return {
+      available: false,
+      detail: error instanceof Error ? error.message : undefined,
+    }
+  }
 }

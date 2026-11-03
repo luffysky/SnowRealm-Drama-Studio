@@ -198,6 +198,8 @@ export const aiProviderKindEnum = pgEnum('ai_provider_kind', [
 /** What an AI job was asked to do. Drives which adapter method runs. */
 export const aiJobKindEnum = pgEnum('ai_job_kind', [
   'PROJECT_PLAN',
+  'OUTLINE_GENERATE',
+  'OUTLINE_REVIEW',
   'NOVEL_CONTINUE',
   'NOVEL_REWRITE',
   'NOVEL_POLISH',

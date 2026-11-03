@@ -376,6 +376,8 @@ export const AI_PROVIDER_KIND_LABEL: Record<AiProviderKindValue, string> = {
 
 export const AI_JOB_KINDS = [
   'PROJECT_PLAN',
+  'OUTLINE_GENERATE',
+  'OUTLINE_REVIEW',
   'NOVEL_CONTINUE',
   'NOVEL_REWRITE',
   'NOVEL_POLISH',
@@ -393,6 +395,8 @@ export type AiJobKindValue = (typeof AI_JOB_KINDS)[number]
 
 export const AI_JOB_KIND_LABEL: Record<AiJobKindValue, string> = {
   PROJECT_PLAN: '作品企劃生成',
+  OUTLINE_GENERATE: '分集大綱生成',
+  OUTLINE_REVIEW: '大綱審視',
   NOVEL_CONTINUE: '小說續寫',
   NOVEL_REWRITE: '小說改寫',
   NOVEL_POLISH: '小說潤稿',

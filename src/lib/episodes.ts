@@ -308,3 +308,180 @@ export async function getEpisodeDetail(
     stages: cells,
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/* 大綱 (outline)                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One episode's outline row.
+ *
+ * The outline is not a new table. An episode already carries `title`,
+ * `logline` and `synopsis`; a separate 大綱 record would immediately raise the
+ * question of which copy is authoritative, and the answer is always "the one
+ * the episode itself holds".
+ */
+export type OutlineRow = {
+  id: string
+  number: number
+  title: string
+  logline: string
+  synopsis: string
+  status: string
+  /** Whether prose exists yet, so the outline view can show what is written. */
+  charCount: number
+  updatedAt: Date
+}
+
+export async function listOutline(
+  projectId: string,
+  range?: { from?: number; to?: number }
+): Promise<OutlineRow[]> {
+  const conditions: SQL[] = [eq(episodes.projectId, projectId)]
+
+  const notDeleted = isNull(episodes.deletedAt)
+  if (notDeleted) conditions.push(notDeleted)
+  if (range?.from !== undefined) conditions.push(sql`${episodes.number} >= ${range.from}`)
+  if (range?.to !== undefined) conditions.push(sql`${episodes.number} <= ${range.to}`)
+
+  const rows = await db
+    .select({
+      id: episodes.id,
+      number: episodes.number,
+      title: episodes.title,
+      logline: episodes.logline,
+      synopsis: episodes.synopsis,
+      status: episodes.status,
+      updatedAt: episodes.updatedAt,
+      charCount: sql<number>`(
+        select coalesce(max(char_count), 0) from documents
+         where documents.episode_id = ${episodes.id}
+           and documents.kind = 'NOVEL'
+           and documents.deleted_at is null
+      )`.mapWith(Number),
+    })
+    .from(episodes)
+    .where(and(...conditions))
+    .orderBy(asc(episodes.number))
+
+  return rows
+}
+
+export type OutlineEdit = {
+  title?: string
+  logline?: string
+  synopsis?: string
+}
+
+/**
+ * Saves one episode's outline.
+ *
+ * Scoped by `projectId` as well as id: an episode id from another project must
+ * not be writable just because the caller guessed it (`docs/ROUTES.md` §5).
+ * Returns null when the episode is not in this project, so the caller answers
+ * 404 rather than distinguishing "wrong project" from "no such episode".
+ */
+export async function updateOutline(
+  projectId: string,
+  episodeId: string,
+  edit: OutlineEdit
+): Promise<OutlineRow | null> {
+  if (edit.title === undefined && edit.logline === undefined && edit.synopsis === undefined) {
+    return null
+  }
+
+  const [row] = await db
+    .update(episodes)
+    .set({
+      ...(edit.title !== undefined ? { title: edit.title } : {}),
+      ...(edit.logline !== undefined ? { logline: edit.logline } : {}),
+      ...(edit.synopsis !== undefined ? { synopsis: edit.synopsis } : {}),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(episodes.id, episodeId),
+        eq(episodes.projectId, projectId),
+        isNull(episodes.deletedAt)
+      )
+    )
+    .returning({
+      id: episodes.id,
+      number: episodes.number,
+      title: episodes.title,
+      logline: episodes.logline,
+      synopsis: episodes.synopsis,
+      status: episodes.status,
+      updatedAt: episodes.updatedAt,
+    })
+
+  return row ? { ...row, charCount: 0 } : null
+}
+
+/** How much of the outline is actually written, for the workbench header. */
+export async function outlineProgress(projectId: string): Promise<{
+  total: number
+  withLogline: number
+  withSynopsis: number
+}> {
+  const [row] = await db
+    .select({
+      total: sql<number>`count(*)`.mapWith(Number),
+      withLogline: sql<number>`count(*) filter (where length(trim(logline)) > 0)`.mapWith(Number),
+      withSynopsis: sql<number>`count(*) filter (where length(trim(synopsis)) > 0)`.mapWith(
+        Number
+      ),
+    })
+    .from(episodes)
+    .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt)))
+
+  return {
+    total: row?.total ?? 0,
+    withLogline: row?.withLogline ?? 0,
+    withSynopsis: row?.withSynopsis ?? 0,
+  }
+}
+
+/**
+ * Applies many outline edits at once.
+ *
+ * One transaction, because adopting an AI-generated outline for ten episodes
+ * is one decision by the writer: half-applied is worse than not applied, and
+ * leaves them guessing which half.
+ *
+ * Returns how many rows actually changed — an id from another project simply
+ * matches nothing, so a hand-crafted request cannot reach across the boundary.
+ */
+export async function applyOutline(
+  projectId: string,
+  edits: { episodeId: string; title?: string; logline?: string; synopsis?: string }[]
+): Promise<{ applied: number }> {
+  if (edits.length === 0) return { applied: 0 }
+
+  return db.transaction(async (tx) => {
+    let applied = 0
+
+    for (const edit of edits) {
+      const [row] = await tx
+        .update(episodes)
+        .set({
+          ...(edit.title !== undefined ? { title: edit.title } : {}),
+          ...(edit.logline !== undefined ? { logline: edit.logline } : {}),
+          ...(edit.synopsis !== undefined ? { synopsis: edit.synopsis } : {}),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(episodes.id, edit.episodeId),
+            eq(episodes.projectId, projectId),
+            isNull(episodes.deletedAt)
+          )
+        )
+        .returning({ id: episodes.id })
+
+      if (row) applied += 1
+    }
+
+    return { applied }
+  })
+}

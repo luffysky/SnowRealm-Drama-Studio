@@ -115,6 +115,37 @@ export const episodeSchema = z.object({
   notes: z.string().trim().max(2000).optional().default(''),
 })
 
+/**
+ * 分集大綱.
+ *
+ * Every field optional, but an empty edit is rejected: it would bump
+ * `updated_at` and write an activity entry for nothing.
+ *
+ * Empty strings are allowed and meaningful — that is how a line is cleared.
+ */
+export const outlineEditSchema = z
+  .object({
+    title: z.string().trim().max(120).optional(),
+    logline: z.string().trim().max(300).optional(),
+    synopsis: z.string().trim().max(5000).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: '沒有要變更的欄位' })
+
+/** 一次採用多集的大綱。 */
+export const outlineApplySchema = z.object({
+  entries: z
+    .array(
+      z.object({
+        episodeId: uuid,
+        title: z.string().trim().max(120).optional(),
+        logline: z.string().trim().max(300).optional(),
+        synopsis: z.string().trim().max(5000).optional(),
+      })
+    )
+    .min(1)
+    .max(200),
+})
+
 /** 批次建立集數 — e.g. episodes 1..120 in one call. */
 export const episodeBatchSchema = z
   .object({
@@ -300,8 +331,15 @@ export const stageUpdateSchema = z.object({
 })
 
 export const aiRunSchema = z.object({
+  /*
+   * Listed rather than derived from AI_JOB_KINDS: not every job kind is
+   * something a client may ask for directly, and a new kind should have to be
+   * opted in here deliberately.
+   */
   task: z.enum([
     'PROJECT_PLAN',
+    'OUTLINE_GENERATE',
+    'OUTLINE_REVIEW',
     'NOVEL_CONTINUE',
     'NOVEL_REWRITE',
     'NOVEL_POLISH',

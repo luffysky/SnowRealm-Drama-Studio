@@ -78,6 +78,13 @@
       "when": 1793711259299,
       "tag": "0010_project_titles",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793716939595,
+      "tag": "0011_outline_job_kinds",
+      "breakpoints": true
     }
   ]
 }

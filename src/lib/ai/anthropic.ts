@@ -63,6 +63,8 @@ const PRICING: Record<string, { input: number; output: number; cacheRead: number
 
 const SUPPORTED_TASKS: readonly AiTaskKind[] = [
   'PROJECT_PLAN',
+  'OUTLINE_GENERATE',
+  'OUTLINE_REVIEW',
   'NOVEL_CONTINUE',
   'NOVEL_REWRITE',
   'NOVEL_POLISH',
