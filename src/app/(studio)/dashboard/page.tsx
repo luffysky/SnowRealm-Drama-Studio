@@ -1,526 +1,517 @@
-import { and, count, desc, eq, gte, isNull, sql } from 'drizzle-orm'
 import {
   Activity,
-  Bot,
-  CalendarDays,
-  CircleDollarSign,
+  AlertTriangle,
   Clapperboard,
-  FileText,
+  ClipboardList,
   Film,
-  Image as ImageIcon,
+  Layers,
   ListChecks,
-  Mic,
-  PenLine,
   Plus,
-  Sparkles,
-  TriangleAlert,
-  Video,
-  Wallet,
+  TrendingUp,
 } from 'lucide-react'
-import { redirect } from 'next/navigation'
 import type { Metadata } from 'next'
-import { db } from '@/db'
-import {
-  activities,
-  aiJobs,
-  arcs,
-  episodeProductionStages,
-  episodes,
-  expenses,
-  projects,
-  tasks,
-  usageLedger,
-  users,
-} from '@/db/schema'
-import {
-  DonutChart,
-  MeterRow,
-  Panel,
-  PendingAction,
-  QuickAction,
-  StatTile,
-  type DonutSlice,
-} from '@/components/studio/DashboardParts'
+import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import type { ReactNode } from 'react'
 import { EmptyState } from '@/components/ui/StateViews'
-import { ProgressBar } from '@/components/ui/StatusChip'
 import { getSessionUser } from '@/lib/auth/session'
+import { PROJECT_STATUS_LABEL, PROJECT_STATUS_STYLE } from '@/lib/constants'
+import { getDashboard, type DashboardData } from '@/lib/dashboard'
 import {
-  EXPENSE_CATEGORY_LABEL,
-  type ExpenseCategoryValue,
-} from '@/lib/constants'
-import { conversionNote, formatFromBase } from '@/lib/money'
-import {
-  aggregateProgress,
-  PRODUCTION_STAGE_KEYS,
   PRODUCTION_STAGE_LABEL,
   stageOrdinal,
+  STAGES_PER_EPISODE,
   toPercent,
 } from '@/lib/production'
-import { getFxRates } from '@/lib/settings'
-import { formatRelativeZh } from '@/lib/utils'
+import { cn, formatRelativeZh } from '@/lib/utils'
 
-export const metadata: Metadata = { title: '總儀表板' }
+export const metadata: Metadata = { title: '工作室儀表板' }
 
 /**
- * 總儀表板 (design 01).
+ * 01 全域工作室儀表板 (design 01 v2).
  *
- * Every figure comes from a query. Spec v2 §0 is explicit that the numbers in
- * the mockup are illustrative and 「示意數字不得寫死」, so on a fresh database
- * this page legitimately shows zeros and empty states — that is the correct
- * output, not a bug.
+ * Cross-project only: no single-project editor is reachable from here
+ * (spec v3 §11.3). Every figure is read from the database — with an empty
+ * studio this page legitimately shows zeros and empty states, and that is the
+ * correct output rather than a reason to seed something.
  */
 export default async function DashboardPage() {
   const user = await getSessionUser()
   if (!user) redirect('/login')
 
-  const fx = await getFxRates()
+  const data = await getDashboard(user.id)
 
-  const [project] = await db
-    .select()
-    .from(projects)
-    .where(isNull(projects.deletedAt))
-    .limit(1)
-
-  if (!project) {
+  if (data.totalProjects === 0) {
     return (
-      <div className="px-6 py-10">
+      <div className="p-6">
         <EmptyState
           title="還沒有任何作品"
-          description="執行 npm run db:seed 建立《一灶見山河》，或從作品頁新增一個作品。"
+          description="建立第一部作品之後，這裡會顯示跨作品的集數、階段與進度摘要。"
+          icon={<Clapperboard aria-hidden className="size-5 text-ink-500" />}
+          action={
+            <Link
+              href="/projects"
+              className="bg-brand-gradient glow-accent-sm inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium text-white"
+            >
+              <Plus aria-hidden className="size-3.5" />
+              前往作品列表
+            </Link>
+          }
+          className="py-24"
         />
       </div>
     )
   }
 
-  const monthStart = new Date()
-  monthStart.setUTCDate(1)
-  monthStart.setUTCHours(0, 0, 0, 0)
-
-  const [
-    members,
-    allArcs,
-    statusRows,
-    stageRows,
-    aiRows,
-    expenseRows,
-    monthSpend,
-    taskRows,
-    recent,
-  ] = await Promise.all([
-    db.select().from(users).where(eq(users.active, true)).orderBy(users.createdAt),
-
-    db
-      .select()
-      .from(arcs)
-      .where(and(eq(arcs.projectId, project.id), isNull(arcs.deletedAt)))
-      .orderBy(arcs.index),
-
-    db
-      .select({ status: episodes.status, n: count() })
-      .from(episodes)
-      .where(and(eq(episodes.projectId, project.id), isNull(episodes.deletedAt)))
-      .groupBy(episodes.status),
-
-    db
-      .select({
-        stage: episodeProductionStages.stageKey,
-        done: sql<string>`sum(
-          case
-            when ${episodeProductionStages.status} = 'completed' then 1.0
-            when ${episodeProductionStages.status} = 'not_started' then 0.0
-            else least(greatest(coalesce(${episodeProductionStages.progressPercent}, 0), 0), 100) / 100.0
-          end
-        )`.mapWith(Number),
-        total: count(),
-      })
-      .from(episodeProductionStages)
-      .innerJoin(episodes, eq(episodes.id, episodeProductionStages.episodeId))
-      .where(
-        and(eq(episodeProductionStages.projectId, project.id), isNull(episodes.deletedAt))
-      )
-      .groupBy(episodeProductionStages.stageKey),
-
-    db
-      .select({ kind: aiJobs.kind, n: count() })
-      .from(aiJobs)
-      .where(gte(aiJobs.createdAt, monthStart))
-      .groupBy(aiJobs.kind),
-
-    db
-      .select({
-        category: expenses.category,
-        total: sql<string>`coalesce(sum(${expenses.amount} * ${expenses.exchangeRate}), 0)`,
-      })
-      .from(expenses)
-      .where(and(eq(expenses.projectId, project.id), gte(expenses.spentAt, monthStart)))
-      .groupBy(expenses.category),
-
-    db
-      .select({ total: sql<string>`coalesce(sum(${usageLedger.amount}), 0)` })
-      .from(usageLedger)
-      .where(
-        and(
-          eq(usageLedger.projectId, project.id),
-          eq(usageLedger.kind, 'ACTUAL'),
-          gte(usageLedger.occurredAt, monthStart)
-        )
-      ),
-
-    db
-      .select({ status: tasks.status, n: count() })
-      .from(tasks)
-      .where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt)))
-      .groupBy(tasks.status),
-
-    db
-      .select({
-        id: activities.id,
-        userName: activities.userName,
-        summary: activities.summary,
-        createdAt: activities.createdAt,
-      })
-      .from(activities)
-      .orderBy(desc(activities.createdAt))
-      .limit(6),
-  ])
-
-  const totalEpisodes = statusRows.reduce((sum, r) => sum + Number(r.n), 0)
-  const doneEpisodes = Number(statusRows.find((r) => r.status === 'DONE')?.n ?? 0)
-  const inProduction = Number(statusRows.find((r) => r.status === 'PRODUCTION')?.n ?? 0)
-  const inReview = Number(statusRows.find((r) => r.status === 'REVIEW')?.n ?? 0)
-
-  const stageByKey = new Map(stageRows.map((r) => [r.stage, r]))
-  const stageTotal = stageRows.reduce((sum, r) => sum + Number(r.total), 0)
-  const stageDone = stageRows.reduce((sum, r) => sum + Number(r.done), 0)
-  const overallPct = stageTotal > 0 ? Math.round((stageDone / stageTotal) * 100) : 0
-
-  const aiTotal = aiRows.reduce((sum, r) => sum + Number(r.n), 0)
-  const aiMax = Math.max(1, ...aiRows.map((r) => Number(r.n)))
-
-  const spend = Number(monthSpend[0]?.total ?? 0)
-  const slices = buildSlices(expenseRows)
-  const slicesTotal = slices.reduce((s, x) => s + x.value, 0)
-
-  const openTasks = taskRows
-    .filter((r) => r.status !== 'DONE')
-    .reduce((sum, r) => sum + Number(r.n), 0)
-
-  const greeting = greetingFor(new Date())
-
   return (
-    <div className="mx-auto flex max-w-[1600px] flex-col gap-4 px-4 py-5 sm:px-6">
-      {/* ------------------------------------------------------------ hero */}
-      <section className="panel relative overflow-hidden rounded-2xl ring-1 ring-stage-700">
-        {/* Gradient stands in until public/hero-banner.png is supplied. */}
-        <div aria-hidden className="art-placeholder absolute inset-0" />
-        <div
-          aria-hidden
-          className="absolute inset-0 bg-gradient-to-r from-stage-950 via-stage-950/85 to-transparent"
-        />
-        <div className="relative flex flex-col gap-1 px-6 py-7">
-          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-ink-50">
-            {greeting}，{user?.name ?? ''}
-            <span className="text-sm font-normal text-ink-400">{user?.title}</span>
-            {user?.title?.toUpperCase().includes('CEO') && <span aria-hidden>👑</span>}
-          </h1>
-          <p className="text-xs text-ink-400">
-            歡迎回到 SnowRealm Drama Studio，一起把好故事拍成熱門短劇。
-          </p>
-        </div>
-      </section>
+    <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
+      <KpiRow data={data} />
 
-      {/* --------------------------------------------- members + quick ops */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {members.map((member) => (
-            <div
-              key={member.id}
-              className="panel flex items-center gap-3 rounded-xl bg-stage-900 px-4 py-3 ring-1 ring-stage-700"
-            >
-              <span
-                className="bg-brand-gradient flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white ring-1 ring-accent-500/50"
-                aria-hidden
-              >
-                {member.name.charAt(0)}
-              </span>
-              <div className="flex min-w-0 flex-col gap-0.5">
-                <span className="flex items-center gap-1 truncate text-sm font-medium text-ink-50">
-                  {member.name}
-                  {member.title.toUpperCase().includes('CEO') && <span aria-hidden>👑</span>}
-                </span>
-                <span className="truncate text-[11px] text-ink-500">{member.title}</span>
-                <span className="flex items-center gap-1 text-[10px] text-emerald-400">
-                  <span aria-hidden className="size-1.5 rounded-full bg-emerald-400" />
-                  啟用中
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <Panel title="快速操作" icon={<Sparkles aria-hidden className="size-3.5" />}>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-            <QuickAction label="新建作品" icon={<Plus aria-hidden className="size-4" />} milestone="M1" />
-            <QuickAction label="寫小說" icon={<PenLine aria-hidden className="size-4" />} milestone="M2" />
-            <QuickAction label="劇本編寫" icon={<FileText aria-hidden className="size-4" />} milestone="M2" />
-            <QuickAction label="生成畫面" icon={<ImageIcon aria-hidden className="size-4" />} milestone="M3" />
-            <QuickAction label="生成影片" icon={<Video aria-hidden className="size-4" />} milestone="M3" />
-            <QuickAction label="配音製作" icon={<Mic aria-hidden className="size-4" />} milestone="M3" />
-          </div>
-        </Panel>
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+        <ProjectsPanel data={data} />
+        <TrendPanel data={data} />
       </div>
 
-      {/* ----------------------------------------------------------- tiles */}
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <StatTile
-          label="進行中作品"
-          value="1"
-          icon={<Film aria-hidden className="size-3.5" />}
-          hint={`${allArcs.length} 個篇章`}
-        />
-        <StatTile
-          label="總集數（規劃）"
-          value={String(totalEpisodes)}
-          icon={<Clapperboard aria-hidden className="size-3.5" />}
-          hint={`已完成 ${doneEpisodes} 集`}
-        />
-        <StatTile
-          label="本月 AI 任務"
-          value={String(aiTotal)}
-          unit="次"
-          icon={<Bot aria-hidden className="size-3.5" />}
-          hint={aiTotal === 0 ? '尚未執行任何任務' : undefined}
-        />
-        <StatTile
-          label="本月 AI 成本"
-          value={formatFromBase(spend, user.displayCurrency, fx)}
-          icon={<CircleDollarSign aria-hidden className="size-3.5" />}
-          hint={conversionNote(user.displayCurrency, fx) ?? '已結算金額'}
-        />
-        <StatTile
-          label="待審核項目"
-          value={String(inReview)}
-          icon={<ListChecks aria-hidden className="size-3.5" />}
-          tone={inReview > 0 ? 'warn' : 'default'}
-        />
-        <StatTile
-          label="製作中集數"
-          value={String(inProduction)}
-          icon={<TriangleAlert aria-hidden className="size-3.5" />}
-          tone={inProduction > 0 ? 'danger' : 'default'}
-        />
-      </section>
-
-      {/* ---------------------------------------- progress / spend / aijobs */}
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Panel
-          title="專案進度概覽"
-          icon={<Activity aria-hidden className="size-3.5" />}
-          action={<PendingAction label="查看全部" milestone="M1" />}
-        >
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-3">
-              <div
-                aria-hidden
-                className="art-placeholder size-14 shrink-0 rounded-lg ring-1 ring-stage-700"
-              />
-              <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="truncate text-sm font-medium text-ink-50">
-                  《{project.title}》
-                </span>
-                <span className="truncate text-[11px] text-ink-500">
-                  {allArcs[0] ? `第${allArcs[0].index}部《${allArcs[0].title}》 · ` : ''}
-                  共 {totalEpisodes} 集
-                </span>
-                <ProgressBar value={overallPct / 100} label="整體進度" />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2 border-t border-stage-700/60 pt-3">
-              <span className="text-[11px] font-medium text-ink-400">製作階段</span>
-              {PRODUCTION_STAGE_KEYS.map((stage) => {
-                const row = stageByKey.get(stage)
-                const total = Number(row?.total ?? 0)
-                const done = Number(row?.done ?? 0)
-                return (
-                  <MeterRow
-                    key={stage}
-                    label={`${stageOrdinal(stage)} ${PRODUCTION_STAGE_LABEL[stage]}`}
-                    value={done}
-                    max={total}
-                    trailing={`${toPercent(aggregateProgress(done, total))}%`}
-                  />
-                )
-              })}
-            </div>
-          </div>
-        </Panel>
-
-        <Panel
-          title="本月支出分布"
-          icon={<Wallet aria-hidden className="size-3.5" />}
-          action={<PendingAction label="查看明細" milestone="M4" />}
-        >
-          <DonutChart
-            slices={slices}
-            centerLabel="本月總支出"
-            centerValue={formatFromBase(slicesTotal, user.displayCurrency, fx)}
-            emptyMessage="本月尚無支出紀錄"
-          />
-        </Panel>
-
-        <Panel title="AI 任務狀態（本月）" icon={<Bot aria-hidden className="size-3.5" />}>
-          {aiRows.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-8 text-center">
-              <Bot aria-hidden className="size-6 text-ink-700" />
-              <p className="text-[11px] text-ink-600">本月尚未執行 AI 任務</p>
-              <p className="text-[10px] text-ink-700">設定 API 金鑰後即可開始使用</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              {aiRows.map((row) => (
-                <MeterRow
-                  key={row.kind}
-                  label={AI_SHORT[row.kind] ?? row.kind}
-                  icon={<Sparkles aria-hidden className="size-3.5" />}
-                  value={Number(row.n)}
-                  max={aiMax}
-                  trailing={`${Number(row.n)} 次`}
-                />
-              ))}
-            </div>
-          )}
-        </Panel>
+      <div className="grid items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <StagePanel data={data} />
+        <TaskPanel data={data} />
+        <RiskPanel data={data} />
       </div>
 
-      {/* ------------------------------------------ tasks / activity / today */}
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Panel
-          title="待辦與提醒"
-          icon={<ListChecks aria-hidden className="size-3.5" />}
-          action={<PendingAction label="任務看板" milestone="M4" />}
-        >
-          {openTasks === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-8 text-center">
-              <ListChecks aria-hidden className="size-6 text-ink-700" />
-              <p className="text-[11px] text-ink-600">目前沒有待辦事項</p>
-              <p className="text-[10px] text-ink-700">任務功能於 M4 階段交付</p>
-            </div>
-          ) : (
-            <ul className="flex flex-col gap-1.5">
-              {taskRows
-                .filter((r) => r.status !== 'DONE')
-                .map((row) => (
-                  <li
-                    key={row.status}
-                    className="flex items-center justify-between rounded-lg bg-stage-850 px-3 py-2 text-[11px]"
-                  >
-                    <span className="text-ink-300">{row.status}</span>
-                    <span className="text-ink-400">{Number(row.n)}</span>
-                  </li>
-                ))}
-            </ul>
-          )}
-        </Panel>
-
-        <Panel title="近期活動" icon={<Activity aria-hidden className="size-3.5" />}>
-          {recent.length === 0 ? (
-            <p className="py-8 text-center text-[11px] text-ink-600">尚無操作紀錄</p>
-          ) : (
-            <ul className="flex flex-col gap-2.5">
-              {recent.map((item) => (
-                <li key={item.id} className="flex items-start gap-2.5">
-                  <span
-                    aria-hidden
-                    className="bg-brand-gradient mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-                  >
-                    {item.userName.charAt(0) || '·'}
-                  </span>
-                  <div className="flex min-w-0 flex-col">
-                    <p className="truncate text-[11px] text-ink-200">{item.summary}</p>
-                    <p className="text-[10px] text-ink-600">
-                      {item.userName} · {formatRelativeZh(item.createdAt)}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-
-        <Panel
-          title="今日重點"
-          icon={<CalendarDays aria-hidden className="size-3.5" />}
-          action={
-            <span className="text-[11px] text-ink-600">
-              {new Date().toLocaleDateString('zh-TW', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                weekday: 'short',
-              })}
-            </span>
-          }
-        >
-          <div className="flex flex-col items-center gap-2 py-8 text-center">
-            <CalendarDays aria-hidden className="size-6 text-ink-700" />
-            <p className="text-[11px] text-ink-600">今日沒有排程項目</p>
-            <p className="text-[10px] text-ink-700">排程功能於 M4 階段交付</p>
-          </div>
-        </Panel>
-      </div>
+      <ActivityPanel data={data} />
     </div>
   )
 }
 
-/* ------------------------------------------------------------------ utils */
+/* -------------------------------------------------------------------------- */
 
-function greetingFor(now: Date): string {
-  const hour = now.getHours()
-  if (hour < 5) return '夜深了'
-  if (hour < 11) return '早安'
-  if (hour < 14) return '午安'
-  if (hour < 18) return '下午好'
-  return '晚安'
+function KpiRow({ data }: { data: DashboardData }) {
+  const totals = data.stageTotals
+  const pctOf = (n: number) =>
+    data.stageRecords > 0 ? `${((n / data.stageRecords) * 100).toFixed(1)}%` : '—'
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <Tile icon={<Clapperboard className="size-4" />} label="進行中作品">
+        <p className="text-2xl font-semibold text-ink-50">
+          {data.activeProjects}
+          <span className="ml-1 text-sm font-normal text-ink-500">部</span>
+        </p>
+        <p className="mt-1 text-[11px] text-ink-600">共 {data.totalProjects} 部作品</p>
+      </Tile>
+
+      <Tile icon={<ClipboardList className="size-4" />} label="總集數（全部作品）">
+        <p className="text-2xl font-semibold text-ink-50">
+          {data.totalEpisodes.toLocaleString('en-US')}
+          <span className="ml-1 text-sm font-normal text-ink-500">集</span>
+        </p>
+        <p className="mt-1 text-[11px] text-ink-600">跨作品合計</p>
+      </Tile>
+
+      <Tile icon={<Layers className="size-4" />} label="製作階段紀錄">
+        <p className="text-2xl font-semibold text-ink-50">
+          {data.stageRecords.toLocaleString('en-US')}
+          <span className="ml-1 text-sm font-normal text-ink-500">筆</span>
+        </p>
+        <p className="mt-1 text-[11px] text-ink-600">
+          集數 × {STAGES_PER_EPISODE} 階段
+        </p>
+      </Tile>
+
+      <Tile icon={<Activity className="size-4" />} label="整體完成率">
+        <div className="flex items-center gap-3">
+          <Donut fraction={data.overallProgress} />
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            {[
+              { label: '已完成', value: totals.completed, dot: 'text-emerald-400' },
+              { label: '進行中', value: totals.inProgress, dot: 'text-accent-400' },
+              { label: '待處理', value: totals.pending, dot: 'text-ink-600' },
+            ].map((slice) => (
+              <div key={slice.label} className="flex items-center gap-1.5 text-[10px]">
+                <span aria-hidden className={cn('text-[8px]', slice.dot)}>
+                  ●
+                </span>
+                <span className="text-ink-500">{slice.label}</span>
+                <span className="ml-auto text-ink-300 tabular-nums">
+                  {slice.value.toLocaleString('en-US')}
+                </span>
+                <span className="w-11 text-right text-ink-600 tabular-nums">
+                  {pctOf(slice.value)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Tile>
+    </div>
+  )
 }
 
-/** Donut colours, drawn from the design system rather than arbitrary hexes. */
-const SLICE_COLORS = [
-  'var(--color-accent-500)',
-  'var(--color-magenta-500)',
-  '#38bdf8',
-  '#34d399',
-  'var(--color-gilt-400)',
-  '#fb7185',
-  'var(--color-ink-500)',
-]
-
-function buildSlices(
-  rows: { category: ExpenseCategoryValue; total: string }[]
-): DonutSlice[] {
-  return rows
-    .map((row, index) => ({
-      label: EXPENSE_CATEGORY_LABEL[row.category] ?? row.category,
-      value: Number(row.total),
-      color: SLICE_COLORS[index % SLICE_COLORS.length]!,
-    }))
-    .filter((s) => s.value > 0)
-    .sort((a, b) => b.value - a.value)
+function Tile({
+  icon,
+  label,
+  children,
+}: {
+  icon: ReactNode
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <section className="panel flex flex-col rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700">
+      <h2 className="mb-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-ink-400">
+        <span aria-hidden className="text-accent-400">
+          {icon}
+        </span>
+        {label}
+      </h2>
+      {children}
+    </section>
+  )
 }
 
-/** Short labels so the AI meter rows stay on one line. */
-const AI_SHORT: Record<string, string> = {
-  NOVEL_CONTINUE: '小說續寫',
-  NOVEL_REWRITE: '小說改寫',
-  NOVEL_POLISH: '潤稿',
-  NOVEL_REVIEW: '審稿',
-  NOVEL_TO_SCRIPT: '轉劇本',
-  SCRIPT_ANALYZE: '劇本分析',
-  STORYBOARD_GENERATE: '分鏡生成',
-  CHARACTER_DESIGN: '角色設計',
-  WORLD_GENERATE: '世界觀',
-  WORLD_CONSISTENCY: '一致性',
-  ASSET_GENERATE: '素材生成',
-  TASK_SUGGEST: '任務建議',
-  PROJECT_PLAN: '作品企劃',
+/** Completion ring. Pure SVG; a chart library for one arc is not worth it. */
+function Donut({ fraction }: { fraction: number }) {
+  const radius = 22
+  const circumference = 2 * Math.PI * radius
+  const filled = circumference * Math.min(Math.max(fraction, 0), 1)
+
+  return (
+    <div className="relative size-16 shrink-0">
+      <svg viewBox="0 0 56 56" className="size-full -rotate-90" aria-hidden>
+        <circle cx="28" cy="28" r={radius} fill="none" strokeWidth="7" className="stroke-stage-800" />
+        <circle
+          cx="28"
+          cy="28"
+          r={radius}
+          fill="none"
+          strokeWidth="7"
+          strokeLinecap="round"
+          className="stroke-accent-500"
+          strokeDasharray={`${filled.toFixed(2)} ${circumference.toFixed(2)}`}
+        />
+      </svg>
+      <span className="absolute inset-0 grid place-items-center text-sm font-semibold text-ink-50">
+        {toPercent(fraction)}%
+      </span>
+    </div>
+  )
+}
+
+function Panel({
+  title,
+  icon,
+  action,
+  children,
+}: {
+  title: string
+  icon: ReactNode
+  action?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section className="panel flex min-w-0 flex-col rounded-xl bg-stage-900 ring-1 ring-stage-700">
+      <header className="flex items-center gap-2 border-b border-stage-700/60 px-4 py-2.5">
+        <span aria-hidden className="text-accent-400">
+          {icon}
+        </span>
+        <h2 className="min-w-0 flex-1 truncate text-xs font-medium text-ink-200">{title}</h2>
+        {action}
+      </header>
+      <div className="min-w-0 flex-1 p-4">{children}</div>
+    </section>
+  )
+}
+
+function ProjectsPanel({ data }: { data: DashboardData }) {
+  return (
+    <Panel
+      title="作品總覽"
+      icon={<Film className="size-3.5" />}
+      action={
+        <Link
+          href="/projects"
+          className="shrink-0 text-[11px] text-ink-500 transition-colors hover:text-ink-200"
+        >
+          查看全部 →
+        </Link>
+      }
+    >
+      <ul className="flex flex-col gap-2">
+        {data.projects.map((project) => (
+          <li key={project.id}>
+            {/* Clicking a card carries the right projectId — spec v3 §11.3. */}
+            <Link
+              href={`/projects/${project.id}`}
+              className="panel flex items-center gap-3 rounded-lg bg-stage-850 p-2 ring-1 ring-stage-700 transition-all hover:ring-stage-600"
+            >
+              {project.coverAssetId ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`/api/files/${project.coverAssetId}`}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="h-14 w-24 shrink-0 rounded object-cover"
+                />
+              ) : (
+                <div aria-hidden className="art-placeholder h-14 w-24 shrink-0 rounded" />
+              )}
+
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-medium text-ink-50">
+                    《{project.title}》
+                  </span>
+                  <span
+                    className={cn(
+                      'shrink-0 rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset',
+                      PROJECT_STATUS_STYLE[project.status]
+                    )}
+                  >
+                    {PROJECT_STATUS_LABEL[project.status]}
+                  </span>
+                  {project.tags.length > 0 && (
+                    <span className="truncate text-[10px] text-ink-600">
+                      {project.tags.join(' × ')}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 text-[11px] text-ink-500 tabular-nums">
+                    {project.episodeCount} 集｜{STAGES_PER_EPISODE} 階段
+                  </span>
+                  <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stage-800">
+                    <div
+                      className="bg-brand-gradient h-full rounded-full"
+                      style={{ width: `${toPercent(project.progress)}%` }}
+                    />
+                  </div>
+                  <span className="w-9 shrink-0 text-right text-[11px] text-ink-200 tabular-nums">
+                    {toPercent(project.progress)}%
+                  </span>
+                </div>
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  )
+}
+
+/**
+ * 製作進度趨勢.
+ *
+ * Drawn from `production_progress_events`, the only record of *when* a stage
+ * moved. A finished stage looks the same today as it did last week in
+ * `episode_production_stages`, so a curve reconstructed from current state
+ * would be invented rather than measured — hence the empty state until the
+ * first stage actually changes.
+ */
+function TrendPanel({ data }: { data: DashboardData }) {
+  const max = Math.max(1, ...data.trend.map((p) => p.completed + p.started))
+
+  return (
+    <Panel title="製作進度趨勢（近 30 天）" icon={<TrendingUp className="size-3.5" />}>
+      {data.trend.length === 0 ? (
+        <EmptyState
+          title="尚無進度變更紀錄"
+          description={
+            data.trendStartedAt
+              ? '近 30 天內沒有階段異動。'
+              : '階段狀態第一次變更後，這裡會以稽核紀錄繪出趨勢，不會從目前狀態回推。'
+          }
+          icon={<TrendingUp aria-hidden className="size-5 text-ink-500" />}
+          className="py-10"
+        />
+      ) : (
+        <div className="flex h-40 items-end gap-1">
+          {data.trend.map((point) => (
+            <div key={point.label} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+              <div className="flex w-full flex-1 flex-col justify-end gap-px">
+                <div
+                  title={`進行中 ${point.started}`}
+                  className="w-full rounded-t bg-accent-500/70"
+                  style={{ height: `${(point.started / max) * 100}%` }}
+                />
+                <div
+                  title={`已完成 ${point.completed}`}
+                  className="w-full bg-emerald-500/80"
+                  style={{ height: `${(point.completed / max) * 100}%` }}
+                />
+              </div>
+              <span className="truncate text-[8px] text-ink-700">{point.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+function StagePanel({ data }: { data: DashboardData }) {
+  return (
+    <Panel title="整體製作流程（九大階段）" icon={<Layers className="size-3.5" />}>
+      <ul className="flex flex-col gap-2">
+        {data.stageBreakdown.map((stage) => {
+          const fraction = stage.total > 0 ? stage.done / stage.total : 0
+          return (
+            <li key={stage.key} className="flex items-center gap-2">
+              <span className="w-5 shrink-0 text-right text-[10px] text-ink-700 tabular-nums">
+                {stageOrdinal(stage.key)}
+              </span>
+              <span className="w-16 shrink-0 truncate text-[11px] text-ink-400">
+                {PRODUCTION_STAGE_LABEL[stage.key]}
+              </span>
+              <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stage-800">
+                <div
+                  className="bg-brand-gradient h-full rounded-full"
+                  style={{ width: `${toPercent(fraction)}%` }}
+                />
+              </div>
+              <span className="w-9 shrink-0 text-right text-[10px] text-ink-300 tabular-nums">
+                {toPercent(fraction)}%
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </Panel>
+  )
+}
+
+function TaskPanel({ data }: { data: DashboardData }) {
+  return (
+    <Panel
+      title={`待處理任務（跨作品${data.tasks.length > 0 ? ` ${data.tasks.length}` : ''}）`}
+      icon={<ListChecks className="size-3.5" />}
+      action={
+        <span
+          aria-disabled="true"
+          title="跨作品任務頁尚未實作，預計於 M4 階段交付"
+          className="shrink-0 cursor-default text-[11px] text-ink-600 select-none"
+        >
+          查看全部 M4
+        </span>
+      }
+    >
+      {data.tasks.length === 0 ? (
+        <EmptyState
+          title="目前沒有待處理任務"
+          description="任務看板於 M4 階段交付，屆時可在此跨作品指派與追蹤。"
+          icon={<ListChecks aria-hidden className="size-5 text-ink-500" />}
+          className="py-8"
+        />
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {data.tasks.map((task) => (
+            <li key={task.id} className="flex items-center gap-2">
+              <span
+                aria-hidden
+                className="size-3.5 shrink-0 rounded border border-stage-600 bg-stage-850"
+              />
+              {task.projectTitle && (
+                <span className="shrink-0 rounded bg-stage-800 px-1.5 py-0.5 text-[10px] text-ink-400 ring-1 ring-inset ring-stage-700">
+                  {task.projectTitle}
+                </span>
+              )}
+              <span className="min-w-0 flex-1 truncate text-xs text-ink-200">{task.title}</span>
+              <DueChip days={task.dueInDays} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  )
+}
+
+function DueChip({ days }: { days: number | null }) {
+  if (days === null) return <span className="shrink-0 text-[10px] text-ink-700">未定</span>
+
+  const label = days === 0 ? '今天' : days < 0 ? `逾期 ${Math.abs(days)} 天` : `${days} 天後`
+  return (
+    <span
+      className={cn(
+        'shrink-0 rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset tabular-nums',
+        days < 0
+          ? 'bg-rose-950 text-rose-300 ring-rose-800'
+          : days === 0
+            ? 'bg-gilt-400/15 text-gilt-300 ring-gilt-500/50'
+            : 'bg-stage-850 text-ink-500 ring-stage-700'
+      )}
+    >
+      {label}
+    </span>
+  )
+}
+
+function RiskPanel({ data }: { data: DashboardData }) {
+  return (
+    <Panel title="重要提醒與風險" icon={<AlertTriangle className="size-3.5" />}>
+      {data.risks.length === 0 ? (
+        <EmptyState
+          title="目前沒有風險項目"
+          description="逾期任務與阻塞階段會自動出現在這裡，不需要手動維護清單。"
+          icon={<AlertTriangle aria-hidden className="size-5 text-ink-500" />}
+          className="py-8"
+        />
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {data.risks.map((risk) => (
+            <li key={risk.id} className="flex items-start gap-2">
+              <span
+                aria-hidden
+                className={cn(
+                  'mt-0.5 grid size-4 shrink-0 place-items-center rounded-full text-[9px] font-bold',
+                  risk.tone === 'high'
+                    ? 'bg-rose-500/20 text-rose-300'
+                    : risk.tone === 'medium'
+                      ? 'bg-amber-500/20 text-amber-300'
+                      : 'bg-sky-500/20 text-sky-300'
+                )}
+              >
+                !
+              </span>
+              <span className="min-w-0 flex-1 text-xs leading-relaxed text-ink-300">
+                {risk.projectTitle && (
+                  <span className="text-ink-500">{risk.projectTitle}：</span>
+                )}
+                {risk.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  )
+}
+
+function ActivityPanel({ data }: { data: DashboardData }) {
+  return (
+    <Panel title="近期動態" icon={<Activity className="size-3.5" />}>
+      {data.recentActivity.length === 0 ? (
+        <EmptyState title="尚無動態" className="py-8" />
+      ) : (
+        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {data.recentActivity.map((entry) => (
+            <li key={entry.id} className="flex items-start gap-2">
+              <span
+                aria-hidden
+                className="mt-1 grid size-5 shrink-0 place-items-center rounded-full bg-stage-800 text-ink-500 ring-1 ring-stage-700"
+              >
+                <Activity className="size-3" />
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col leading-tight">
+                <span className="truncate text-xs text-ink-200">{entry.summary}</span>
+                <span className="text-[10px] text-ink-600">
+                  {entry.userName}・{formatRelativeZh(entry.createdAt)}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  )
 }
