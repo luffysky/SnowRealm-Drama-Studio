@@ -224,6 +224,12 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 **1. cron 每天只能一次。** `vercel.json` 設為每天 03:00，當作「撿漏網之魚」的保險 ——
 專門處理退避重試到期、但當下沒人在使用系統的任務。
 
+> ⚠️ **`vercel.json` 不能寫註解。** JSON 本身沒有註解語法，而且 Vercel 的 schema 是
+> 嚴格模式：`crons[]` 物件只允許 `path` 與 `schedule` 兩個欄位，多放任何東西
+> （包括自訂的 `_comment`）都會讓建置直接失敗，錯誤是
+> `[INVALID_VERCEL_CONFIG] crons[0] should NOT have additional property`。
+> 所有說明都寫在這份文件裡，不要寫回設定檔。
+
 **2. 即時執行靠前端推一下。** 送出 AI 任務後，前端會呼叫一次
 `POST /api/ai/worker`（`src/lib/ai/client.ts` 的 `submitAiJob`）。
 因此 worker **同時接受兩種身分**：
