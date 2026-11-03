@@ -1,3 +1,7 @@
+> **已由 `docs/todo/TODO.md`（Z 編號總表）取代。保留作為歷史紀錄。**
+
+---
+
 # 待辦 · 2026-11-03
 
 > SnowRealm Drama Studio V1。依據 `docs/SnowRealm_Drama_Studio_Complete_UI_Spec_v2.md`（**spec v2 為唯一依據，v1 作廢但保留檔案**）。
