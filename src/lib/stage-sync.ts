@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { db } from '@/db'
+import { END_MARKER_SOURCE } from '@/lib/novel-progress'
 
 /**
  * 讓製作進度跟真正寫出來的東西對齊 (Z117).
@@ -65,20 +66,49 @@ async function syncStages(scope: ReturnType<typeof sql>): Promise<number> {
       select
         e.id as episode_id,
         'novel'::text as stage_key,
-        least(
-          1.0,
-          coalesce(
-            (
-              select sum(ch.char_count)::numeric
-                from chapters ch
-                join documents d on d.id = ch.document_id
-               where d.episode_id = e.id
-                 and d.kind = 'NOVEL'
-                 and d.deleted_at is null
-            ),
-            0
-          ) / nullif(p.target_chars, 0)
-        ) as fraction
+        /*
+         * 寫完了沒有，看作者自己標的（Z118）。
+         *
+         * The last chapter ending in 「第001集 完」 is the author saying so.
+         * A word count cannot: a chapter at 110% of target can still be half
+         * a scene short, and one at 60% can be finished because it came out
+         * tighter than planned.
+         *
+         * Tags are stripped before matching, so a marker the editor split
+         * across elements still reads as one phrase.
+         */
+        case
+          when exists (
+            select 1
+              from chapters ch
+              join documents d on d.id = ch.document_id
+             where d.episode_id = e.id
+               and d.kind = 'NOVEL'
+               and d.deleted_at is null
+               and ch.sort_order = (
+                 select max(ch2.sort_order)
+                   from chapters ch2
+                   join documents d2 on d2.id = ch2.document_id
+                  where d2.episode_id = e.id and d2.kind = 'NOVEL' and d2.deleted_at is null
+               )
+               and regexp_replace(ch.content, '<[^>]*>', '', 'g') ~ ${sql.raw(`'${END_MARKER_SOURCE}'`)}
+          )
+          then 1.0
+          else least(
+            0.99,
+            coalesce(
+              (
+                select sum(ch.char_count)::numeric
+                  from chapters ch
+                  join documents d on d.id = ch.document_id
+                 where d.episode_id = e.id
+                   and d.kind = 'NOVEL'
+                   and d.deleted_at is null
+              ),
+              0
+            ) / nullif(p.target_chars, 0)
+          )
+        end as fraction
       from episodes e
       join projects p on p.id = e.project_id
       where ${scope} and e.deleted_at is null
@@ -140,25 +170,45 @@ async function syncStages(scope: ReturnType<typeof sql>): Promise<number> {
       where ${scope} and e.deleted_at is null
     )
     update episode_production_stages s
-       set status = 'in_progress',
+       set status = case
+             /*
+              * 1.0 for 小說 means the author wrote 「第NNN集 完」, which is
+              * the one source that can say a chapter is finished. For the
+              * other stages it is only ever a measurement, so they stay
+              * 進行中 until a person decides.
+              */
+             when m.stage_key = 'novel' and m.fraction >= 1 then 'completed'
+             else 'in_progress'
+           end::production_stage_status,
            progress_percent = greatest(
              s.progress_percent,
              round(coalesce(m.fraction, 0) * 100)::int
            ),
            started_at = coalesce(s.started_at, now()),
+           completed_at = case
+             when m.stage_key = 'novel' and m.fraction >= 1
+               then coalesce(s.completed_at, now())
+             else s.completed_at
+           end,
            updated_at = now()
       from measured m
      where s.episode_id = m.episode_id
        and s.stage_key = m.stage_key::production_stage_key
        and m.fraction is not null
-       -- Never walk back a human's judgement.
-       and s.status <> 'completed'
+       /*
+        * Never walk back 完成 — except for 小說, where 完成 is itself derived
+        * from the text, so deleting the 「第NNN集 完」 line has to be able to
+        * take it back. The other stages are a human's call and stay put.
+        */
+       and (s.status <> 'completed' or m.stage_key = 'novel')
        -- Only when the measurement says something has actually happened.
        and (m.fraction > 0 or s.stage_key in ('storyboard', 'assets'))
        -- And only when it would change something, so this is cheap to re-run.
        and (
          s.status = 'not_started'
          or s.progress_percent < round(coalesce(m.fraction, 0) * 100)::int
+         -- Reaching 完成 is a change even when the percentage did not move.
+         or (m.stage_key = 'novel' and m.fraction >= 1 and s.status <> 'completed')
        )
   `)
 
@@ -186,12 +236,13 @@ async function clearStages(scope: ReturnType<typeof sql>): Promise<number> {
        set status = 'not_started',
            progress_percent = 0,
            started_at = null,
+           completed_at = null,
            updated_at = now()
       from episodes e
      where e.id = s.episode_id
        and ${scope}
        and s.stage_key = 'novel'
-       and s.status = 'in_progress'
+       and s.status in ('in_progress', 'completed')
        and not exists (
          select 1
            from chapters ch
