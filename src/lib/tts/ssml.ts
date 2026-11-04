@@ -31,20 +31,23 @@ const AZURE_CEILING_SEC = 8 * 60
 /**
  * 真正在管事的不是 Azure 的上限，是我們自己的函式上限。
  *
- * The worker runs with `maxDuration = 60` (`api/ai/worker/route.ts`), and
- * synthesising eight minutes of audio cannot finish inside sixty seconds at
- * any plausible rate. So a part is sized for **our** budget, not Azure's:
- * small enough that several fit in one invocation, which is also what makes
- * the whole thing resumable — a job that renders 42 small parts can stop
- * after any of them and pick up where it left off, and one that renders four
- * big ones cannot.
+ * The worker runs with `maxDuration = 60` (`api/ai/worker/route.ts`), so a
+ * part has to be sized for **our** budget, not Azure's. That is also what
+ * makes the whole thing resumable: a job of many small parts can stop after
+ * any of them and pick up where it left off; a job of four big ones cannot.
  *
- * Deliberately conservative. Azure is almost certainly several times faster
- * than real time, but 「almost certainly」 is not a number, and the cost of
- * being wrong is a job that can never finish. It is raised once there is a
- * measurement.
+ * **Measured**, now, rather than guessed: 35 characters of multi-voice SSML
+ * came back in 1.3 seconds — about **seven times real time**. The first
+ * version of this assumed the worst case of 1× and sat at 45 seconds, which
+ * would have made an episode 42 round trips for no reason.
+ *
+ * At 7× a two-minute part synthesises in roughly 17 seconds, so three fit in
+ * one invocation with room to spare. Not pushed further: the cost of a part
+ * that overruns is a request Azure has already billed and we have nothing to
+ * show for, while the cost of a part that is too small is one more HTTP
+ * round trip. Those are not symmetrical.
  */
-const FUNCTION_BUDGET_SEC = 45
+const FUNCTION_BUDGET_SEC = 120
 
 const MAX_SECONDS_PER_REQUEST = Math.min(AZURE_CEILING_SEC, FUNCTION_BUDGET_SEC)
 
