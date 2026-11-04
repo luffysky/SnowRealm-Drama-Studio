@@ -181,6 +181,15 @@ export function knownNames(
 /* Voice assignment                                                            */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * A voice to choose from.
+ *
+ * `gender` is optional because the browser does not report one —
+ * `SpeechSynthesisVoice` has no such field. Azure does, and when it is there
+ * it decides which pool a character draws from.
+ */
+export type VoiceOption = { id: string; lang: string; gender?: string }
+
 export type VoiceSlot = {
   /** `voiceURI`, or null to use whatever the reader picked for narration. */
   voiceId: string | null
@@ -213,10 +222,49 @@ export type CastMember = {
 export function assignVoices(
   cast: CastMember[],
   /** Available voices, Chinese first — `loadVoices()` already sorts that way. */
-  voices: { id: string; lang: string }[]
+  voices: VoiceOption[]
 ): Record<string, VoiceSlot> {
   const chinese = voices.filter((v) => v.lang.toLowerCase().startsWith('zh'))
   const pool = chinese.length > 0 ? chinese : voices
+
+  /*
+   * 音色本身有性別就照性別挑 (Z129).
+   *
+   * The original rule was 「gender steers pitch, not which voice」, and for
+   * browser voices that is right: `SpeechSynthesisVoice` has no gender, and a
+   * machine with one Chinese voice has no female voice to pick. But the
+   * per-gender counters below start at zero for each gender, so a female lead
+   * and a male lead both landed on `pool[0]` — **the same voice** — separated
+   * only by pitch.
+   *
+   * Azure's list does carry gender, and a male voice pitched up is not a
+   * female voice. So when the pool is gendered, each side draws from its own;
+   * when it is not, every pool is the whole pool and this is exactly the old
+   * behaviour.
+   */
+  /**
+   * Classifies a voice, **female first**.
+   *
+   * 「female」 contains 「male」, so a bare `/male/i` matches every female
+   * voice Azure lists. The first version of this did exactly that and the
+   * male pool silently became the whole pool — both leads landed on the same
+   * voice, which is the bug this whole block exists to fix.
+   */
+  const voiceGender = (value?: string): 'female' | 'male' | 'other' => {
+    const text = (value ?? '').toLowerCase()
+    if (/female|女/.test(text)) return 'female'
+    if (/male|男/.test(text)) return 'male'
+    return 'other'
+  }
+
+  const poolFor = (want: 'female' | 'male') => {
+    const matching = pool.filter((voice) => voiceGender(voice.gender) === want)
+    // No gendered voices at all — the browser case. Old behaviour exactly.
+    return matching.length > 0 ? matching : pool
+  }
+
+  const femalePool = poolFor('female')
+  const malePool = poolFor('male')
 
   /*
    * Pitch steps, spread around the narrator's 1.0 and never reaching it — the
@@ -252,8 +300,10 @@ export function assignVoices(
      */
     const override = member.voiceId && available.has(member.voiceId) ? member.voiceId : null
 
+    const ownPool = steps === HIGH ? femalePool : steps === LOW ? malePool : pool
+
     out[member.id] = {
-      voiceId: override ?? pool[index % Math.max(1, pool.length)]?.id ?? null,
+      voiceId: override ?? ownPool[index % Math.max(1, ownPool.length)]?.id ?? null,
       pitch: steps[index % steps.length] ?? 1,
       // A touch of variation so two characters sharing a pitch still differ.
       rate: 1 + ((index % 3) - 1) * 0.04,
@@ -288,7 +338,7 @@ export function castChunks(
   chunks: { text: string; paragraph: number }[],
   paragraphs: string[],
   cast: CastMember[],
-  voices: { id: string; lang: string }[]
+  voices: VoiceOption[]
 ): CastedChunk[] {
   if (cast.length === 0) return chunks
 

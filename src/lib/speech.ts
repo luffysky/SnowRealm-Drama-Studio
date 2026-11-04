@@ -85,92 +85,17 @@ export function loadVoices(): Promise<Voice[]> {
 /* Splitting                                                                   */
 /* -------------------------------------------------------------------------- */
 
-export type SpeechChunk = {
-  text: string
-  /**
-   * Whose line this is, and how it sounds (Z111).
-   *
-   * All optional: without a cast every chunk is narration, which is exactly
-   * what this was before. `rate` and `pitch` are **multipliers** on whatever
-   * the reader has set, so someone who reads at 1.4x keeps their pace and
-   * still hears a raised voice as raised.
-   */
-  voiceId?: string | null
-  rate?: number
-  pitch?: number
-  /** The character's name, for showing who is speaking. */
-  speaker?: string | null
-  /**
-   * Which paragraph this came from.
-   *
-   * Carried explicitly because the reader highlights the paragraph being
-   * spoken. It used to assume one chunk per paragraph and highlight by chunk
-   * index — true only while every paragraph fits in one utterance, and
-   * silently wrong from the first long paragraph onward, with the highlight
-   * drifting further behind for the rest of the chapter.
-   */
-  paragraph: number
-}
-
-/**
- * Roughly 40 characters.
+/*
+ * 切段搬到 `speech-split.ts` 了 (Z129)。
  *
- * Measured in Chrome: 70 characters of Chinese took 18.3 seconds, so about
- * 3.9 characters a second. 40 keeps an utterance near ten seconds — under
- * Chrome's fifteen-second cut-off with room to spare, so the cut-off never
- * has to be worked around.
+ * 這個檔案是 `'use client'`，伺服器端的有聲小說匯出載不進來；但切法一定要
+ * 兩邊一樣，否則同一個角色在閱讀器與匯出檔裡會在不同地方開口。重新匯出，
+ * 呼叫端的 import 一行都不用改。
  */
-const MAX_CHARS = 40
+import type { SpeechChunk } from '@/lib/speech-split'
 
-/**
- * Splits prose into utterances, one paragraph at a time.
- *
- * Paragraphs are never merged. A chapter of this novel is 238 paragraphs with
- * a median of 12 characters — mostly dialogue — and merging them would read
- * more smoothly but would make the highlight coarser than the line you are
- * looking at.
- */
-export function splitForSpeech(paragraphs: string[], maxChars = MAX_CHARS): SpeechChunk[] {
-  const out: SpeechChunk[] = []
-
-  paragraphs.forEach((paragraph, index) => {
-    const sentences = paragraph
-      // Keep the punctuation: it is what makes the synthesiser pause.
-      .split(/(?<=[。！？!?；;…，、：])/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-
-    let buffer = ''
-
-    const flush = () => {
-      if (buffer) out.push({ text: buffer, paragraph: index })
-      buffer = ''
-    }
-
-    for (const sentence of sentences) {
-      if (buffer && buffer.length + sentence.length > maxChars) flush()
-
-      /*
-       * A single sentence longer than the cap — one unbroken clause — is cut
-       * on length. Ugly, but better than one 40-second utterance, which is
-       * exactly where the browser stops speaking without telling anyone.
-       */
-      if (sentence.length > maxChars) {
-        flush()
-        for (let at = 0; at < sentence.length; at += maxChars) {
-          out.push({ text: sentence.slice(at, at + maxChars), paragraph: index })
-        }
-        continue
-      }
-
-      buffer += sentence
-    }
-
-    flush()
-  })
-
-  return out
-}
+export { splitForSpeech } from '@/lib/speech-split'
+export type { SpeechChunk }
 
 /* -------------------------------------------------------------------------- */
 /* Speaking                                                                    */
