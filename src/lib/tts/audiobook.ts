@@ -2,10 +2,17 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '@/db'
 import { characters, episodes } from '@/db/schema'
 import { ApiError } from '@/lib/api'
-import { castChunks, castFromSpeakers, type CastMember } from '@/lib/narration'
+import {
+  castChunks,
+  castFromSpeakers,
+  isDialogue,
+  type CastedChunk,
+  type CastMember,
+} from '@/lib/narration'
 import { novelForReading } from '@/lib/novel-export'
 import { splitForSpeech } from '@/lib/speech-split'
 import { batchChunks, billableChars, estimatedSeconds, ssmlFor, type SsmlBatch } from './ssml'
+import { emotionOf, styleFor } from './style'
 
 /**
  * 一集小說 → 可以送去合成的 SSML (Z129).
@@ -23,8 +30,14 @@ import { batchChunks, billableChars, estimatedSeconds, ssmlFor, type SsmlBatch }
  * 而那種不一致看起來就像「匯出壞掉了」。
  */
 
-/** A voice as Azure lists it, reduced to what the caster needs. */
-export type AudiobookVoice = { id: string; lang: string }
+/**
+ * A voice as Azure lists it, reduced to what the caster needs.
+ *
+ * `styles` 是 Azure 的情緒風格清單 (Z140)。沒有它，`characters.voiceStyle`
+ * 就只能猜那個音色支不支援——而猜錯的結果是 Azure 安靜地照平常唸，設定看
+ * 起來有生效其實沒有。
+ */
+export type AudiobookVoice = { id: string; lang: string; styles?: readonly string[] }
 
 export type AudiobookCast = {
   name: string
@@ -58,6 +71,76 @@ export type AudiobookPlan = {
  * without anybody noticing (the same reason 匯率 and 模型單價 are settings).
  */
 export const DEFAULT_RATE_PER_MILLION_USD = 15
+
+/**
+ * 給每一句台詞挑一個情緒風格 (Z140).
+ *
+ * 只有這裡同時知道四件事，所以決定只能在這裡做：正文怎麼寫、這句是誰說的、
+ * 那個角色在角色表裡填了什麼預設風格、以及那個音色到底支援哪幾種風格。
+ *
+ * ## 只套在台詞上
+ *
+ * 旁白不給風格，這是刻意的。情緒詞本來就寫在旁白裡——「許山河怒道」這六個
+ * 字是敘述，不是怒。讓旁白用生氣的聲音唸「他生氣地說」，是把描述當成了表演。
+ * 旁白是讀的人，不是演的人。
+ *
+ * ## 上一段也算證據，但有條件
+ *
+ * 實測這部小說第一章：74 段對白，**沒有一段在同一段裡寫出說話的人**。情緒
+ * 詞也一樣在隔壁——
+ *
+ *     許山河皺起眉。          ← 證據在這裡
+ *     「你說什麼？」          ← 要唸的是這裡
+ *
+ * 所以上一段納入判斷，但**只在上一段本身不是對白的時候**。上一段是對白時，
+ * 那裡的情緒屬於另一個人，借過來用就是張冠李戴。
+ */
+function withStyles(
+  chunks: CastedChunk[],
+  context: {
+    paragraphs: string[]
+    voices: AudiobookVoice[]
+    /** 名字 → `characters.voiceStyle`。 */
+    baseStyles: ReadonlyMap<string, string>
+    narratorVoice: string
+  }
+): CastedChunk[] {
+  /** 音色 → 它支援的風格。沒有風格的音色一律得到空陣列。 */
+  const supported = new Map(context.voices.map((voice) => [voice.id, voice.styles ?? []]))
+
+  /** 段號 → 判斷用的上下文，算一次就好。 */
+  const evidence = new Map<number, string>()
+
+  const contextFor = (index: number): string => {
+    const cached = evidence.get(index)
+    if (cached !== undefined) return cached
+
+    const here = context.paragraphs[index] ?? ''
+    const before = context.paragraphs[index - 1] ?? ''
+    const usable = before && !isDialogue(before) ? before : ''
+    const built = `${usable}${here}`
+
+    evidence.set(index, built)
+    return built
+  }
+
+  return chunks.map((chunk) => {
+    if (!chunk.text.trim()) return chunk
+
+    const paragraph = context.paragraphs[chunk.paragraph] ?? ''
+    const spoken = isDialogue(chunk.text) || isDialogue(paragraph)
+    if (!spoken) return chunk
+
+    const voice = chunk.voiceId || context.narratorVoice
+    const style = styleFor({
+      emotion: emotionOf(chunk.text, contextFor(chunk.paragraph)),
+      base: chunk.speaker ? context.baseStyles.get(chunk.speaker) : null,
+      supported: supported.get(voice) ?? [],
+    })
+
+    return style ? { ...chunk, style } : chunk
+  })
+}
 
 export async function planEpisodeAudio(input: {
   projectId: string
@@ -110,16 +193,31 @@ export async function planEpisodeAudio(input: {
       name: characters.name,
       gender: characters.gender,
       tier: characters.tier,
+      voiceId: characters.voiceId,
+      voiceStyle: characters.voiceStyle,
     })
     .from(characters)
     .where(and(eq(characters.projectId, input.projectId), isNull(characters.deletedAt)))
 
+  /*
+   * `voiceId` 一定要帶進來 (Z140).
+   *
+   * `assignVoices` 本來就會優先用角色自己釘住的音色，但這裡**沒有把這個欄位
+   * 查出來**——所以在閱讀器裡釘得住，匯出的有聲書卻照樣按順序重新分配。
+   * 那是最難發現的一種壞法：介面上明明設了，檔案裡就是不照辦。
+   */
   const members: CastMember[] = cast.map((row) => ({
     id: row.id,
     name: row.name,
     gender: row.gender ?? '',
     tier: row.tier,
+    voiceId: row.voiceId || undefined,
   }))
+
+  /** 名字 → 角色表裡填的預設情緒風格。 */
+  const baseStyles = new Map(
+    cast.filter((row) => row.voiceStyle).map((row) => [row.name, row.voiceStyle])
+  )
 
   /*
    * The whole episode as one stream, not chapter by chapter.
@@ -141,7 +239,7 @@ export async function planEpisodeAudio(input: {
     ? castFromSpeakers([...input.speakers.values()], members, input.genders)
     : members
 
-  const casted = castChunks(
+  const plainCast = castChunks(
     plain,
     paragraphs,
     castForVoices,
@@ -150,6 +248,13 @@ export async function planEpisodeAudio(input: {
     // 旁白的音色留給旁白。
     [input.narratorVoice]
   )
+
+  const casted = withStyles(plainCast, {
+    paragraphs,
+    voices: input.voices,
+    baseStyles,
+    narratorVoice: input.narratorVoice,
+  })
 
   const batches = batchChunks(casted)
   const locale = input.locale ?? 'zh-TW'

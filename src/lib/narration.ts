@@ -459,6 +459,16 @@ export type CastedChunk = {
   rate?: number
   pitch?: number
   speaker?: string | null
+  /**
+   * Azure 的情緒風格名字，已經確認這個音色支援 (Z140).
+   *
+   * 由 `tts/audiobook.ts` 決定——只有那裡同時知道正文、角色設定的預設風格、
+   * 以及這個音色到底支援哪幾種。瀏覽器朗讀用不到：Web Speech API 沒有風格
+   * 這個概念，所以這個欄位在那條路上永遠是空的。
+   */
+  style?: string | null
+  /** 靜音，不是字。見 `SpeechChunk.pauseMs`。 */
+  pauseMs?: number
 }
 
 /**

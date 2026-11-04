@@ -1,3 +1,5 @@
+import { isSceneBreak, SCENE_BREAK_MS, speakableText } from '@/lib/speech-text'
+
 /**
  * 把正文切成一段一段唸得出來的單位。
  *
@@ -26,6 +28,14 @@ export type SpeechChunk = {
   pitch?: number
   /** The character's name, for showing who is speaking. */
   speaker?: string | null
+  /**
+   * 這一塊是靜音，不是字 (Z140).
+   *
+   * 場景分隔線（`* * *`）在書上是一條線，唸出來卻是三個「星號」——使用者
+   * 聽到的就是這個。刪掉是不夠的：場景換了而聲音一路接下去，聽起來就是
+   * 前一場的話還沒說完。所以它變成一段明顯的停頓，`text` 是空的。
+   */
+  pauseMs?: number
   /**
    * Which paragraph this came from.
    *
@@ -60,7 +70,26 @@ export function splitForSpeech(paragraphs: string[], maxChars = MAX_CHARS): Spee
   const out: SpeechChunk[] = []
 
   paragraphs.forEach((paragraph, index) => {
-    const sentences = paragraph
+    /*
+     * 排版符號不要唸出來 (Z140).
+     *
+     * 在螢幕上是留白，在耳朵裡是字。`* * *` 被唸成「星號星號星號」，而那
+     * 三個星號還是**我們自己放進去的**（`htmlToText` 把 `<hr>` 轉成它）。
+     *
+     * 掛在這裡是因為切段是閱讀器朗讀跟匯出音檔共用的那一份——修一次兩邊
+     * 都好，而修在別處就會只好一邊。
+     */
+    const speakable = speakableText(paragraph)
+
+    if (speakable === null) {
+      // 整段都是分隔線：換成靜音，位置留著，讓高亮還對得上段號。
+      if (isSceneBreak(paragraph)) {
+        out.push({ text: '', paragraph: index, pauseMs: SCENE_BREAK_MS })
+      }
+      return
+    }
+
+    const sentences = speakable
       // Keep the punctuation: it is what makes the synthesiser pause.
       .split(/(?<=[。！？!?；;…，、：])/)
       .map((s) => s.trim())

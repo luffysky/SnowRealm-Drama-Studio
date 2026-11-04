@@ -52,6 +52,7 @@ export const GET = handle(async (request: Request, context: Context) => {
     voices: pool.map((voice) => ({
       id: voice.id,
       lang: voice.locale,
+      styles: voice.styles,
       gender: voice.gender,
       speaksChinese: voice.speaksChinese,
     })),
@@ -112,6 +113,7 @@ export const POST = handle(async (request: Request, context: Context) => {
     voices: pool.map((voice) => ({
       id: voice.id,
       lang: voice.locale,
+      styles: voice.styles,
       gender: voice.gender,
       speaksChinese: voice.speaksChinese,
     })),

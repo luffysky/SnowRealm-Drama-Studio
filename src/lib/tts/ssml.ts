@@ -1,4 +1,5 @@
 import type { CastedChunk } from '@/lib/narration'
+import { markReadings, spell } from './pronounce'
 
 /**
  * 把分配好角色的段落變成 Azure 吃得下的 SSML (Z129).
@@ -97,6 +98,41 @@ export type SsmlOptions = {
 }
 
 /**
+ * 屬性值。
+ *
+ * 跟 `escapeXml` 分開一支，因為屬性裡**必須**處理引號而文字節點裡不必。
+ * 這裡的值是我們自己字典裡的注音與拼音，本來就不含引號——但「本來就不含」
+ * 是一句關於今天的話，而這個函式要對明天新增的規則也成立。
+ */
+function escapeAttr(value: string): string {
+  return escapeXml(value).replaceAll('"', '&quot;')
+}
+
+/**
+ * 一塊文字，該標讀音的地方標上 (Z140).
+ *
+ * 用哪一種拼寫是**音色**決定的，不是文件的 `xml:lang`——所以只有到這裡、
+ * 知道最後是哪一個音色在唸，才能決定。`spell()` 回 null 就是那一類音色不
+ * 支援（粵語、吳語、多語言，實測一律 400），原樣輸出。
+ *
+ * 寧可唸錯一個字，也不要送出一個會被整批退掉的請求。
+ */
+function renderText(text: string, voice: string): string {
+  const out: string[] = []
+
+  for (const segment of markReadings(text)) {
+    const ph = segment.reading ? spell(segment.reading, voice) : null
+    if (!ph) {
+      out.push(escapeXml(segment.text))
+      continue
+    }
+    out.push(`<phoneme alphabet="sapi" ph="${escapeAttr(ph)}">${escapeXml(segment.text)}</phoneme>`)
+  }
+
+  return out.join('')
+}
+
+/**
  * One SSML document for a run of chunks.
  *
  * Azure allows several `<voice>` elements in one document, which is what
@@ -108,41 +144,85 @@ export type SsmlOptions = {
  */
 export function ssmlFor(chunks: CastedChunk[], options: SsmlOptions): string {
   const parts: string[] = [
-    `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${options.locale}">`,
+    `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" ` +
+      `xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${options.locale}">`,
   ]
 
+  /*
+   * 三層，而且順序是 Azure 定的：`<voice>` 包 `<mstts:express-as>` 包
+   * `<prosody>`。情緒風格換了就得連裡面的 prosody 一起收掉再重開，所以
+   * 收的動作是**由內往外串**的——漏掉一層就是標籤交錯，而交錯的 SSML 是
+   * 400，整批白跑。
+   */
   let openVoice: string | null = null
+  /** null 代表沒有開著 express-as；有值就是正開著的風格。 */
+  let openStyle: string | null = null
   let openProsody: string | null = null
 
-  const closeAll = () => {
+  const closeProsody = () => {
     if (openProsody !== null) parts.push('</prosody>')
-    if (openVoice !== null) parts.push('</voice>')
     openProsody = null
+  }
+
+  const closeStyle = () => {
+    closeProsody()
+    if (openStyle !== null) parts.push('</mstts:express-as>')
+    openStyle = null
+  }
+
+  const closeVoice = () => {
+    closeStyle()
+    if (openVoice !== null) parts.push('</voice>')
     openVoice = null
   }
 
   for (const chunk of chunks) {
     const text = chunk.text.trim()
-    if (!text) continue
+
+    /*
+     * 場景分隔：一段靜音，不是一個字 (Z140).
+     *
+     * `<break>` 要待在 `<voice>` 裡面——`<speak>` 底下直接放，Azure 不收。
+     * 所以沒有開著的音色時，借旁白的開一個。
+     */
+    if (!text) {
+      if (chunk.pauseMs && chunk.pauseMs > 0) {
+        if (openVoice === null) {
+          parts.push(`<voice name="${options.narratorVoice}">`)
+          openVoice = options.narratorVoice
+        }
+        parts.push(`<break time="${Math.round(chunk.pauseMs)}ms"/>`)
+      }
+      continue
+    }
 
     const voice = chunk.voiceId || options.narratorVoice
+    const style = chunk.style?.trim() || null
     const rate = prosodyPercent(chunk.rate ?? 1, RATE_BOUND)
     const pitch = prosodyPercent(chunk.pitch ?? 1, PITCH_BOUND)
     const prosody = `${rate}|${pitch}`
 
     if (voice !== openVoice) {
-      closeAll()
+      closeVoice()
       parts.push(`<voice name="${voice}">`)
       openVoice = voice
     }
 
+    if (style !== openStyle) {
+      closeStyle()
+      if (style) {
+        parts.push(`<mstts:express-as style="${escapeAttr(style)}">`)
+        openStyle = style
+      }
+    }
+
     if (prosody !== openProsody) {
-      if (openProsody !== null) parts.push('</prosody>')
+      closeProsody()
       parts.push(`<prosody rate="${rate}" pitch="${pitch}">`)
       openProsody = prosody
     }
 
-    parts.push(escapeXml(text))
+    parts.push(renderText(text, voice))
 
     /*
      * A beat between paragraphs. Without it every paragraph runs into the
@@ -152,7 +232,7 @@ export function ssmlFor(chunks: CastedChunk[], options: SsmlOptions): string {
     parts.push('<break strength="medium"/>')
   }
 
-  closeAll()
+  closeVoice()
   parts.push('</speak>')
 
   return parts.join('')
@@ -191,7 +271,12 @@ export function batchChunks(
 
   for (const chunk of chunks) {
     const length = chunk.text.trim().length
-    if (length === 0) continue
+
+    /*
+     * 空白的一塊通常就是沒東西，丟掉；但帶著 `pauseMs` 的那種是**場景分隔的
+     * 靜音**，丟掉它就等於把場景之間的停頓又拿掉了——而那正是加它的理由。
+     */
+    if (length === 0 && !chunk.pauseMs) continue
 
     if (chars > 0 && chars + length > maxChars) flush()
 
