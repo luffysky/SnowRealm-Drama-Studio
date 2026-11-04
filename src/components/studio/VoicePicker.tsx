@@ -340,9 +340,16 @@ export function VoicePicker({
         <track kind="captions" />
       </audio>
 
+      {/*
+       * 只講這裡選得到幾個。
+       *
+       * 本來把 Azure 回報的總數也印出來，於是變成「共 156 個音色。可以用，
+       * 556 個音色」——兩個數字擺在一起沒有說明哪個是哪個，讀起來像壞掉。
+       * 400 個是英文西班牙文那些，跟這部戲無關，講出來只是噪音。
+       */}
       <p className="text-[10px] text-ink-700">
         <Volume2 aria-hidden className="mr-1 inline size-3" />
-        共 {voices.length} 個音色。{catalogue.detail}
+        這裡選得到 {voices.length} 個音色：中文的全部，加上英日韓。
       </p>
     </div>
   )

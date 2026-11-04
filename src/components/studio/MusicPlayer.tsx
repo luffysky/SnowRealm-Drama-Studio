@@ -20,6 +20,7 @@ import { MUSIC_CATEGORY_LABEL } from '@/lib/music-view'
 import { cn, formatDurationZh } from '@/lib/utils'
 import { usePlayer, type PlayerTrack } from '@/components/studio/PlayerProvider'
 import { TrackLyrics } from '@/components/studio/TrackLyrics'
+import { WaveformBar } from '@/components/studio/WaveformBar'
 
 /**
  * 音樂播放器 — every track in the studio, with a queue.
@@ -119,7 +120,6 @@ export function MusicPlayer({
 
   if (!track) return null
 
-  const progress = duration > 0 ? current / duration : 0
 
   return (
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
@@ -161,29 +161,19 @@ export function MusicPlayer({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <div className="relative h-1.5">
-            <div className="absolute inset-0 rounded-full bg-stage-800" />
-            <div
-              aria-hidden
-              className="absolute inset-y-0 left-0 rounded-full bg-accent-500"
-              style={{ width: `${progress * 100}%` }}
-            />
-            <label className="sr-only" htmlFor="music-seek">
-              播放位置
-            </label>
-            <input
-              id="music-seek"
-              type="range"
-              min={0}
-              max={Math.max(duration, 0.01)}
-              step={0.01}
-              value={current}
-              onChange={(event) => seekTo(Number(event.target.value))}
-              /* `-inset-y-3` so the thumb is draggable on a phone; the
-                 bar itself is 6px tall and a finger is not. */
-              className="absolute inset-x-0 -inset-y-3 w-full cursor-pointer opacity-0"
-            />
-          </div>
+          {/*
+           * 「播音樂的時候沒有波形，這樣沒感覺」(Z140).
+           *
+           * 峰值是現成的——上傳時瀏覽器就算好存進 `asset_variants` 了。拿不
+           * 到的素材（TTS 產出的有聲書就是這一類）退回原來那條進度條，而不
+           * 是畫一個看起來合理的假波形。
+           */}
+          <WaveformBar
+            assetId={track.assetId}
+            current={current}
+            duration={duration}
+            onSeek={seekTo}
+          />
           <div className="flex justify-between text-[10px] text-ink-600 tabular-nums">
             <span>{formatDurationZh(Math.floor(current))}</span>
             <span>{formatDurationZh(Math.floor(duration))}</span>
