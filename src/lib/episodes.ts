@@ -70,6 +70,13 @@ export async function listEpisodes(
 
   if (query.status) conditions.push(eq(episodes.status, query.status))
 
+  /*
+   * 卷 is a container and nothing else (Z128), so filtering by it is a plain
+   * equality on `arc_id` — no join, and nothing here depends on the episode
+   * numbers being contiguous within it.
+   */
+  if (query.arcId) conditions.push(eq(episodes.arcId, query.arcId))
+
   if (query.stage) {
     // "Show me what still needs 分鏡" — episodes whose named stage is unfinished.
     conditions.push(

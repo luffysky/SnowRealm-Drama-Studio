@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  ArrowRight,
   Check,
   FileText,
   History,
@@ -78,6 +79,14 @@ export type NovelEditorProps = {
    * of a hundred and twenty.
    */
   toc: NovelTocEpisode[]
+  /**
+   * 下一集，so 新增章節 can offer to put it there (Z128).
+   *
+   * The next episode that **exists**, not `number + 1`: episodes are created
+   * in batches and a gap is normal. Null on the last one, where the choice
+   * does not arise.
+   */
+  nextEpisode?: { id: string; number: number; title: string } | null
 }
 
 export type NovelTocEpisode = {
@@ -109,6 +118,7 @@ export function NovelEditor({
   providerReady,
   providerDetail,
   toc,
+  nextEpisode = null,
 }: NovelEditorProps) {
   const toast = useToast()
   const router = useRouter()
@@ -202,21 +212,59 @@ export function NovelEditor({
     return () => window.removeEventListener('beforeunload', warn)
   }, [state])
 
-  async function addChapter() {
+  /**
+   * 新增章節，加在這一集或下一集 (Z128).
+   *
+   * 「應該加一個看要在這裡新增還是下一集」—— a long chapter usually ends
+   * with a decision about which it was, and before this the button always
+   * answered 「這一集」 and you found out afterwards.
+   *
+   * The two destinations take different routes on purpose. 「這一集」 posts
+   * to the open document and appends to the list in place, with no
+   * navigation. 「下一集」 goes through the episode-keyed route, because the
+   * next episode may have no 小說 document yet and the client has no way to
+   * learn an id that does not exist — then navigates to it.
+   */
+  async function addChapter(where: 'here' | 'next') {
     if (creating) return
+
+    if (where === 'next' && !nextEpisode) return
+
+    // Unsaved text must not be left behind by a navigation this triggered.
+    if (where === 'next' && (state === 'dirty' || state === 'saving')) {
+      toast.warning('還有沒存的內容', '等自動存檔跑完，或先按儲存，再換到下一集。')
+      return
+    }
+
     setCreating(true)
     try {
-      const response = await apiFetch(
-        `/api/projects/${projectId}/documents/${documentId}/chapters`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ title: `第 ${chapters.length + 1} 章` }),
-        }
-      )
+      const url =
+        where === 'here'
+          ? `/api/projects/${projectId}/documents/${documentId}/chapters`
+          : `/api/projects/${projectId}/episodes/${nextEpisode!.id}/chapters`
+
+      const response = await apiFetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: where === 'here' ? `第 ${chapters.length + 1} 章` : '',
+        }),
+      })
       if (!response.ok) throw new Error(await readApiError(response))
 
       const body = (await response.json()) as { chapter: ChapterData; lockRevision: number }
+
+      if (where === 'next') {
+        toast.success(
+          `已在 EP${String(nextEpisode!.number).padStart(3, '0')} 新增章節`,
+          '正在開啟那一集。'
+        )
+        router.push(
+          `/projects/${projectId}/episodes/${nextEpisode!.id}/novel?chapter=${body.chapter.id}`
+        )
+        return
+      }
+
       setChapters((prev) => [...prev, body.chapter])
       setActiveId(body.chapter.id)
       // Authoritative value from the server: creating a chapter advances the
@@ -383,15 +431,41 @@ export function NovelEditor({
       {/* ---- chapter rail ------------------------------------------------ */}
       <aside className="panel flex min-h-0 flex-col rounded-xl bg-stage-900 ring-1 ring-stage-700">
         <div className="flex flex-col gap-2 border-b border-stage-700/60 p-3">
-          <button
-            type="button"
-            onClick={() => void addChapter()}
-            disabled={creating}
-            className="bg-brand-gradient glow-accent-sm inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-          >
-            <Plus aria-hidden className="size-3.5" />
-            {creating ? '新增中…' : '新增章節'}
-          </button>
+          {/*
+            新增章節，可以選加在哪一集 (Z128).
+
+            Two buttons rather than a menu behind a chevron: there are exactly
+            two destinations, both are one word, and a menu would hide the
+            second one behind a press for no saving in width. The second
+            disappears entirely on the last episode, where it would be a
+            button that cannot do anything.
+          */}
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => void addChapter('here')}
+              disabled={creating}
+              className="bg-brand-gradient glow-accent-sm inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
+              <Plus aria-hidden className="size-3.5" />
+              {creating ? '新增中…' : '新增章節'}
+            </button>
+
+            {nextEpisode && (
+              <button
+                type="button"
+                onClick={() => void addChapter('next')}
+                disabled={creating}
+                title={`在 EP${String(nextEpisode.number).padStart(3, '0')}${
+                  nextEpisode.title ? `《${nextEpisode.title}》` : ''
+                } 新增一章並跳過去`}
+                className="tap inline-flex shrink-0 items-center gap-1 rounded-lg bg-stage-800 px-2.5 py-2 text-[11px] text-ink-300 ring-1 ring-stage-700 transition-colors hover:bg-stage-700 hover:text-ink-50 disabled:opacity-60"
+              >
+                下一集
+                <ArrowRight aria-hidden className="size-3" />
+              </button>
+            )}
+          </div>
 
           <div className="relative">
             <Search

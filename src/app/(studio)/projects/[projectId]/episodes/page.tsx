@@ -12,6 +12,7 @@ import {
   parseView,
   type EpisodeRow,
 } from '@/lib/episodes'
+import { listArcs } from '@/lib/arcs'
 import { requireProjectPage } from '@/lib/project-access'
 import { PRODUCTION_STAGE_KEYS, type ProductionStageKey } from '@/lib/production'
 
@@ -55,6 +56,15 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
     ? (stageParam as ProductionStageKey)
     : undefined
 
+  /*
+   * 卷 (Z128). Listed unconditionally rather than only when there is more
+   * than one: the strip is where a second 卷 gets made, so hiding it until a
+   * second 卷 exists would leave no way to make one.
+   */
+  const arcs = await listArcs(project.id)
+  const arcParam = one(sp.arc)
+  const arcId = arcs.some((arc) => arc.id === arcParam) ? arcParam : ''
+
   const result = await listEpisodes(project.id, {
     page: Number(one(sp.page)) || 1,
     perPage: parsePerPage(one(sp.per)),
@@ -62,6 +72,7 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
     status,
     stage,
     sort: parseSort(one(sp.sort)),
+    ...(arcId ? { arcId } : {}),
   })
 
   // The selected episode may be off the current page; look it up by id rather
@@ -82,6 +93,8 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
       status={status ?? ''}
       stage={stage ?? ''}
       sort={parseSort(one(sp.sort))}
+      arcs={arcs}
+      arcId={arcId}
     />
   )
 }

@@ -135,7 +135,17 @@ export const episodes = pgTable(
     arcId: uuid('arc_id')
       .notNull()
       .references(() => arcs.id, { onDelete: 'cascade' }),
-    /** 第幾集 within the arc, 1-based (1..120). */
+    /**
+     * 第幾集, 1-based, **project-wide** (1..120).
+     *
+     * The unique constraint below is per arc, which once read as 「第幾集
+     * within the arc」 — true only while every project had exactly one arc.
+     * Now that 卷 can be created and episodes moved between them (Z128), it
+     * matters that this number is the project's: 小說、劇本、分鏡 and every
+     * 「第 007 集」 written in the prose refer to it, so **moving an episode
+     * to another 卷 must never renumber it**. 卷 is a container, not an
+     * address.
+     */
     number: integer('number').notNull(),
     title: text('title').notNull().default(''),
     logline: text('logline').notNull().default(''),

@@ -893,3 +893,25 @@ export const aiBatchSchema = z.object({
   providerId: uuid.nullable().optional(),
   userInstruction: z.string().trim().max(4000).optional().default(''),
 })
+
+/* -------------------------------------------------------------------------- */
+/* 卷 (Z128)                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export const createArcSchema = z.object({
+  title: z.string().trim().min(1, '請輸入卷名').max(120, '卷名最多 120 個字'),
+  logline: z.string().trim().max(500, '一句話簡介最多 500 個字').optional().default(''),
+})
+
+/**
+ * Every field optional, because the dialog sends only what changed — and
+ * `episodeIds` rides along so renaming a 卷 and refiling episodes into it is
+ * one request rather than two that can half-fail.
+ */
+export const updateArcSchema = z.object({
+  title: z.string().trim().max(120, '卷名最多 120 個字').optional(),
+  logline: z.string().trim().max(500, '一句話簡介最多 500 個字').optional(),
+  /** Counted toward the project's 規劃集數, which sums across every 卷. */
+  plannedEpisodes: z.coerce.number().int().min(0).max(9999).optional(),
+  episodeIds: z.array(uuid).max(500, '一次最多搬 500 集').optional(),
+})

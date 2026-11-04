@@ -29,6 +29,8 @@ import {
   toPercent,
   type ProductionStageStatus,
 } from '@/lib/production'
+import { ArcBar } from '@/components/studio/ArcBar'
+import type { ArcRow } from '@/lib/arcs-view'
 import { cn } from '@/lib/utils'
 import { FinalCutPanel } from '@/components/studio/FinalCutPanel'
 import { assetPreviewUrl } from '@/lib/asset-url'
@@ -55,6 +57,13 @@ export type EpisodeManagerProps = {
   status: EpisodeStatusValue | ''
   stage: string
   sort: string
+  /**
+   * 卷 (Z128). Empty when the caller does not care about grouping — 17 製作
+   * 進度 reuses this component and has no business filing episodes.
+   */
+  arcs?: ArcRow[]
+  /** The 卷 currently filtered to, from `?arc=`. */
+  arcId?: string
   /** 17 製作進度 reuses this table under its own heading. */
   heading?: string
   /** Whether this member may change the final cut. */
@@ -78,6 +87,8 @@ export function EpisodeManager({
   status,
   stage,
   sort,
+  arcs = [],
+  arcId = '',
   heading = '集數管理',
   canWrite = false,
 }: EpisodeManagerProps) {
@@ -158,6 +169,21 @@ export function EpisodeManager({
       </header>
 
       <StatsBar stats={stats} />
+
+      {arcs.length > 0 && (
+        <ArcBar
+          projectId={projectId}
+          arcs={arcs}
+          activeArcId={arcId}
+          canWrite={canWrite}
+          onFilter={(id) => go({ arc: id })}
+          selectable={rows.map((row) => ({
+            id: row.id,
+            number: row.number,
+            title: row.title,
+          }))}
+        />
+      )}
 
       {/* --- filters ------------------------------------------------------ */}
       <div className="flex flex-wrap items-center gap-2">

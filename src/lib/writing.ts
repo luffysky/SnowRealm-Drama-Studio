@@ -1042,3 +1042,84 @@ async function touchDocument(documentId: string, userId: string): Promise<number
   if (!row) throw new Error('Failed to touch document')
   return row.lockRevision
 }
+
+/**
+ * 新增章節時，要加在這一集還是下一集 (Z128).
+ *
+ * 「新增章節那裡 應該加一個看要在這裡新增還是下一集」. The editor only knows
+ * its own `documentId`, and the next episode may have no 小說 document yet —
+ * so the choice cannot be made on the client, and resolving it there would
+ * mean creating documents for episodes nobody has opened.
+ *
+ * Takes an **episode** rather than a document and does the rest: finds the
+ * episode, opens or creates its 小說 document, appends a chapter, and hands
+ * back where it ended up so the editor can navigate there.
+ *
+ * `openDocument` already creates on demand, with an `onConflictDoNothing` for
+ * the other tab doing the same thing at the same moment. This reuses it
+ * rather than repeating that race.
+ */
+export async function createChapterInEpisode(input: {
+  projectId: string
+  episodeId: string
+  title?: string
+  user: SessionUser
+}): Promise<{
+  documentId: string
+  episodeNumber: number
+  chapter: ChapterRow
+  lockRevision: number
+}> {
+  const document = await openDocument(input.projectId, input.episodeId, 'NOVEL')
+  if (!document) throw ApiError.notFound('找不到這一集')
+
+  const title = input.title?.trim() || `第 ${document.chapters.length + 1} 章`
+
+  const { chapter, lockRevision } = await createChapter({
+    documentId: document.id,
+    title,
+    user: input.user,
+  })
+
+  return {
+    documentId: document.id,
+    episodeNumber: document.episodeNumber,
+    chapter,
+    lockRevision,
+  }
+}
+
+/**
+ * 下一集是哪一集。
+ *
+ * The next **existing** episode by number, not `number + 1`: episodes are
+ * created in batches and a gap is normal, so adding to 「下一集」 must land on
+ * an episode that is actually there rather than one that is not.
+ */
+export async function nextEpisodeAfter(
+  projectId: string,
+  episodeId: string
+): Promise<{ id: string; number: number; title: string } | null> {
+  const [current] = await db
+    .select({ number: episodes.number })
+    .from(episodes)
+    .where(and(eq(episodes.id, episodeId), eq(episodes.projectId, projectId)))
+    .limit(1)
+
+  if (!current) return null
+
+  const [next] = await db
+    .select({ id: episodes.id, number: episodes.number, title: episodes.title })
+    .from(episodes)
+    .where(
+      and(
+        eq(episodes.projectId, projectId),
+        isNull(episodes.deletedAt),
+        gt(episodes.number, current.number)
+      )
+    )
+    .orderBy(asc(episodes.number))
+    .limit(1)
+
+  return next ?? null
+}

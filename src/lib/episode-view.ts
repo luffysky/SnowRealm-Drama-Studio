@@ -72,6 +72,8 @@ export type EpisodeQuery = {
   status?: EpisodeStatusValue
   /** Only episodes whose given stage is unfinished. */
   stage?: ProductionStageKey
+  /** Only the episodes filed under one 卷 (Z128). */
+  arcId?: string
   sort?: EpisodeSort
 }
 

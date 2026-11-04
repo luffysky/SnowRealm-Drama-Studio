@@ -5,7 +5,7 @@ import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
 import { adapterForTask } from '@/lib/ai/jobs'
 import { getEditorModules, getFxRates } from '@/lib/settings'
-import { novelToc, openDocument } from '@/lib/writing'
+import { nextEpisodeAfter, novelToc, openDocument } from '@/lib/writing'
 
 export const metadata: Metadata = { title: '小說編輯器' }
 
@@ -32,7 +32,7 @@ export default async function EpisodeNovelPage({ params, searchParams }: Params)
   const requestedChapter = (await searchParams).chapter
   const chapterId = typeof requestedChapter === 'string' ? requestedChapter : null
 
-  const [document, toc, modules, fx, provider] = await Promise.all([
+  const [document, toc, modules, fx, provider, nextEpisode] = await Promise.all([
     openDocument(project.id, episodeId, 'NOVEL'),
     // The rail can show the whole book, not just this episode's chapters.
     novelToc(project.id, 'NOVEL'),
@@ -43,6 +43,12 @@ export default async function EpisodeNovelPage({ params, searchParams }: Params)
      * paint rather than flashing "available" and correcting itself.
      */
     providerStatus(),
+    /*
+     * 下一集, so 新增章節 can offer to write there instead (Z128). Resolved
+     * on the server because the next episode may have no 小說 document yet,
+     * and the editor cannot look up an id that does not exist.
+     */
+    nextEpisodeAfter(project.id, episodeId),
   ])
   if (!document) notFound()
 
@@ -72,6 +78,7 @@ export default async function EpisodeNovelPage({ params, searchParams }: Params)
       providerReady={provider.available}
       providerDetail={provider.detail}
       toc={toc}
+      nextEpisode={nextEpisode}
     />
   )
 }
