@@ -99,6 +99,15 @@ type JobView = {
 
 const POLL_MS = 2000
 
+/**
+ * How long a job may sit at QUEUED before the panel says something.
+ *
+ * The worker normally starts within a second of the nudge. Fifteen is long
+ * enough that a slow cold start is not called a failure, and short enough
+ * that nobody sits watching a spinner wondering.
+ */
+const STALL_MS = 15_000
+
 export function AiAssistant({
   projectId,
   episodeId,
@@ -125,6 +134,9 @@ export function AiAssistant({
   const [job, setJob] = useState<JobView | null>(null)
   const [chosen, setChosen] = useState(0)
   const [applying, setApplying] = useState(false)
+  /** The job was accepted but nothing has picked it up. */
+  const [stalled, setStalled] = useState(false)
+  const [waking, setWaking] = useState(false)
 
   /**
    * Which episode's novel to adapt. Defaults to the one being written, which
@@ -165,6 +177,27 @@ export function AiAssistant({
   const ready = readsNovel
     ? Boolean(novelSource && novelSource.charCount > 0)
     : Boolean(activeSource.trim()) || task === 'PROJECT_PLAN'
+
+  /**
+   * Asks the worker to run now, and says so when it cannot.
+   *
+   * Separate from the enqueue so 「立刻執行」 can call it again: a job that
+   * is still QUEUED is almost always a nudge that did not land, and the one
+   * thing that fixes it is another nudge.
+   */
+  async function nudge(): Promise<boolean> {
+    try {
+      const response = await apiFetch('/api/ai/worker', { method: 'POST' })
+      if (!response.ok) {
+        setStalled(true)
+        return false
+      }
+      return true
+    } catch {
+      setStalled(true)
+      return false
+    }
+  }
 
   async function runEstimate() {
     setPhase('estimating')
@@ -226,8 +259,15 @@ export function AiAssistant({
        * Nudge the worker. On the Hobby plan cron runs once a day, so without
        * this the job would sit in the queue until 03:00 — correct, but not
        * usable. The worker accepts a signed-in member for exactly this.
+       *
+       * The failure is **not** swallowed any more. It used to be
+       * `.catch(() => {})`, and when the nudge did not land the panel polled
+       * a QUEUED job forever: 「已排入佇列」, no progress, no error, nothing.
+       * From the outside that is indistinguishable from the feature being
+       * broken — which is exactly how it was reported.
        */
-      void apiFetch('/api/ai/worker', { method: 'POST' }).catch(() => {})
+      setStalled(false)
+      void nudge()
     } catch (error) {
       setPhase('failed')
       toast.error('無法送出任務', error instanceof Error ? error.message : undefined)
@@ -243,6 +283,7 @@ export function AiAssistant({
     if (!jobId || phase !== 'running') return
 
     let cancelled = false
+    const startedAt = Date.now()
 
     const poll = async () => {
       try {
@@ -253,6 +294,19 @@ export function AiAssistant({
         if (cancelled) return
 
         setJob(data.job)
+
+        /*
+         * Still sitting in the queue long after it was accepted.
+         *
+         * The worker runs on a nudge from here (cron is once a day), so a job
+         * that has not even started means the nudge did not land — the server
+         * was restarting, the tab lost the network, something. Saying so beats
+         * polling in silence, which is what this did before and which reads
+         * as 「這功能壞了」.
+         */
+        if (data.job.status === 'QUEUED' && Date.now() - startedAt > STALL_MS) {
+          setStalled(true)
+        }
 
         if (data.job.status === 'AWAITING_REVIEW' || data.job.status === 'SUCCEEDED') {
           setPhase('review')
@@ -470,6 +524,39 @@ export function AiAssistant({
       )}
 
       {/* ---- running ------------------------------------------------------ */}
+      {/*
+        排了隊卻沒人跑 (Z114).
+
+        The button that fixes it is the same nudge that should have happened
+        automatically — so this is not a workaround bolted on, it is the one
+        action that is actually missing when this state occurs.
+      */}
+      {stalled && phase === 'running' && (
+        <div className="flex flex-col gap-1.5 rounded-lg bg-amber-500/10 p-3 ring-1 ring-inset ring-amber-500/30">
+          <p className="text-[11px] leading-relaxed text-amber-200">
+            任務已經排進佇列，但還沒有開始跑。背景工作是靠這個頁面叫起來的
+            （排程一天只跑一次），多半是那一下沒送到。
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              setWaking(true)
+              const ok = await nudge()
+              setWaking(false)
+              if (ok) setStalled(false)
+            }}
+            disabled={waking}
+            className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-amber-500/20 px-2.5 py-1.5 text-[11px] text-amber-100 transition-colors hover:bg-amber-500/30 disabled:opacity-50"
+          >
+            {waking && <Loader2 aria-hidden className="size-3 animate-spin" />}
+            立刻執行
+          </button>
+          <p className="text-[10px] text-amber-200/70">
+            還是不動的話，去「AI 製片中心」看佇列——那裡看得到每一筆任務的狀態。
+          </p>
+        </div>
+      )}
+
       {phase === 'running' && job && (
         <div className="flex flex-col gap-2 rounded-lg bg-stage-850 p-3 ring-1 ring-inset ring-stage-700">
           <p className="flex items-center gap-1.5 text-[11px] text-ink-300">

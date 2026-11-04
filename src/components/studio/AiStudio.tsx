@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertTriangle, Ban, CheckCircle2, Loader2, RefreshCw, RotateCcw } from 'lucide-react'
+import { AlertTriangle, Ban, CheckCircle2, Loader2, Play, RefreshCw, RotateCcw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
@@ -97,6 +97,30 @@ export function AiStudio({
     return () => window.clearInterval(timer)
   }, [running, router])
 
+  /**
+   * Runs the queue now (Z114).
+   *
+   * The worker is triggered by a signed-in member, not only by cron — cron
+   * is once a day on this plan. A job stuck at 等待中 almost always means the
+   * nudge from wherever it was started never landed, and this is that nudge.
+   */
+  async function wake() {
+    setBusy('worker')
+    try {
+      const response = await apiFetch('/api/ai/worker', { method: 'POST' })
+      if (!response.ok) throw new Error(await readApiError(response))
+      const report = (await response.json()) as { claimed?: number }
+      toast.success(
+        report.claimed ? `開始執行 ${report.claimed} 筆` : '佇列裡沒有可以執行的任務'
+      )
+      router.refresh()
+    } catch (cause) {
+      toast.error('叫不動背景工作', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function act(jobId: string, what: 'cancel' | 'retry') {
     setBusy(jobId)
     try {
@@ -185,14 +209,31 @@ export function AiStudio({
               {running} 個進行中，每 4 秒更新
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => router.refresh()}
-            className="tap ml-auto inline-flex items-center gap-1 rounded-lg bg-stage-800 px-2 py-1 text-[10px] text-ink-300 hover:bg-stage-700"
-          >
-            <RefreshCw aria-hidden className="size-3" />
-            重新整理
-          </button>
+          <div className="ml-auto flex items-center gap-1.5">
+            {canRun && (counts.QUEUED ?? 0) > 0 && (
+              <button
+                type="button"
+                onClick={() => void wake()}
+                disabled={busy === 'worker'}
+                className="tap inline-flex items-center gap-1 rounded-lg bg-accent-600 px-2 py-1 text-[10px] text-white transition-colors hover:bg-accent-500 disabled:opacity-50"
+              >
+                {busy === 'worker' ? (
+                  <Loader2 aria-hidden className="size-3 animate-spin" />
+                ) : (
+                  <Play aria-hidden className="size-3" />
+                )}
+                執行佇列
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => router.refresh()}
+              className="tap inline-flex items-center gap-1 rounded-lg bg-stage-800 px-2 py-1 text-[10px] text-ink-300 hover:bg-stage-700"
+            >
+              <RefreshCw aria-hidden className="size-3" />
+              重新整理
+            </button>
+          </div>
         </div>
 
         <ul className="flex flex-wrap gap-1.5">
