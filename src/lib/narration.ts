@@ -342,6 +342,42 @@ export function assignVoices(
   return out
 }
 
+/**
+ * 從正文裡的名字生出一份角色表 (Z132).
+ *
+ * 「要有一個方法可以從文本建音檔，然後音色又分開的」—— 重點在**不必先去建
+ * 角色表**。歸屬那一趟讀的是正文，認得出角色表上沒有的人；這裡把那些名字
+ * 補成可以配音色的對象。
+ *
+ * 已經在角色表裡的人原封不動帶過來，所以性別、別名、以及人工指定的音色都還
+ * 算數。表上沒有的人拿一個從名字長出來的假 id，這樣同一個名字每次都配到同一
+ * 個音色——跨次一致比配得好聽更重要，一個角色在第三集換了聲音，聽的人會以為
+ * 是另一個人。
+ *
+ * **但那個一致性只撐到他被正式建進角色表為止**：真 id 一出現，排序就變了，
+ * 聲音可能跟著換。要固定下來就把喜歡的音色存進那個角色的 `voiceId`——
+ * `assignVoices` 會優先用它。
+ */
+export function castFromSpeakers(speakers: readonly string[], known: CastMember[]): CastMember[] {
+  const byName = new Map(known.map((member) => [member.name, member]))
+  const out: CastMember[] = []
+  const seen = new Set<string>()
+
+  for (const name of [...new Set(speakers)].sort()) {
+    const trimmed = name.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+
+    const existing = byName.get(trimmed)
+    out.push(existing ?? { id: `name:${trimmed}`, name: trimmed, gender: '', tier: 'SUPPORTING' })
+  }
+
+  // Anyone in the table who did not speak still belongs to the work; they are
+  // left out here because a voice nobody uses is a voice taken from somebody
+  // who does.
+  return out
+}
+
 /* -------------------------------------------------------------------------- */
 /* Putting it together                                                         */
 /* -------------------------------------------------------------------------- */
@@ -367,9 +403,20 @@ export function castChunks(
   chunks: { text: string; paragraph: number }[],
   paragraphs: string[],
   cast: CastMember[],
-  voices: VoiceOption[]
+  voices: VoiceOption[],
+  /**
+   * 段號 → 說話的人，從正文判斷出來的 (Z132).
+   *
+   * When present it **wins over** `speakerOf`. That rule-based matcher only
+   * recognises 「名字＋說話動詞」 and found a speaker for zero of this novel's
+   * 2,657 lines of dialogue; an attribution pass that read the prose knows
+   * better, including for people who are not in the cast table at all.
+   */
+  overrides?: ReadonlyMap<number, string>
 ): CastedChunk[] {
-  if (cast.length === 0) return chunks
+  // With an attribution map there is a cast even when the table is empty —
+  // `castFromSpeakers` builds one out of the names the prose used.
+  if (cast.length === 0 && !overrides?.size) return chunks
 
   const names = knownNames(cast)
   const slots = assignVoices(cast, voices)
@@ -382,7 +429,8 @@ export function castChunks(
     const paragraph = paragraphs[chunk.paragraph] ?? ''
 
     if (!speakers.has(chunk.paragraph)) {
-      speakers.set(chunk.paragraph, speakerOf(paragraph, names).name)
+      const given = overrides?.get(chunk.paragraph)
+      speakers.set(chunk.paragraph, given ?? speakerOf(paragraph, names).name)
     }
     const speaker = speakers.get(chunk.paragraph) ?? null
 
