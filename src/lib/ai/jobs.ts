@@ -357,15 +357,24 @@ async function applyToDocument(input: {
     const nextVersion = doc.version + 1
     const charCount = input.content.replace(/\s/g, '').length
 
+    /*
+     * The snapshot holds what was **there**, not what is about to replace it.
+     *
+     * It used to store `input.content` — the AI's output — under a label
+     * saying 「採用候選一」, so the thing the UI called a backup was a second
+     * copy of the new text. Restoring it would have handed back the AI's
+     * version again, and the original would have been nowhere. The whole
+     * promise of 「原本的內容仍在版本紀錄裡」 rested on this one line.
+     */
     const [snapshot] = await tx
       .insert(versions)
       .values({
         targetType: 'DOCUMENT',
         targetId: doc.id,
         version: nextVersion,
-        snapshot: { content: input.content, kind: doc.kind },
-        charCount,
-        label: input.label,
+        snapshot: { content: doc.content, kind: doc.kind },
+        charCount: doc.charCount,
+        label: `${input.label}（這一版是採用前的內容）`,
         aiJobId: input.jobId,
         authorId: input.user.id,
         authorName: input.user.name,

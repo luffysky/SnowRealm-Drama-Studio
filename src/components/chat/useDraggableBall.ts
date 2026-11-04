@@ -61,15 +61,33 @@ function write(position: BallPosition): void {
   }
 }
 
-/** Keeps a position inside the window. Pure, so the initialiser can use it. */
-function clampTo(p: BallPosition, size: number): BallPosition {
+/**
+ * Keeps a position inside the part of the window you can actually see.
+ *
+ * `window.innerHeight` is the wrong floor on a phone: the keyboard covers the
+ * page without resizing it, and the safe-area inset is behind the home
+ * indicator where a tap is a system gesture rather than a press. Clamping to
+ * either one parks the ball somewhere real and untouchable.
+ */
+function clampTo(p: BallPosition, size: number, obscured = 0): BallPosition {
+  const safeBottom = readInset('--safe-bottom')
+  const safeTop = readInset('--safe-top')
+  const floor = window.innerHeight - obscured - safeBottom
+
   return {
     x: Math.min(Math.max(p.x, EDGE_MARGIN), window.innerWidth - size - EDGE_MARGIN),
-    y: Math.min(Math.max(p.y, EDGE_MARGIN), window.innerHeight - size - EDGE_MARGIN),
+    y: Math.min(Math.max(p.y, EDGE_MARGIN + safeTop), floor - size - EDGE_MARGIN),
   }
 }
 
-export function useDraggableBall(size = 56) {
+/** The CSS env() value as a number; 0 where the device has no inset. */
+function readInset(variable: string): number {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(variable)
+  const parsed = Number.parseFloat(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+export function useDraggableBall(size = 56, obscured = 0) {
   const ref = useRef<HTMLDivElement | null>(null)
 
   /*
@@ -84,7 +102,7 @@ export function useDraggableBall(size = 56) {
     if (typeof window === 'undefined') return null
     const saved = read()
     // Clamped here too: the window may be a different size than last time.
-    return saved ? clampTo(saved, size) : null
+    return saved ? clampTo(saved, size, 0) : null
   })
   const [dragging, setDragging] = useState(false)
 
@@ -92,7 +110,10 @@ export function useDraggableBall(size = 56) {
   const movedRef = useRef(false)
   const originRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
 
-  const clamp = useCallback((p: BallPosition) => clampTo(p, size), [size])
+  const clamp = useCallback(
+    (p: BallPosition) => clampTo(p, size, obscured),
+    [size, obscured]
+  )
 
   // A rotated phone or a resized window must not strand it off-screen.
   useEffect(() => {
@@ -174,9 +195,21 @@ export function useDraggableBall(size = 56) {
   /** True for the moment after a drag, so the click can be ignored. */
   const justDragged = useCallback(() => movedRef.current, [])
 
+  /*
+   * Where it is drawn, as opposed to where it was put.
+   *
+   * Clamped at render rather than written back into state: the chosen
+   * position is the person's, and the keyboard is a temporary guest. Storing
+   * the corrected value would mean the ball never returns to where they left
+   * it once the keyboard closes — and it would be a `setState` reacting to an
+   * effect, which is the other thing wrong with doing it that way.
+   */
+  const rendered =
+    position && typeof window !== 'undefined' ? clampTo(position, size, obscured) : position
+
   return {
     ref,
-    position,
+    position: rendered,
     dragging,
     justDragged,
     handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp },

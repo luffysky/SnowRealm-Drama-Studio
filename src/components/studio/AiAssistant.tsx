@@ -342,7 +342,25 @@ export function AiAssistant({
       })
       if (!response.ok) throw new Error(await readApiError(response))
 
-      toast.success('已採用', '內容已寫入新版本，可在版本紀錄回溯')
+      /*
+       * 只有真的寫進去才說寫進去了 (P0-3).
+       *
+       * The apply route only writes when the job carries a target, and
+       * nothing in this panel sets one — so every apply so far marked the
+       * job 已採用 and changed no text at all, while the toast said the
+       * content had been written and could be rolled back. A message that
+       * confidently describes work that did not happen is worse than an
+       * error, because nobody goes looking.
+       */
+      const applied = (await response.json().catch(() => null)) as {
+        versionId?: string | null
+      } | null
+
+      if (applied?.versionId) {
+        toast.success('已採用', '原本的內容已存成版本，可在版本紀錄回溯')
+      } else {
+        toast.warning('已標記為採用', '這份產出還沒有自動寫回正文——請自行複製需要的段落。')
+      }
       setPhase('idle')
       setJob(null)
       setEstimate(null)
@@ -660,7 +678,12 @@ export function AiAssistant({
           </div>
 
           <p className="text-[10px] text-ink-700">
-            採用會寫成一個新版本，並記下是哪個 AI 任務產生的；原本的內容仍在版本紀錄裡。
+            {/*
+              The old text promised a rollback that did not exist. Until the
+              chapter-level write is wired (Z122), say what actually happens.
+            */}
+            這份產出目前不會自動覆蓋正文——請自行複製要用的段落。
+            之後接上自動寫回時，會先把原本的內容存成版本再寫。
           </p>
         </div>
       )}

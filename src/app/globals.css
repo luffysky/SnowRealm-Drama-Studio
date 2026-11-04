@@ -77,6 +77,18 @@
 @layer base {
   :root {
     color-scheme: dark;
+
+    /*
+     * 安全區域 (P0-2).
+     *
+     * Exposed as plain variables so JavaScript can read them — `env()` is not
+     * visible to `getComputedStyle` on its own, and the floating widgets need
+     * the number to keep themselves off the home indicator and the notch.
+     */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
   }
 
   html {

@@ -15,6 +15,7 @@ import { notify, requestNotifications, useNotificationPermission } from '@/lib/n
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { useDraggableBall } from '@/components/chat/useDraggableBall'
 import { cn } from '@/lib/utils'
+import { useViewportFit } from '@/components/chat/useViewportFit'
 
 /**
  * 懸浮對話球.
@@ -45,9 +46,10 @@ const STORAGE_KEY = 'srds.floatingChat.v1'
  * root element (`useBottomDock`), and the widget rides above it. Pages that do
  * not set it are unaffected: the fallback is 0.
  */
-const clearance = (gap: string) => ({ bottom: `calc(var(--dock-height, 0px) + ${gap})` })
-const DOCK_CLEARANCE = clearance('0.5rem')
-const DOCK_CLEARANCE_BALL = clearance('1rem')
+const clearance = (gap: string, obscured = 0) => ({
+  bottom: `calc(var(--dock-height, 0px) + var(--safe-bottom, 0px) + ${obscured}px + ${gap})`,
+})
+
 
 export function FloatingChat({
   conversationId,
@@ -60,6 +62,9 @@ export function FloatingChat({
   iceServers: RTCIceServer[]
 }) {
   const pathname = usePathname()
+  /** 鍵盤、瀏海、有沒有人在打字 (P0-2)。 */
+  const viewport = useViewportFit()
+
   /** 拖得動，而且記得放在哪 (Z120)。 */
   const {
     ref: ballRef,
@@ -67,7 +72,7 @@ export function FloatingChat({
     dragging: ballDragging,
     justDragged,
     handlers: ballHandlers,
-  } = useDraggableBall()
+  } = useDraggableBall(56, viewport.obscured)
   const [state, setState] = useState<'hidden' | 'ball' | 'open'>('ball')
   const restored = useRef(false)
   const [draft, setDraft] = useState('')
@@ -255,7 +260,7 @@ export function FloatingChat({
           onClick={() => persist('ball')}
           aria-label="顯示對話"
           title="顯示對話"
-          style={DOCK_CLEARANCE}
+          style={clearance('0.5rem', viewport.obscured)}
           className="tap fixed right-2 bottom-2 z-30 grid size-7 place-items-center rounded-full bg-stage-800/70 text-ink-600 ring-1 ring-stage-700 transition-colors hover:text-ink-200"
         >
           <MessageSquare aria-hidden className="size-3.5" />
@@ -279,13 +284,21 @@ export function FloatingChat({
         style={
           ballPosition
             ? { left: ballPosition.x, top: ballPosition.y, right: 'auto', bottom: 'auto' }
-            : DOCK_CLEARANCE_BALL
+            : clearance('1rem', viewport.obscured)
         }
         className={cn(
           'fixed right-4 bottom-4 z-40 flex touch-none items-center gap-1.5',
           ballDragging ? 'cursor-grabbing' : 'cursor-grab',
           // No transition while dragging, or it lags behind the finger.
-          !ballDragging && 'transition-[left,top] duration-200'
+          !ballDragging && 'transition-[left,top,opacity,transform] duration-200',
+          /*
+           * 有人在打字就讓開 (P0-2).
+           *
+           * Shrunk and faded rather than hidden: it still rings, and
+           * something that vanishes while you type reads as having crashed.
+           * Hover or focus brings it straight back.
+           */
+          viewport.typing && 'scale-75 opacity-40 hover:scale-100 hover:opacity-100'
         )}
       >
         {/* Collapsed, but still able to ring. */}
@@ -332,7 +345,7 @@ export function FloatingChat({
 
   return (
     <div
-      style={DOCK_CLEARANCE}
+      style={clearance('0.5rem', viewport.obscured)}
       className="panel fixed right-2 bottom-2 z-40 flex max-h-[min(32rem,calc(100dvh-5rem))] w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl bg-stage-850 ring-1 shadow-2xl ring-stage-700"
       role="dialog"
       aria-label="對話"
