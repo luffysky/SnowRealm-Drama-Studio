@@ -227,6 +227,8 @@ export const aiJobKindEnum = pgEnum('ai_job_kind', [
   'STORYBOARD_GENERATE',
   'ASSET_GENERATE',
   'TASK_SUGGEST',
+  /** 對白歸屬：這句話是誰說的（Z132）。 */
+  'DIALOGUE_ATTRIBUTE',
 ])
 
 export const aiJobStatusEnum = pgEnum('ai_job_status', [

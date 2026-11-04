@@ -23,6 +23,8 @@ export type AiTaskKind =
   | 'STORYBOARD_GENERATE'
   | 'ASSET_GENERATE'
   | 'TASK_SUGGEST'
+  /** 這句話是誰說的，給分角色朗讀與有聲書用（Z132）。 */
+  | 'DIALOGUE_ATTRIBUTE'
 
 /** Background the adapter puts in front of the task instruction. */
 export type AiContext = {

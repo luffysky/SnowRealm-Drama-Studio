@@ -390,6 +390,7 @@ export const AI_JOB_KINDS = [
   'STORYBOARD_GENERATE',
   'ASSET_GENERATE',
   'TASK_SUGGEST',
+  'DIALOGUE_ATTRIBUTE',
 ] as const
 export type AiJobKindValue = (typeof AI_JOB_KINDS)[number]
 
@@ -409,6 +410,7 @@ export const AI_JOB_KIND_LABEL: Record<AiJobKindValue, string> = {
   STORYBOARD_GENERATE: '分鏡生成',
   ASSET_GENERATE: '素材生成',
   TASK_SUGGEST: '任務建議',
+  DIALOGUE_ATTRIBUTE: '對白歸屬',
 }
 
 export const AI_JOB_STATUSES = [

@@ -4,7 +4,9 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -12,6 +14,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { users } from './auth'
 import { episodes, projects } from './catalog'
+import { characters } from './characters'
 import { approvalStateEnum, documentKindEnum, reviewStateEnum, versionTargetEnum } from './enums'
 
 /** One novel and one script per episode. */
@@ -255,3 +258,41 @@ export const approvalRecordsRelations = relations(approvalRecords, ({ one }) => 
   version: one(versions, { fields: [approvalRecords.versionId], references: [versions.id] }),
   decidedBy: one(users, { fields: [approvalRecords.decidedById], references: [users.id] }),
 }))
+
+/**
+ * 每一段對白是誰說的 (Z132).
+ *
+ * 為什麼要存而不是每次重算：它是花錢問模型問出來的，而且人會想改其中幾句。
+ * 跟 `episode_characters` 同一個形狀——推導出來的可以重算覆蓋，人改過的不動。
+ *
+ * 鍵是（集數, 段號）。段號是 `novelForReading()` 展平之後的索引，所以它跟
+ * 閱讀器、朗讀與有聲書看到的是同一套編號。正文改了段落數會變，那時這張表就
+ * 過期了——`source` 記得住是誰下的判斷，重跑時才知道哪幾列能蓋。
+ */
+export const episodeLineSpeakers = pgTable(
+  'episode_line_speakers',
+  {
+    episodeId: uuid('episode_id')
+      .notNull()
+      .references(() => episodes.id, { onDelete: 'cascade' }),
+    paragraphIndex: integer('paragraph_index').notNull(),
+    /**
+     * Null means 「確定沒有人在說話」—— narration, read in the narrator's
+     * voice. That is not the same as 「還沒判斷過」, which is the absence of
+     * a row, and the difference decides whether a re-run should look at it.
+     */
+    characterId: uuid('character_id').references(() => characters.id, { onDelete: 'cascade' }),
+    /** What the prose called them, for speakers not yet in the cast table. */
+    spokenAs: text('spoken_as').notNull().default(''),
+    /** `rule` | `model` | `manual`. A manual row is never overwritten. */
+    source: text('source').notNull().default('model'),
+    confidence: numeric('confidence', { precision: 4, scale: 3 }),
+    aiJobId: uuid('ai_job_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.episodeId, t.paragraphIndex] }),
+    index('episode_line_speakers_character_idx').on(t.characterId),
+  ]
+)

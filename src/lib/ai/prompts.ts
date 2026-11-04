@@ -63,6 +63,15 @@ const TASK_INSTRUCTIONS: Record<AiTaskKind, string> = {
   STORYBOARD_GENERATE:
     '依劇本產生分鏡鏡頭表。每個鏡頭需包含：場次、秒數、景別、運鏡、畫面描述、台詞、生圖提示詞。所有鏡頭秒數加總必須落在目標片長範圍內。',
   ASSET_GENERATE: '依需求撰寫素材生成提示詞，包含正向提示詞與負向提示詞。',
+  DIALOGUE_ATTRIBUTE:
+    '判斷每一句對白是誰說的。輸入是編號過的正文，以及要判斷的段號清單。'+
+    '只回 JSON 陣列，每筆 {index, speaker, confidence, reason}：'+
+    'index 必須是清單裡給的段號；speaker 必須是角色名單裡的名字，'+
+    '若說話的人不在名單上就照正文寫出他的稱呼，若判斷不出來就填 null；'+
+    'confidence 是 0 到 1；reason 用十個字以內說明依據。'+
+    '判斷依據：說話標記、一來一往的輪替、稱謂與語氣、前後文提到在場的人。'+
+    '不確定就填 null 並把 confidence 壓低——寧可不答，不要答錯。'+
+    '不要輸出 JSON 以外的任何文字，不要改寫正文。',
   TASK_SUGGEST:
     '依目前製作進度，建議接下來的任務安排。逐條輸出建議，每條標明理由與影響的集數。不要擅自變更既有期限與負責人。',
 }
@@ -147,12 +156,20 @@ export const TASK_EFFORT: Record<AiTaskKind, 'low' | 'medium' | 'high'> = {
   WORLD_GENERATE: 'medium',
   CHARACTER_DESIGN: 'medium',
   TASK_SUGGEST: 'medium',
+  /*
+   * 對白歸屬 is analysis, but of a mechanical kind: who is speaking is in
+   * the text, not a judgement to deliberate over. `medium` because a
+   * whole episode is ~300 decisions in one answer and the long tail of
+   * unmarked lines does need some thought.
+   */
+  DIALOGUE_ATTRIBUTE: 'medium',
   // Local edits and prompt writing: deliberation changes almost nothing.
   NOVEL_POLISH: 'low',
   ASSET_GENERATE: 'low',
 }
 
 export const STRUCTURED_TASKS: ReadonlySet<AiTaskKind> = new Set<AiTaskKind>([
+  'DIALOGUE_ATTRIBUTE',
   'STORYBOARD_GENERATE',
   'WORLD_CONSISTENCY',
   'TASK_SUGGEST',

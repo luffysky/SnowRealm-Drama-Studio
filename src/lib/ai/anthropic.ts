@@ -77,6 +77,7 @@ const SUPPORTED_TASKS: readonly AiTaskKind[] = [
   'STORYBOARD_GENERATE',
   'ASSET_GENERATE',
   'TASK_SUGGEST',
+  'DIALOGUE_ATTRIBUTE',
 ]
 
 export type AnthropicAdapterConfig = {
