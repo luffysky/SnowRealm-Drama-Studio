@@ -71,6 +71,15 @@ export async function listAssets(
     // Only finished uploads: a PENDING row has no bytes behind it, and showing
     // one would put an unplayable, undownloadable tile in the grid.
     eq(assets.uploadStatus, 'COMPLETED'),
+    /*
+     * 素材庫的，不含對話的附件 (Z116).
+     *
+     * A chat voice message is a `kind = 'VOICE'` asset like any other, so
+     * without this it sat in 配音 next to the material actually meant for
+     * dubbing. 「語音訊息-1793747242682.webm」 is not a take of anybody's
+     * lines.
+     */
+    eq(assets.origin, 'LIBRARY'),
   ]
 
   const notDeleted = isNull(assets.deletedAt)

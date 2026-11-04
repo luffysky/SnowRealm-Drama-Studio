@@ -145,6 +145,8 @@ export async function beginUpload(input: {
   projectId: string
   episodeId?: string | null
   kind: AssetKindValue
+  /** 對話的附件不屬於素材庫 (Z116)。預設 LIBRARY。 */
+  origin?: 'LIBRARY' | 'CHAT'
   filename: string
   contentType: string
   sizeBytes: number
@@ -189,6 +191,7 @@ export async function beginUpload(input: {
         projectId: input.projectId,
         episodeId: input.episodeId ?? null,
         kind: input.kind,
+        origin: input.origin ?? 'LIBRARY',
         name: input.filename,
         objectKey,
         /*

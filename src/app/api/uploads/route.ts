@@ -20,6 +20,7 @@ export const POST = handle(async (request: Request) => {
     projectId: input.projectId,
     episodeId: input.episodeId ?? null,
     kind: input.kind,
+    origin: input.origin,
     filename: input.filename,
     contentType: input.contentType ?? '',
     sizeBytes: input.sizeBytes,

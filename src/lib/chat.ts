@@ -421,7 +421,12 @@ export async function sendMessage(input: SendInput): Promise<ChatMessage> {
  */
 export async function recallMessage(messageId: string, userId: string): Promise<ChatMessage> {
   const [existing] = await db
-    .select({ id: messages.id, senderId: messages.senderId, recalledAt: messages.recalledAt })
+    .select({
+      id: messages.id,
+      senderId: messages.senderId,
+      recalledAt: messages.recalledAt,
+      assetId: messages.assetId,
+    })
     .from(messages)
     .where(eq(messages.id, messageId))
     .limit(1)
@@ -430,10 +435,38 @@ export async function recallMessage(messageId: string, userId: string): Promise<
   if (existing.senderId !== userId) throw ApiError.forbidden('只能收回自己送出的訊息')
   if (existing.recalledAt) return (await byId(messageId))!
 
-  await db
-    .update(messages)
-    .set({ body: '', assetId: null, durationSec: null, recalledAt: new Date(), updatedAt: new Date() })
-    .where(eq(messages.id, messageId))
+  await db.transaction(async (tx) => {
+    await tx
+      .update(messages)
+      .set({
+        body: '',
+        assetId: null,
+        durationSec: null,
+        recalledAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(messages.id, messageId))
+
+    /*
+     * The attachment goes with the message (Z116).
+     *
+     * Clearing `asset_id` used to leave the row behind with nothing pointing
+     * at it — a recalled voice note still sat in storage, still counted
+     * toward the bill, and until this release still showed up in 素材資產
+     * 中心. 「收回」 has to mean the recording is gone too, or it does not
+     * mean what it says.
+     *
+     * Soft-deleted, like every other asset: the bytes are swept later by
+     * `purge-stale-uploads`, and a delete that cannot be undone for a
+     * mis-tapped button is worse than one that waits.
+     */
+    if (existing.assetId) {
+      await tx
+        .update(assets)
+        .set({ deletedAt: new Date() })
+        .where(and(eq(assets.id, existing.assetId), eq(assets.origin, 'CHAT')))
+    }
+  })
 
   const message = await byId(messageId)
   if (!message) throw new ApiError(500, '收回後讀不回來', 'message_read_failed')

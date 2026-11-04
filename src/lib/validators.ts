@@ -342,6 +342,13 @@ export const uploadRequestSchema = z.object({
   projectId: uuid,
   episodeId: uuid.nullable().optional(),
   kind: z.enum(ASSET_KINDS),
+  /**
+   * 對話的附件 vs 素材庫的素材 (Z116)。
+   *
+   * 預設 LIBRARY，所以忘了帶的上傳會進素材庫——那是比較安全的方向：
+   * 一筆該在庫裡卻沒進去的素材，比一筆不該在庫裡卻混進去的更容易發現。
+   */
+  origin: z.enum(['LIBRARY', 'CHAT']).optional().default('LIBRARY'),
   filename: z.string().trim().min(1, '缺少檔名').max(255),
   contentType: z.string().trim().max(160).optional().default(''),
   sizeBytes: z.coerce

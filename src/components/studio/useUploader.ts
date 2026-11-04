@@ -29,6 +29,8 @@ export type UploadItem = {
   id: string
   file: File
   kind: AssetKindValue
+  /** 素材庫，還是對話的附件 (Z116)。 */
+  origin: 'LIBRARY' | 'CHAT'
   status: UploadItemStatus
   /** 0..1 */
   progress: number
@@ -85,6 +87,7 @@ export function useUploader(options: UseUploaderOptions) {
             projectId: options.projectId,
             episodeId: options.episodeId ?? null,
             kind: item.kind,
+            origin: item.origin,
             filename: item.file.name,
             contentType: item.file.type,
             sizeBytes: item.file.size,
@@ -168,11 +171,12 @@ export function useUploader(options: UseUploaderOptions) {
   )
 
   const enqueue = useCallback(
-    (files: File[], kind: AssetKindValue) => {
+    (files: File[], kind: AssetKindValue, origin: 'LIBRARY' | 'CHAT' = 'LIBRARY') => {
       const newItems: UploadItem[] = files.map((file) => ({
         id: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         file,
         kind,
+        origin,
         status: 'queued',
         progress: 0,
         attempt: 1,

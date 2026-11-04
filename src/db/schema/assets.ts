@@ -13,7 +13,12 @@ import {
 } from 'drizzle-orm/pg-core'
 import { users } from './auth'
 import { episodes, projects } from './catalog'
-import { assetKindEnum, assetVariantKindEnum, uploadStatusEnum } from './enums'
+import {
+  assetKindEnum,
+  assetOriginEnum,
+  assetVariantKindEnum,
+  uploadStatusEnum,
+} from './enums'
 
 /**
  * Metadata only. The bytes live in the private Cloudflare R2 bucket under
@@ -30,6 +35,8 @@ export const assets = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     episodeId: uuid('episode_id').references(() => episodes.id, { onDelete: 'set null' }),
     kind: assetKindEnum('kind').notNull(),
+    /** 素材庫的，還是對話的附件 (Z116)。素材中心只列 LIBRARY。 */
+    origin: assetOriginEnum('origin').notNull().default('LIBRARY'),
     /** Display name; the original filename as uploaded. Never edited. */
     name: text('name').notNull(),
     /**

@@ -119,6 +119,19 @@ export const assetKindEnum = pgEnum('asset_kind', [
   'OTHER',
 ])
 
+/**
+ * 這筆資產是從哪裡來的 (Z116).
+ *
+ * A chat voice message is uploaded through the same pipeline as everything
+ * else, so it became a `kind = 'VOICE'` asset and turned up in 素材資產中心
+ * › 配音 beside the material actually meant for dubbing.
+ *
+ * Separate from `kind` because kind is still true — it *is* a voice
+ * recording, and the chat bubble renders it by kind. What differs is where
+ * it belongs.
+ */
+export const assetOriginEnum = pgEnum('asset_origin', ['LIBRARY', 'CHAT'])
+
 /** Lifecycle of one upload into R2. Only COMPLETED rows are user-visible assets. */
 export const uploadStatusEnum = pgEnum('upload_status', [
   'PENDING',

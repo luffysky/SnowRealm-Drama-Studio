@@ -184,7 +184,7 @@ export function ChatRoom({
 
         const extension = (recorder.mimeType || 'audio/webm').includes('mp4') ? 'm4a' : 'webm'
         const file = new File([blob], `語音訊息-${Date.now()}.${extension}`, { type: blob.type })
-        uploader.enqueue([file], 'VOICE')
+        uploader.enqueue([file], 'VOICE', 'CHAT')
       }
 
       recorder.start()
@@ -578,7 +578,7 @@ export function ChatRoom({
                 if (files.length > 0 && uploadProjectId) {
                   for (const file of files) {
                     const mime = resolveMimeType(file.name, file.type)
-                    uploader.enqueue([file], uploadKind(mime))
+                    uploader.enqueue([file], uploadKind(mime), 'CHAT')
                   }
                 }
                 event.target.value = ''
