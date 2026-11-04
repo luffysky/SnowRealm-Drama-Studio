@@ -2,6 +2,7 @@
 
 import { AlertTriangle } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { useUiScript } from '@/components/ScriptProvider'
 import { Button } from './Button'
 import { Dialog } from './Dialog'
 import { Field, Input } from './Field'
@@ -57,7 +58,17 @@ function ConfirmDialogContent({
   const [typed, setTyped] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const nameMatches = !confirmName || typed === confirmName
+  /*
+   * 繁體簡體都收 (Z139).
+   *
+   * 畫面上顯示的名字是繁簡轉換後的（預設簡體），而 `confirmName` 是資料庫裡
+   * 的原值（繁體）。直接比對的話，**照著畫面打反而不給過**——是那個轉換功能
+   * 自己製造出來的坑，而且使用者只會覺得刪除鍵壞了。
+   *
+   * 兩邊都折成同一種字形再比：打哪一種都算數。
+   */
+  const { fold } = useUiScript()
+  const nameMatches = !confirmName || fold(typed.trim()) === fold(confirmName.trim())
   const isBusy = busy || submitting
 
   async function handleConfirm() {

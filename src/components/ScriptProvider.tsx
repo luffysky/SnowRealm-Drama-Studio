@@ -47,7 +47,31 @@ const DEFAULT: UiScript = 'simplified'
 type ScriptApi = {
   script: UiScript
   setScript: (next: UiScript) => void
+  /**
+   * 把文字折成同一種字形，給「比對使用者打的字」用 (Z139).
+   *
+   * 畫面顯示的是轉換後的簡體，而資料庫裡存的是繁體原值。要使用者打名字確認
+   * 的地方（刪除素材）如果直接比對原值，**照著畫面打反而不給過**——是這個
+   * 轉換功能自己製造出來的坑。
+   *
+   * 兩邊都折成簡體就都收：打繁體會被折成簡體而相符，打簡體則因為轉換是等冪
+   * 的、折完還是自己。繁體模式下畫面沒有被轉換過，所以這裡原樣返回，嚴格
+   * 比對本來就是對的。
+   */
+  fold: (text: string) => string
 }
+
+/**
+ * 折成簡體，給比對用。
+ *
+ * 轉換器是動態載入的，所以這裡留一份載好之後的參照。還沒載好就原樣返回
+ * ——那一刻誠實的答案就是「還不知道」，而使用者打字進對話框時它早已載好。
+ */
+let folder: ((text: string) => string) | null = null
+
+void import('@/lib/chinese').then((module) => {
+  folder = module.toSimplified
+})
 
 /* -------------------------------------------------------------------------- */
 /* The stored preference, as an external store                                 */
@@ -90,7 +114,11 @@ function subscribeToScript(listener: () => void): () => void {
   return () => listeners.delete(listener)
 }
 
-const ScriptContext = createContext<ScriptApi>({ script: DEFAULT, setScript: () => {} })
+const ScriptContext = createContext<ScriptApi>({
+  script: DEFAULT,
+  setScript: () => {},
+  fold: (text) => text,
+})
 
 export function useUiScript(): ScriptApi {
   return useContext(ScriptContext)
@@ -133,5 +161,17 @@ export function ScriptProvider({ children }: { children: ReactNode }) {
    */
   useScriptConversion(wholeDocument, script === 'simplified')
 
-  return <ScriptContext.Provider value={{ script, setScript }}>{children}</ScriptContext.Provider>
+  /*
+   * 同一份轉換器，拿來做比對 (Z139).
+   *
+   * 繁體模式下畫面沒有被轉換過，所以原樣返回——那時候嚴格比對本來就是對的。
+   */
+  const fold = useCallback(
+    (text: string) => (script === 'simplified' && folder ? folder(text) : text),
+    [script]
+  )
+
+  return (
+    <ScriptContext.Provider value={{ script, setScript, fold }}>{children}</ScriptContext.Provider>
+  )
 }
