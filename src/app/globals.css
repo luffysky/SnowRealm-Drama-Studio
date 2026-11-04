@@ -84,6 +84,25 @@
     scrollbar-gutter: stable;
   }
 
+  /*
+   * While the full-screen reader is open.
+   *
+   * The gutter above reserves 10px on the right whether or not a scrollbar is
+   * there. A `fixed inset-0` element is laid out against the viewport *minus*
+   * that gutter — so the reader covered 1430 of 1440px and the last 10px
+   * showed the studio's near-black through, down the right edge of a cream
+   * page. It read as an empty scrollbar track, which is the thing being
+   * removed.
+   *
+   * Giving the gutter up costs nothing here: `overflow: hidden` means there
+   * is no scrollbar to reserve for, and the reader is covering whatever would
+   * have reflowed.
+   */
+  html.is-reading {
+    scrollbar-gutter: auto;
+    overflow: hidden;
+  }
+
   body {
     background-color: var(--color-stage-950);
     color: var(--color-ink-200);
@@ -120,6 +139,34 @@
 
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-stage-600);
+  }
+
+  /*
+   * 閱讀器裡沒有捲軸。
+   *
+   * The bar above is dressed for the studio chrome — a stage-900 track and a
+   * stage-700 thumb — and the reader's page can be parchment, cream or pure
+   * white. A dark grey bar ran down the edge of the prose, 10px of it, and
+   * because it took layout width the text column was 10px narrower on the
+   * right than on the left: the measure was visibly off-centre.
+   *
+   * Hidden rather than recoloured. A scrollbar cannot be themed per surface
+   * in a way that works across browsers, and a book does not have one. What
+   * replaces it is `ReadingRail` — a hairline in the page's own ink that
+   * appears while you move and fades when you stop, and can still be dragged.
+   *
+   * Scoped to the subtree so the 目錄 and 閱讀設定 drawers get it too.
+   */
+  .reader-surface,
+  .reader-surface * {
+    scrollbar-width: none;
+  }
+
+  .reader-surface::-webkit-scrollbar,
+  .reader-surface *::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
   }
 
   @media (prefers-reduced-motion: reduce) {

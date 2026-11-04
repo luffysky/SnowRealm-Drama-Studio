@@ -45,6 +45,7 @@ import {
   saveReaderSettings,
   type ReaderSettings,
 } from '@/lib/novel-reader-view'
+import { ReadingRail } from '@/components/studio/ReadingRail'
 import {
   loadVoices,
   speak,
@@ -248,6 +249,18 @@ export function NovelReader({
     setSpokenAt(-1)
   }, [])
 
+  /*
+   * Hands the scrollbar gutter back while the reader is open.
+   *
+   * `fixed inset-0` is laid out against the viewport minus `html`'s reserved
+   * gutter, so without this the reader stops 10px short of the right edge and
+   * the studio's near-black shows through beside the page.
+   */
+  useEffect(() => {
+    document.documentElement.classList.add('is-reading')
+    return () => document.documentElement.classList.remove('is-reading')
+  }, [])
+
   // Leaving the page must silence it. Speech is a global queue that outlives
   // the component, so an unmounted reader would keep talking.
   useEffect(() => () => stopReading(), [stopReading])
@@ -312,6 +325,8 @@ export function NovelReader({
   /* ------------------------------------------------------------- gestures */
 
   const touch = useRef<{ x: number; y: number } | null>(null)
+  /** The scrolling prose column, for the reading rail. */
+  const pageRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -408,9 +423,15 @@ export function NovelReader({
        * Above the rail (z-50) and the floating chat, or they sit on top of
        * the page and the 退出 button is behind the sidebar.
        */
-      className="fixed inset-0 z-[60] flex flex-col transition-colors"
+      className="reader-surface fixed inset-0 z-[60] flex flex-col transition-colors"
       style={{ background: theme.bg }}
     >
+      {/*
+        Replaces the browser's scrollbar, which `.reader-surface` hides. See
+        `ReadingRail` for why it is not simply hidden and left at that.
+      */}
+      <ReadingRail containerRef={pageRef} color={theme.faint} enabled={!paged} />
+
       {/*
         Dimming is an overlay rather than a CSS `filter` on the content: a
         filter creates a containing block, which breaks `position: fixed` for
@@ -519,6 +540,7 @@ export function NovelReader({
 
       {/* ---- the page --------------------------------------------------- */}
       <div
+        ref={pageRef}
         className="relative mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-5 py-8 sm:px-8"
         onTouchStart={(event) => {
           const point = event.touches[0]
