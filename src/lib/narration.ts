@@ -224,6 +224,17 @@ export type VoiceSlot = {
   voiceId: string | null
   pitch: number
   rate: number
+  /**
+   * 這個音色只有他在用 (Z137).
+   *
+   * 決定要不要套用上面那組音高偏移。那組偏移的用途是**讓共用同一個音色的
+   * 角色分得開**——瀏覽器可能只有一個中文語音，所以只能靠音高。Azure 給得起
+   * 專屬音色時，那個偏移就不但多餘，還會跟語氣疊起來失真。
+   *
+   * 實測：沈知味的基數是 1.18，乘上疑問 1.15 得 1.357、乘上輕聲 0.92 得
+   * 1.086——同一集裡 25% 的音高擺幅，聽起來就是前後不像同一個人。
+   */
+  distinct: boolean
 }
 
 export type CastMember = {
@@ -360,10 +371,18 @@ export function assignVoices(
 
     const ownPool = steps === HIGH ? femalePool : steps === LOW ? malePool : pool
     const voiceId = override ?? pick(ownPool, index)
+
+    /*
+     * Distinct when nobody — including the narrator — already holds it. The
+     * check has to happen before it is marked taken, or everybody would look
+     * like they were sharing with themselves.
+     */
+    const distinct = voiceId !== null && !taken.has(voiceId)
     if (voiceId) taken.add(voiceId)
 
     out[member.id] = {
       voiceId,
+      distinct,
       pitch: steps[index % steps.length] ?? 1,
       // A touch of variation so two characters sharing a pitch still differ.
       rate: 1 + ((index % 3) - 1) * 0.04,
@@ -503,12 +522,21 @@ export function castChunks(
      */
     const lift = spoken && !slot ? DIALOGUE_SHAPE : { rate: 1, pitch: 1 }
 
+    /*
+     * 有專屬音色就不要再調音高 (Z137).
+     *
+     * 那組偏移是為了讓共用音色的角色分得開；聲音本身已經不同時，它只會跟
+     * 語氣疊起來，把同一個人的前後句拉開 25%。語氣調整留著——疑問上揚、
+     * 輕聲放慢，那是演繹，不是辨識。
+     */
+    const separation = slot && !slot.distinct ? slot : { rate: 1, pitch: 1 }
+
     return {
       ...chunk,
       speaker,
       voiceId: slot?.voiceId ?? null,
-      rate: tone.rate * (slot?.rate ?? 1) * lift.rate,
-      pitch: tone.pitch * (slot?.pitch ?? 1) * lift.pitch,
+      rate: tone.rate * separation.rate * lift.rate,
+      pitch: tone.pitch * separation.pitch * lift.pitch,
     }
   })
 }

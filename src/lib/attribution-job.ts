@@ -356,3 +356,170 @@ export async function attributionStatus(episodeIds: string[]): Promise<
     ])
   )
 }
+
+/* -------------------------------------------------------------------------- */
+
+export type UnlistedSpeaker = {
+  name: string
+  /** 男 / 女 / 空白，從正文判斷出來的。 */
+  gender: string
+  /** How many lines they speak across the whole work. */
+  lines: number
+  /** Which episodes they turn up in. */
+  episodes: number[]
+}
+
+/**
+ * 在正文裡說過話、但角色表沒有的人 (Z137).
+ *
+ * 歸屬那一趟會認出這些人——錢管事、陸承安、賣雞的老伯——而他們現在處在一個
+ * 半吊子的狀態：**配得到聲音，但不在角色頁、沒有定妝照、不算進出場統計。**
+ *
+ * 之所以不自動建進角色表，是因為那是作者的資料。「周圍的百姓」不是角色，
+ * 「路人」也不是；而「陸承安」顯然是。只有人分得出來，所以這裡只負責把名單
+ * 端出來。
+ */
+export async function unlistedSpeakers(projectId: string): Promise<UnlistedSpeaker[]> {
+  const rows = await db
+    .select({
+      spokenAs: episodeLineSpeakers.spokenAs,
+      gender: episodeLineSpeakers.gender,
+      number: episodes.number,
+    })
+    .from(episodeLineSpeakers)
+    .innerJoin(episodes, eq(episodes.id, episodeLineSpeakers.episodeId))
+    .where(
+      and(
+        eq(episodes.projectId, projectId),
+        isNull(episodes.deletedAt),
+        // Null means the cast table has no row for them — the whole point.
+        isNull(episodeLineSpeakers.characterId)
+      )
+    )
+
+  const byName = new Map<string, { gender: Map<string, number>; lines: number; episodes: Set<number> }>()
+
+  for (const row of rows) {
+    if (!row.spokenAs) continue
+    const entry = byName.get(row.spokenAs) ?? {
+      gender: new Map<string, number>(),
+      lines: 0,
+      episodes: new Set<number>(),
+    }
+    entry.lines += 1
+    entry.episodes.add(row.number)
+    if (row.gender) entry.gender.set(row.gender, (entry.gender.get(row.gender) ?? 0) + 1)
+    byName.set(row.spokenAs, entry)
+  }
+
+  return [...byName.entries()]
+    .map(([name, entry]) => {
+      const ranked = [...entry.gender.entries()].sort((a, b) => b[1] - a[1])
+      return {
+        name,
+        gender: ranked[0]?.[0] ?? '',
+        lines: entry.lines,
+        episodes: [...entry.episodes].sort((a, b) => a - b),
+      }
+    })
+    // Most spoken first: the people worth adding are the ones who talk.
+    .sort((a, b) => b.lines - a.lines)
+}
+
+/**
+ * 把這些名字建成角色，並把已經歸屬的句子接上去.
+ *
+ * 建完要**回頭接線**：那些句子現在的 `character_id` 是 null，不接上去的話
+ * 角色頁還是會說他出現於 0 集——正是 P0-1 修過的那個毛病，只是從另一個方向
+ * 走回來。
+ */
+export async function promoteSpeakers(input: {
+  projectId: string
+  names: string[]
+  user: SessionUser
+}): Promise<{ created: string[]; linked: number; skipped: string[] }> {
+  if (input.names.length === 0) return { created: [], linked: 0, skipped: [] }
+
+  const existing = await db
+    .select({ name: characters.name })
+    .from(characters)
+    .where(and(eq(characters.projectId, input.projectId), isNull(characters.deletedAt)))
+
+  const known = new Set(existing.map((row) => row.name))
+  const unlisted = await unlistedSpeakers(input.projectId)
+  const byName = new Map(unlisted.map((row) => [row.name, row]))
+
+  const created: string[] = []
+  const skipped: string[] = []
+  let linked = 0
+
+  for (const raw of input.names) {
+    const name = raw.trim()
+    if (!name) continue
+    if (known.has(name)) {
+      skipped.push(name)
+      continue
+    }
+
+    const found = byName.get(name)
+
+    const [row] = await db
+      .insert(characters)
+      .values({
+        projectId: input.projectId,
+        name,
+        gender: found?.gender ?? '',
+        /*
+         * 配角, not 主角. Somebody promoted from a line of dialogue is a
+         * supporting character until a person says otherwise — and the tier
+         * decides whether 體檢 complains about them never appearing.
+         */
+        tier: 'SUPPORTING',
+        personality: found
+          ? `從正文的對白認出來的：在 ${found.episodes.length} 集裡說了 ${found.lines} 句。`
+          : '',
+      })
+      .returning({ id: characters.id })
+
+    if (!row) continue
+    created.push(name)
+    known.add(name)
+
+    /*
+     * 回頭接線。沒有這一步，角色頁會說他出現於 0 集——P0-1 修過的毛病從另一
+     * 個方向走回來。
+     */
+    const relinked = await db
+      .update(episodeLineSpeakers)
+      .set({ characterId: row.id, updatedAt: new Date() })
+      .where(
+        and(
+          eq(episodeLineSpeakers.spokenAs, name),
+          isNull(episodeLineSpeakers.characterId),
+          inArray(
+            episodeLineSpeakers.episodeId,
+            db
+              .select({ id: episodes.id })
+              .from(episodes)
+              .where(and(eq(episodes.projectId, input.projectId), isNull(episodes.deletedAt)))
+          )
+        )
+      )
+      .returning({ episodeId: episodeLineSpeakers.episodeId })
+
+    linked += relinked.length
+  }
+
+  if (created.length > 0) {
+    await logActivity({
+      user: input.user,
+      action: 'create',
+      entityType: 'character',
+      entityId: null,
+      projectId: input.projectId,
+      summary: `${input.user.name} 從正文把 ${created.length} 個人加進角色表：${created.join('、')}`,
+    })
+  }
+
+  return { created, linked, skipped }
+}

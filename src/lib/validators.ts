@@ -962,3 +962,13 @@ export const audiobookSchema = z.object({
   narratorVoice: z.string().trim().max(120).optional(),
   locale: z.string().trim().max(20).optional(),
 })
+
+/**
+ * 把正文裡認出來的說話人建成角色 (Z137).
+ *
+ * Names rather than ids, because these people have no row yet — the name as
+ * the prose wrote it is the only handle they have.
+ */
+export const promoteSpeakersSchema = z.object({
+  names: z.array(z.string().trim().min(1).max(60)).min(1, '至少要選一個').max(50),
+})

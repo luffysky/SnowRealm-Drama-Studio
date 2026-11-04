@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import { BookTabs } from '@/components/studio/BookTabs'
 import { listArcs } from '@/lib/arcs'
+import { unlistedSpeakers } from '@/lib/attribution-job'
 import { getSessionUser } from '@/lib/auth/session'
 import { can } from '@/lib/auth/rbac'
 import { getCharacters } from '@/lib/characters'
@@ -43,7 +44,7 @@ export default async function BookPage({ params }: Params) {
   const { projectId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const [toc, arcs, characters, audio] = await Promise.all([
+  const [toc, arcs, characters, audio, unlisted] = await Promise.all([
     novelToc(project.id, 'NOVEL'),
     listArcs(project.id),
     getCharacters(project.id),
@@ -69,6 +70,11 @@ export default async function BookPage({ params }: Params) {
           isNull(assets.deletedAt)
         )
       ),
+    /*
+     * 在正文裡說過話、但角色表沒有的人 (Z137)。歸屬那一趟會認出他們，而他們
+     * 現在卡在半吊子狀態：配得到聲音，但不在角色頁、沒有定妝照。
+     */
+    unlistedSpeakers(project.id),
   ])
 
   if (toc.length === 0) notFound()
@@ -129,6 +135,8 @@ export default async function BookPage({ params }: Params) {
           }
         })(),
       }))}
+      unlisted={unlisted}
+      canEditCast={can(user, 'character.write')}
       cast={characters.characters.map((character) => ({
         id: character.id,
         name: character.name,

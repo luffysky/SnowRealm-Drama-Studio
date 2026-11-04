@@ -37,7 +37,14 @@ export function MiniPlayer() {
       className="panel animate-rise fixed left-2 z-40 flex w-[min(22rem,calc(100vw-1rem))] items-center gap-2 rounded-xl bg-stage-850 p-2 ring-1 shadow-2xl ring-stage-700 lg:left-[16.5rem]"
     >
       <Link
-        href={`/listen/${track.projectId}`}
+        /*
+         * `/listen`, not `/listen/<作品>` (Z137).
+         *
+         * 回報：「懸浮播放器點進去是 404」。音樂播放是**跨作品**的一頁——
+         * 它的清單是整個工作室的曲子，沒有以作品分段的路由，也不該有：
+         * 那會是作品工作區的音樂庫，不是這個。
+         */
+        href="/listen"
         className="min-w-0 flex-1 leading-tight"
         title="回到音樂播放器"
       >

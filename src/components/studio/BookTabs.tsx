@@ -1,9 +1,13 @@
 'use client'
 
-import { BookOpen, Headphones, Users } from 'lucide-react'
+import { BookOpen, Headphones, UserPlus, Users } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { Tabs } from '@/components/ui/Tabs'
+import { useToast } from '@/components/ui/Toast'
+import { apiFetch, readApiError } from '@/lib/client-fetch'
+import { cn } from '@/lib/utils'
 import { AudiobookPanel } from '@/components/studio/AudiobookPanel'
 import { CHARACTER_TIER_LABEL, type CharacterTierValue } from '@/lib/constants'
 
@@ -42,6 +46,14 @@ export type BookCast = {
   episodeCount: number
 }
 
+/** 在正文裡說過話、但角色表沒有的人 (Z137)。 */
+export type UnlistedSpeaker = {
+  name: string
+  gender: string
+  lines: number
+  episodes: number[]
+}
+
 type Panel = 'toc' | 'about' | 'audio'
 
 export function BookTabs({
@@ -54,6 +66,8 @@ export function BookTabs({
   arcs,
   episodes,
   cast,
+  unlisted,
+  canEditCast,
 }: {
   projectId: string
   title: string
@@ -64,6 +78,8 @@ export function BookTabs({
   arcs: BookArc[]
   episodes: BookEpisode[]
   cast: BookCast[]
+  unlisted: UnlistedSpeaker[]
+  canEditCast: boolean
 }) {
   const [panel, setPanel] = useState<Panel>('toc')
 
@@ -132,8 +148,11 @@ export function BookTabs({
 
       {panel === 'about' && (
         <About
+          projectId={projectId}
           synopsis={synopsis}
           cast={cast}
+          unlisted={unlisted}
+          canEditCast={canEditCast}
           chars={totals.chars}
           percent={totals.percent}
           targetChars={targetChars}
@@ -246,15 +265,21 @@ function Toc({
 /* -------------------------------------------------------------------------- */
 
 function About({
+  projectId,
   synopsis,
   cast,
+  unlisted,
+  canEditCast,
   chars,
   percent,
   targetChars,
   episodes,
 }: {
+  projectId: string
   synopsis: string
   cast: BookCast[]
+  unlisted: UnlistedSpeaker[]
+  canEditCast: boolean
   chars: number
   percent: number
   targetChars: number
@@ -335,7 +360,126 @@ function About({
             ))}
           </ul>
         )}
+
+        {unlisted.length > 0 && (
+          <Unlisted projectId={projectId} speakers={unlisted} canEdit={canEditCast} />
+        )}
       </section>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 正文裡說過話、但角色表沒有的人 (Z137).
+ *
+ * 歸屬那一趟會認出他們——錢管事、陸承安、賣雞的老伯——而他們現在卡在半吊子
+ * 狀態：**配得到聲音，但不在角色頁、沒有定妝照、不算進出場統計。**
+ *
+ * 刻意**不自動建**。那是作者的資料，而且「周圍的百姓」不是角色、「路人」也
+ * 不是，「陸承安」顯然是——只有人分得出來。所以這裡只端名單，勾了才建。
+ */
+function Unlisted({
+  projectId,
+  speakers,
+  canEdit,
+}: {
+  projectId: string
+  speakers: UnlistedSpeaker[]
+  canEdit: boolean
+}) {
+  const router = useRouter()
+  const toast = useToast()
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
+
+  async function add() {
+    if (picked.size === 0) return
+    setSaving(true)
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/speakers`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ names: [...picked] }),
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      const body = (await response.json()) as { created: string[]; linked: number }
+      toast.success(
+        `加了 ${body.created.length} 個角色`,
+        `已經歸屬的 ${body.linked} 句話也接上了，出場集數會跟著算。`
+      )
+      setPicked(new Set())
+      router.refresh()
+    } catch (cause) {
+      toast.error('加入失敗', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700/60">
+      <h3 className="text-[11px] font-medium text-ink-300">
+        正文裡還有 {speakers.length} 個人說過話
+      </h3>
+      <p className="text-[10px] leading-relaxed text-ink-600">
+        AI 判斷對白時認出來的。他們現在配得到聲音，但不在角色表裡——所以沒有定妝照，
+        也不算進出場統計。挑出真的是角色的加進去；「路人」「周圍的百姓」那種不用。
+      </p>
+
+      <ul className="flex flex-wrap gap-1.5">
+        {speakers.map((speaker) => {
+          const on = picked.has(speaker.name)
+          return (
+            <li key={speaker.name}>
+              <button
+                type="button"
+                aria-pressed={on}
+                disabled={!canEdit}
+                onClick={() =>
+                  setPicked((previous) => {
+                    const next = new Set(previous)
+                    if (on) next.delete(speaker.name)
+                    else next.add(speaker.name)
+                    return next
+                  })
+                }
+                className={cn(
+                  'tap flex flex-col items-start gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition-colors',
+                  on
+                    ? 'bg-accent-600 text-white'
+                    : 'bg-stage-800 text-ink-300 hover:text-ink-50',
+                  !canEdit && 'cursor-default opacity-70'
+                )}
+              >
+                <span className="text-[11px]">
+                  {speaker.name}
+                  {speaker.gender && (
+                    <span className="ml-1 text-[9px] opacity-70">{speaker.gender}</span>
+                  )}
+                </span>
+                <span className="text-[9px] tabular-nums opacity-70">
+                  {speaker.lines} 句・{speaker.episodes.length} 集
+                </span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+
+      {canEdit && (
+        <button
+          type="button"
+          onClick={() => void add()}
+          disabled={picked.size === 0 || saving}
+          className="tap inline-flex w-fit items-center gap-1.5 rounded-lg bg-accent-600 px-3 py-1.5 text-[11px] text-white transition-colors hover:bg-accent-500 disabled:opacity-40"
+        >
+          <UserPlus aria-hidden className="size-3.5" />
+          {saving ? '加入中…' : `把這 ${picked.size} 個加進角色表`}
+        </button>
+      )}
     </div>
   )
 }
