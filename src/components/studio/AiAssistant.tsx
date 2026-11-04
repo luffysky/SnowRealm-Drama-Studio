@@ -50,6 +50,15 @@ export type AiAssistantProps = {
    * been shown, and correctly refused to invent one.
    */
   sourceTextByTask?: Partial<Record<AiJobKindValue, string>>
+  /**
+   * Episodes whose novel 依小說生成劇本 can adapt (Z113).
+   *
+   * The list only — the prose is read server-side when the job runs. Only
+   * episodes that actually have writing in them appear: an empty one is not
+   * a source, and offering it is offering a button that spends money to be
+   * told there is nothing to read.
+   */
+  novelSources?: { id: string; number: number; title: string; charCount: number }[]
   tasks: AiTask[]
   currency: CurrencyValue
   fx: FxRates
@@ -95,6 +104,7 @@ export function AiAssistant({
   episodeId,
   sourceText,
   sourceTextByTask,
+  novelSources,
   tasks,
   currency,
   fx,
@@ -116,6 +126,18 @@ export function AiAssistant({
   const [chosen, setChosen] = useState(0)
   const [applying, setApplying] = useState(false)
 
+  /**
+   * Which episode's novel to adapt. Defaults to the one being written, which
+   * is right almost always — the picker is for the scene that carries over.
+   */
+  const [novelFrom, setNovelFrom] = useState<string>(
+    () => novelSources?.find((source) => source.id === episodeId)?.id ?? novelSources?.[0]?.id ?? ''
+  )
+
+  /** Tasks that adapt a novel rather than the text on screen. */
+  const readsNovel = task === 'NOVEL_TO_SCRIPT'
+  const novelSource = novelSources?.find((source) => source.id === novelFrom) ?? null
+
   /** What this task actually reads. */
   const activeSource = sourceTextByTask?.[task] ?? sourceText
 
@@ -124,14 +146,25 @@ export function AiAssistant({
       task,
       projectId,
       episodeId: episodeId ?? null,
-      sourceText: activeSource,
+      // The server reads the prose; the client only names the episode.
+      ...(readsNovel ? { novelEpisodeId: novelFrom || null } : {}),
+      sourceText: readsNovel ? '' : activeSource,
       userInstruction: instruction.trim() || undefined,
       includeWorld: true,
       includeCharacters: true,
       candidates: 1,
     }),
-    [task, projectId, episodeId, activeSource, instruction]
+    [task, projectId, episodeId, activeSource, instruction, readsNovel, novelFrom]
   )
+
+  /*
+   * Whether there is anything to work on. Previously this was only
+   * `activeSource`, and a novel task had no source on the client at all —
+   * it is read on the server now, so readiness is 「選到了一集有字的」.
+   */
+  const ready = readsNovel
+    ? Boolean(novelSource && novelSource.charCount > 0)
+    : Boolean(activeSource.trim()) || task === 'PROJECT_PLAN'
 
   async function runEstimate() {
     setPhase('estimating')
@@ -329,12 +362,60 @@ export function AiAssistant({
         />
       </label>
 
+      {/*
+        素材來源 (Z113).
+
+        This task reads a novel, not the text on screen, and nothing used to
+        say so. A disabled 估算成本 with no explanation is the thing spec v2
+        §4 forbids — so the source is named, its length is shown, and when
+        there is nothing to adapt it says that instead of going quiet.
+      */}
+      {readsNovel && (
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-ink-400">
+            改編哪一集的小說
+            <span className="ml-1.5 text-ink-600">正文由伺服器讀，不經過瀏覽器</span>
+          </span>
+
+          {novelSources && novelSources.length > 0 ? (
+            <>
+              <select
+                value={novelFrom}
+                onChange={(event) => setNovelFrom(event.target.value)}
+                disabled={phase === 'running'}
+                className="rounded-lg bg-stage-850 px-2 py-1.5 text-xs text-ink-100 ring-1 ring-inset ring-stage-700 focus:ring-2 focus:ring-accent-500 focus:outline-none disabled:opacity-50"
+              >
+                {novelSources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    EP{String(source.number).padStart(3, '0')}
+                    {source.title ? `・${source.title}` : ''}（
+                    {source.charCount.toLocaleString('en-US')} 字）
+                    {source.id === episodeId ? '　← 本集' : ''}
+                  </option>
+                ))}
+              </select>
+
+              {novelSource && novelSource.id !== episodeId && (
+                <span className="text-[10px] text-amber-300">
+                  這不是本集的小說。要改編別集的內容才選它。
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="rounded-lg bg-stage-850 px-2 py-1.5 text-[11px] leading-relaxed text-ink-500 ring-1 ring-inset ring-stage-700">
+              這部作品還沒有任何一集寫了小說，所以沒有東西可以改編。
+              先去小說編輯寫一些，這裡就會出現可以選的集數。
+            </span>
+          )}
+        </label>
+      )}
+
       {/* ---- estimate / run ---------------------------------------------- */}
       {phase === 'idle' && (
         <button
           type="button"
           onClick={() => void runEstimate()}
-          disabled={!activeSource.trim() && task !== 'PROJECT_PLAN'}
+          disabled={!ready}
           className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-stage-800 px-3 py-2 text-xs text-ink-200 ring-1 ring-inset ring-stage-700 transition-colors hover:text-ink-50 disabled:opacity-50"
         >
           估算成本

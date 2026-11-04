@@ -1,10 +1,11 @@
-import { and, count, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   aiJobAttempts,
   aiJobs,
   aiProviders,
   arcs,
+  chapters,
   characters,
   documents,
   episodes,
@@ -13,6 +14,7 @@ import {
   worldEntries,
 } from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
+import { stripHtmlToText } from '@/lib/utils'
 import type { SessionUser } from '@/lib/auth/session'
 import { adapterFor, aiOverrides, envOnlyAnthropicAdapter } from './registry'
 import type { AiAdapter, AiContext, AiTaskKind } from './types'
@@ -37,6 +39,17 @@ export async function buildContext(input: {
   projectId?: string | null
   episodeId?: string | null
   sourceText?: string
+  /**
+   * Adapt from this episode's novel (Z113).
+   *
+   * The prose is fetched **here**, server-side, rather than being handed to
+   * the browser and posted back: an episode is ten thousand characters, and
+   * the only thing the client needs to say is which one.
+   *
+   * It is also what lets 劇本工坊 adapt from an episode other than the one
+   * being written — a scene that carries over, or a restructure.
+   */
+  novelEpisodeId?: string | null
   userInstruction?: string
   includeWorld?: boolean
   includeCharacters?: boolean
@@ -46,6 +59,12 @@ export async function buildContext(input: {
 
   if (input.userInstruction) context.userInstruction = input.userInstruction
   if (input.sourceText) context.sourceText = input.sourceText
+
+  // An explicit novel wins: it is the thing being adapted.
+  if (input.novelEpisodeId) {
+    const prose = await episodeNovelText(input.novelEpisodeId)
+    if (prose) context.sourceText = prose
+  }
 
   if (input.episodeId) {
     const [row] = await db
@@ -131,6 +150,66 @@ export async function buildContext(input: {
   }
 
   return context
+}
+
+/**
+ * One episode's novel, in chapter order, as plain text.
+ *
+ * Markup stripped: the model is being asked to adapt a story, and the
+ * editor's HTML is noise it would be charged for by the token.
+ */
+export async function episodeNovelText(episodeId: string): Promise<string> {
+  const rows = await db
+    .select({ title: chapters.title, content: chapters.content })
+    .from(chapters)
+    .innerJoin(documents, eq(documents.id, chapters.documentId))
+    .where(
+      and(
+        eq(documents.episodeId, episodeId),
+        eq(documents.kind, 'NOVEL'),
+        isNull(documents.deletedAt)
+      )
+    )
+    .orderBy(asc(chapters.sortOrder))
+
+  return rows
+    .map((row) => [row.title, stripHtmlToText(row.content)].filter(Boolean).join('\n'))
+    .join('\n\n')
+    .trim()
+}
+
+/**
+ * Which episodes have a novel worth adapting, for the source picker.
+ *
+ * Only ones with prose in them: an empty episode is not a source, and
+ * offering it is offering a button that spends money to be told there is
+ * nothing to read.
+ */
+export async function novelSources(
+  projectId: string
+): Promise<{ id: string; number: number; title: string; charCount: number }[]> {
+  const rows = await db
+    .select({
+      id: episodes.id,
+      number: episodes.number,
+      title: episodes.title,
+      charCount: sql<number>`coalesce(sum(${chapters.charCount}), 0)`.mapWith(Number),
+    })
+    .from(episodes)
+    .innerJoin(
+      documents,
+      and(
+        eq(documents.episodeId, episodes.id),
+        eq(documents.kind, 'NOVEL'),
+        isNull(documents.deletedAt)
+      )
+    )
+    .innerJoin(chapters, eq(chapters.documentId, documents.id))
+    .where(eq(episodes.projectId, projectId))
+    .groupBy(episodes.id, episodes.number, episodes.title)
+    .orderBy(asc(episodes.number))
+
+  return rows.filter((row) => row.charCount > 0)
 }
 
 /** Resolves the adapter that would serve `task`, or null when none can. */

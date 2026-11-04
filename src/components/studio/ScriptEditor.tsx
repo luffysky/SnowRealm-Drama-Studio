@@ -51,8 +51,8 @@ export type ScriptEditorProps = {
   initialScenes: SceneData[]
   /** From `?scene=` — which scene a search result wants opened. */
   initialSceneId?: string | null
-  /** The episode's novel, which 依小說生成劇本 adapts from. */
-  novelText?: string
+  /** Which episodes have a novel to adapt from (Z113). */
+  novelSources?: { id: string; number: number; title: string; charCount: number }[]
   initialRevision: number
   lastEditorName: string | null
   /** The project's per-episode runtime window, in seconds. */
@@ -77,7 +77,7 @@ export function ScriptEditor({
   episodeTitle,
   initialScenes,
   initialSceneId,
-  novelText = '',
+  novelSources = [],
   initialRevision,
   lastEditorName,
   targetMinSec,
@@ -359,7 +359,7 @@ export function ScriptEditor({
                * 依小說生成劇本 reads the novel, not the scene being edited.
                * Everything else on this surface works on the scene.
                */
-              sourceTextByTask={{ NOVEL_TO_SCRIPT: novelText }}
+              novelSources={novelSources}
               currency={currency}
               fx={fx}
               providerReady={providerReady}

@@ -415,6 +415,8 @@ export const stageUpdateSchema = z.object({
 })
 
 export const aiRunSchema = z.object({
+  /** 依這一集的小說生成（Z113）。正文由伺服器讀，不經過瀏覽器。 */
+  novelEpisodeId: uuid.nullish(),
   /*
    * Listed rather than derived from AI_JOB_KINDS: not every job kind is
    * something a client may ask for directly, and a new kind should have to be

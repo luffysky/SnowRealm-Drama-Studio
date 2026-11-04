@@ -6,7 +6,7 @@ import { projects } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
-import { adapterForTask } from '@/lib/ai/jobs'
+import { adapterForTask, novelSources } from '@/lib/ai/jobs'
 import { getEditorModules, getFxRates } from '@/lib/settings'
 import { openDocument } from '@/lib/writing'
 
@@ -34,7 +34,7 @@ export default async function EpisodeScriptPage({ params, searchParams }: Params
   const requestedScene = (await searchParams).scene
   const sceneId = typeof requestedScene === 'string' ? requestedScene : null
 
-  const [document, modules, settings, fx, provider, novelText] = await Promise.all([
+  const [document, modules, settings, fx, provider, sources] = await Promise.all([
     openDocument(project.id, episodeId, 'SCRIPT'),
     getEditorModules('SCRIPT'),
     db
@@ -45,13 +45,17 @@ export default async function EpisodeScriptPage({ params, searchParams }: Params
     getFxRates(),
     providerStatus(),
     /*
-     * The episode's novel, for 依小說生成劇本.
+     * Which episodes have a novel worth adapting (Z113).
      *
-     * That task used to be handed the current *scene* — so the model was
-     * asked to adapt a novel it had never been shown, and correctly refused
-     * rather than inventing one.
+     * The list, not the prose. The text itself is read server-side when the
+     * job runs — an episode is ten thousand characters, and embedding it in
+     * this page just to post it back was a round trip for nothing.
+     *
+     * Before any of this the task was handed the current *scene*, so the
+     * model was asked to adapt a novel it had never been shown and correctly
+     * refused rather than inventing one.
      */
-    episodeNovelText(episodeId),
+    novelSources(project.id),
   ])
 
   if (!document) notFound()
@@ -68,7 +72,7 @@ export default async function EpisodeScriptPage({ params, searchParams }: Params
         updatedAt: scene.updatedAt.toISOString(),
       }))}
       initialSceneId={sceneId}
-      novelText={novelText}
+      novelSources={sources}
       initialRevision={document.lockRevision}
       lastEditorName={document.lastEditorName}
       targetMinSec={settings[0]?.min ?? 120}
@@ -80,32 +84,6 @@ export default async function EpisodeScriptPage({ params, searchParams }: Params
       providerDetail={provider.detail}
     />
   )
-}
-
-/** All of this episode's novel prose, in chapter order. */
-async function episodeNovelText(episodeId: string): Promise<string> {
-  const { db } = await import('@/db')
-  const schema = await import('@/db/schema')
-  const { and, asc, eq, isNull } = await import('drizzle-orm')
-  const { stripHtmlToText } = await import('@/lib/utils')
-
-  const rows = await db
-    .select({ title: schema.chapters.title, content: schema.chapters.content })
-    .from(schema.chapters)
-    .innerJoin(schema.documents, eq(schema.documents.id, schema.chapters.documentId))
-    .where(
-      and(
-        eq(schema.documents.episodeId, episodeId),
-        eq(schema.documents.kind, 'NOVEL'),
-        isNull(schema.documents.deletedAt)
-      )
-    )
-    .orderBy(asc(schema.chapters.sortOrder))
-
-  return rows
-    .map((row) => [row.title, stripHtmlToText(row.content)].filter(Boolean).join('\n'))
-    .join('\n\n')
-    .trim()
 }
 
 /** Whether a text provider is configured, and why not when it isn't. */

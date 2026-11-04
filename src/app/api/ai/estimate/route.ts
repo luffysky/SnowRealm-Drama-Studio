@@ -13,6 +13,7 @@ export const POST = handle(async (request: Request) => {
   const context = await buildContext({
     projectId: input.projectId ?? null,
     episodeId: input.episodeId ?? null,
+    novelEpisodeId: input.novelEpisodeId ?? null,
     ...(input.sourceText ? { sourceText: input.sourceText } : {}),
     userInstruction: input.userInstruction,
     includeWorld: input.includeWorld,
