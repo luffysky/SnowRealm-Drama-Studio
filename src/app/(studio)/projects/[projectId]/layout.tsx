@@ -77,6 +77,7 @@ export default async function ProjectWorkspaceLayout({
           status: project.status,
           targetMinSec: project.targetMinSec,
           targetMaxSec: project.targetMaxSec,
+          targetChars: project.targetChars,
           coverAssetId: project.coverAssetId,
           novelCoverAssetId: project.novelCoverAssetId,
         }}

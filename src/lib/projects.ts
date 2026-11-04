@@ -400,6 +400,7 @@ export type ProjectEdit = {
   status?: ProjectStatusValue
   targetMinSec?: number
   targetMaxSec?: number
+  targetChars?: number
   /** An asset id to use as the cover, or null to clear it. */
   coverAssetId?: string | null
   /** The book cover. null clears it, meaning 「沿用作品封面」. */
@@ -471,6 +472,7 @@ export async function updateProject(
       ...(edit.status !== undefined ? { status: edit.status } : {}),
       ...(edit.targetMinSec !== undefined ? { targetMinSec: edit.targetMinSec } : {}),
       ...(edit.targetMaxSec !== undefined ? { targetMaxSec: edit.targetMaxSec } : {}),
+      ...(edit.targetChars !== undefined ? { targetChars: edit.targetChars } : {}),
       ...(edit.coverAssetId !== undefined ? { coverAssetId: edit.coverAssetId } : {}),
       ...(edit.novelCoverAssetId !== undefined
         ? { novelCoverAssetId: edit.novelCoverAssetId }
@@ -503,6 +505,7 @@ export type NewProject = {
   status?: ProjectStatusValue
   targetMinSec?: number
   targetMaxSec?: number
+  targetChars?: number
   /** 第幾部, and its name. A work is always at least one arc. */
   arcIndex?: number
   arcTitle?: string
@@ -531,6 +534,7 @@ export async function createProject(
   const planned = Math.min(Math.max(input.plannedEpisodes ?? 120, 0), 999)
   const targetMinSec = input.targetMinSec ?? 120
   const targetMaxSec = input.targetMaxSec ?? 180
+  const targetChars = input.targetChars ?? 4000
 
   const slug = await uniqueSlug(input.title)
 
@@ -552,6 +556,7 @@ export async function createProject(
         ownerId: userId,
         targetMinSec,
         targetMaxSec,
+        targetChars,
       })
       .returning({ id: projects.id, slug: projects.slug })
 

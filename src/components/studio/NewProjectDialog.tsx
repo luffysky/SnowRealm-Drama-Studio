@@ -40,6 +40,7 @@ export function NewProjectDialog({ canWrite }: { canWrite: boolean }) {
   const [plannedEpisodes, setPlannedEpisodes] = useState('120')
   const [targetMinSec, setTargetMinSec] = useState('120')
   const [targetMaxSec, setTargetMaxSec] = useState('180')
+  const [targetChars, setTargetChars] = useState('4000')
 
   async function submit() {
     if (!title.trim()) {
@@ -69,6 +70,7 @@ export function NewProjectDialog({ canWrite }: { canWrite: boolean }) {
           plannedEpisodes: Number(plannedEpisodes) || 0,
           targetMinSec: Number(targetMinSec) || 120,
           targetMaxSec: Number(targetMaxSec) || 180,
+          targetChars: Number(targetChars) || 4000,
         }),
       })
 
@@ -278,6 +280,20 @@ export function NewProjectDialog({ canWrite }: { canWrite: boolean }) {
                     />
                   </Field>
                 </div>
+
+                <Field
+                  label="單集目標字數"
+                  hint="小說編輯器的進度條以它為準。一集 120–180 秒大約 4000 字，但那是節奏問題，不是規定。"
+                >
+                  <Input
+                    type="number"
+                    min={100}
+                    max={100000}
+                    value={targetChars}
+                    onChange={(event) => setTargetChars(event.target.value)}
+                    className="h-9 text-xs"
+                  />
+                </Field>
 
           <p className="text-[10px] leading-relaxed text-ink-700">
             建立後會一併排好集數與九大製作階段的進度列，集名與大綱留空等你寫。

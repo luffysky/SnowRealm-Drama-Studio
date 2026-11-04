@@ -35,6 +35,7 @@ export type ProjectAccess = {
   synopsis: string
   targetMinSec: number
   targetMaxSec: number
+  targetChars: number
   createdAt: Date
 }
 
@@ -82,6 +83,7 @@ export async function findAccessibleProject(
       synopsis: projects.synopsis,
       targetMinSec: projects.targetMinSec,
       targetMaxSec: projects.targetMaxSec,
+      targetChars: projects.targetChars,
       createdAt: projects.createdAt,
     })
     .from(projects)

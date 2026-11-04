@@ -47,6 +47,7 @@ export type ProjectSettings = {
   status: ProjectStatusValue
   targetMinSec: number
   targetMaxSec: number
+  targetChars: number
   coverAssetId: string | null
   /** 小說封面. Empty means「沿用作品封面」. */
   novelCoverAssetId: string | null
@@ -111,6 +112,7 @@ function SettingsForm({
   const [status, setStatus] = useState<ProjectStatusValue>(project.status)
   const [targetMinSec, setTargetMinSec] = useState(String(project.targetMinSec))
   const [targetMaxSec, setTargetMaxSec] = useState(String(project.targetMaxSec))
+  const [targetChars, setTargetChars] = useState(String(project.targetChars))
   const [coverAssetId, setCoverAssetId] = useState(project.coverAssetId)
   const [novelCoverAssetId, setNovelCoverAssetId] = useState(project.novelCoverAssetId)
 
@@ -133,6 +135,7 @@ function SettingsForm({
     status !== project.status ||
     Number(targetMinSec) !== project.targetMinSec ||
     Number(targetMaxSec) !== project.targetMaxSec ||
+    Number(targetChars) !== project.targetChars ||
     coverAssetId !== project.coverAssetId ||
     novelCoverAssetId !== project.novelCoverAssetId
 
@@ -159,6 +162,7 @@ function SettingsForm({
           status,
           targetMinSec: Number(targetMinSec) || 120,
           targetMaxSec: Number(targetMaxSec) || 180,
+          targetChars: Number(targetChars) || 4000,
           coverAssetId,
           novelCoverAssetId,
         }),
@@ -356,6 +360,16 @@ function SettingsForm({
             />
           </Field>
         </div>
+
+        <Field label="單集目標字數">
+          <Input
+            type="number"
+            min={100}
+            max={100000}
+            value={targetChars}
+            onChange={(event) => setTargetChars(event.target.value)}
+          />
+        </Field>
 
         {error && (
           <p role="alert" className="text-[11px] text-rose-400">

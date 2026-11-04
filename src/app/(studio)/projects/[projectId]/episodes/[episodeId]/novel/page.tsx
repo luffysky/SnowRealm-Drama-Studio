@@ -60,8 +60,12 @@ export default async function EpisodeNovelPage({ params, searchParams }: Params)
       initialChapterId={chapterId}
       initialRevision={document.lockRevision}
       lastEditorName={document.lastEditorName}
-      /* A 120–180 second episode is roughly this much prose. */
-      targetChars={4000}
+      /*
+       * This work's own target (Z98). It used to be `4000` written here —
+       * not even a constant — so a second work with a different pace could
+       * not have a different target without a deploy.
+       */
+      targetChars={project.targetChars}
       modules={modules}
       currency={user.displayCurrency}
       fx={fx}

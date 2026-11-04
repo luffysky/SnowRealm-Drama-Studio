@@ -63,6 +63,15 @@ export const projects = pgTable(
     targetMinSec: integer('target_min_sec').notNull().default(120),
     targetMaxSec: integer('target_max_sec').notNull().default(180),
     /**
+     * 一集的目標字數 (Z98).
+     *
+     * Beside the two second-counts because it is the same kind of fact: the
+     * rhythm of *this* work. It used to be `targetChars={4000}` written into
+     * the novel page's JSX — not even a constant — so a second work with a
+     * different pace could not have a different target without a deploy.
+     */
+    targetChars: integer('target_chars').notNull().default(4000),
+    /**
      * When indexable content last changed without being re-indexed.
      *
      * Null means the index is current. It is set by content writes and cleared

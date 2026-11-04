@@ -92,6 +92,7 @@ export const projectSchema = z.object({
   genre: z.string().trim().max(60).optional().default(''),
   targetMinSec: z.coerce.number().int().min(10).max(3600).optional().default(120),
   targetMaxSec: z.coerce.number().int().min(10).max(3600).optional().default(180),
+  targetChars: z.coerce.number().int().min(100).max(100000).optional().default(4000),
 })
   .refine((v) => v.targetMinSec <= v.targetMaxSec, {
     message: '片長下限不可大於上限',
@@ -299,6 +300,7 @@ export const projectCreateSchema = z
     status: z.enum(PROJECT_STATUSES).optional().default('PLANNING'),
     targetMinSec: z.coerce.number().int().min(10).max(3600).optional().default(120),
     targetMaxSec: z.coerce.number().int().min(10).max(3600).optional().default(180),
+    targetChars: z.coerce.number().int().min(100).max(100000).optional().default(4000),
     arcIndex: z.coerce.number().int().min(1).max(99).optional().default(1),
     arcTitle: z.string().trim().max(80).optional().default(''),
     /** 0 lays out no episodes; they can be added later. */
@@ -318,6 +320,7 @@ export const projectUpdateSchema = z
     synopsis: z.string().trim().max(8000).optional(),
     tags: z.array(z.string().trim().min(1).max(20)).max(8).optional(),
     status: z.enum(PROJECT_STATUSES).optional(),
+    targetChars: z.coerce.number().int().min(100).max(100000).optional(),
     targetMinSec: z.coerce.number().int().min(10).max(3600).optional(),
     targetMaxSec: z.coerce.number().int().min(10).max(3600).optional(),
     /** null clears the cover. */
