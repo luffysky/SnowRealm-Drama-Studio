@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm'
 import {
+  boolean,
   index,
   integer,
   pgTable,
@@ -106,6 +107,18 @@ export const episodeCharacters = pgTable(
       .notNull()
       .references(() => characters.id, { onDelete: 'cascade' }),
     note: text('note').notNull().default(''),
+    /**
+     * 怎麼知道他出場的 (P0-1).
+     *
+     * The derived two are recomputed from the prose and the script, so they
+     * correct themselves when the writing changes. `manual` is a person's
+     * own answer and the sync never touches it — needed because a name is
+     * all the derivation can see, and a character who appears as 「那個男人」
+     * before the reveal is exactly the appearance worth recording.
+     */
+    fromNovel: boolean('from_novel').notNull().default(false),
+    fromScript: boolean('from_script').notNull().default(false),
+    manual: boolean('manual').notNull().default(false),
   },
   (t) => [
     primaryKey({ columns: [t.episodeId, t.characterId] }),

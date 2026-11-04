@@ -48,6 +48,8 @@ export type CharacterItem = {
   voiceNote: string
   keyVisualAssetId: string | null
   episodeCount: number
+  novelEpisodeCount: number
+  scriptEpisodeCount: number
   updatedAt: string
 }
 
@@ -285,7 +287,18 @@ export function CharacterBrowser({
                 )}
 
                 <p className="text-[10px] text-ink-600">
-                  出現於 {selected.episodeCount} 集・更新於 {formatRelativeZh(selected.updatedAt)}
+                  {/*
+                    小說與劇本分開寫 (P0-1)。「寫進小說了」跟「進了劇本」
+                    不是同一件事，合成一個數字正好把值得看見的落差藏起來。
+                  */}
+                  出現於 {selected.episodeCount} 集
+                  {selected.episodeCount > 0 && (
+                    <>
+                      （小說 {selected.novelEpisodeCount}
+                      ・劇本 {selected.scriptEpisodeCount}）
+                    </>
+                  )}
+                  ・更新於 {formatRelativeZh(selected.updatedAt)}
                 </p>
               </div>
 

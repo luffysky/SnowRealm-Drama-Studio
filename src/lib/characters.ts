@@ -34,8 +34,12 @@ export type CharacterRow = {
   keyVisualAssetId: string | null
   voiceSampleAssetId: string | null
   updatedAt: Date
-  /** How many episodes this character is tagged into. */
+  /** How many episodes this character is tagged into, from any source. */
   episodeCount: number
+  /** Of those, how many have them written into the prose. */
+  novelEpisodeCount: number
+  /** …and into the script. The two differ, and the gap is the point. */
+  scriptEpisodeCount: number
 }
 
 export type RelationshipRow = {
@@ -116,7 +120,14 @@ export async function getCharacters(
   const [appearances, relationshipRows] = await Promise.all([
     ids.length
       ? db
-          .select({ characterId: episodeCharacters.characterId, n: count() })
+          .select({
+            characterId: episodeCharacters.characterId,
+            n: count(),
+            // 分開數，因為「寫進小說了」跟「進了劇本」不是同一件事，
+            // 合成一個數字正好把值得看見的落差藏起來 (P0-1)。
+            novel: sql<number>`count(*) filter (where ${episodeCharacters.fromNovel})`.mapWith(Number),
+            script: sql<number>`count(*) filter (where ${episodeCharacters.fromScript})`.mapWith(Number),
+          })
           .from(episodeCharacters)
           .innerJoin(episodes, eq(episodes.id, episodeCharacters.episodeId))
           .where(
@@ -143,7 +154,7 @@ export async function getCharacters(
       .where(eq(characterRelationships.projectId, projectId)),
   ])
 
-  const appearancesBy = new Map(appearances.map((a) => [a.characterId, Number(a.n)]))
+  const appearancesBy = new Map(appearances.map((a) => [a.characterId, a]))
   const nameOf = new Map(rows.map((r) => [r.id, r.name]))
 
   const countsByTier: Record<string, number> = {}
@@ -152,7 +163,9 @@ export async function getCharacters(
   return {
     characters: rows.map((row) => ({
       ...row,
-      episodeCount: appearancesBy.get(row.id) ?? 0,
+      episodeCount: Number(appearancesBy.get(row.id)?.n ?? 0),
+      novelEpisodeCount: appearancesBy.get(row.id)?.novel ?? 0,
+      scriptEpisodeCount: appearancesBy.get(row.id)?.script ?? 0,
     })),
     relationships: relationshipRows.map((row) => ({
       ...row,
@@ -183,11 +196,20 @@ export async function getCharacter(
   if (!row) return null
 
   const [appearance] = await db
-    .select({ n: count() })
+    .select({
+      n: count(),
+      novel: sql<number>`count(*) filter (where ${episodeCharacters.fromNovel})`.mapWith(Number),
+      script: sql<number>`count(*) filter (where ${episodeCharacters.fromScript})`.mapWith(Number),
+    })
     .from(episodeCharacters)
     .where(eq(episodeCharacters.characterId, characterId))
 
-  return { ...row, episodeCount: Number(appearance?.n ?? 0) }
+  return {
+    ...row,
+    episodeCount: Number(appearance?.n ?? 0),
+    novelEpisodeCount: appearance?.novel ?? 0,
+    scriptEpisodeCount: appearance?.script ?? 0,
+  }
 }
 
 export async function createCharacter(input: {
@@ -212,7 +234,8 @@ export async function createCharacter(input: {
     throw new ApiError(409, `「${input.name.trim()}」已經存在`, 'duplicate_name')
   }
 
-  return { ...created, episodeCount: 0 }
+  // A character created this second is in nothing yet; the next sync decides.
+  return { ...created, episodeCount: 0, novelEpisodeCount: 0, scriptEpisodeCount: 0 }
 }
 
 /** Fields a member may edit. Ids, timestamps and the project are not among them. */
@@ -277,11 +300,20 @@ export async function updateCharacter(input: {
   if (!updated) throw ApiError.notFound('找不到這個角色')
 
   const [appearance] = await db
-    .select({ n: count() })
+    .select({
+      n: count(),
+      novel: sql<number>`count(*) filter (where ${episodeCharacters.fromNovel})`.mapWith(Number),
+      script: sql<number>`count(*) filter (where ${episodeCharacters.fromScript})`.mapWith(Number),
+    })
     .from(episodeCharacters)
     .where(eq(episodeCharacters.characterId, input.characterId))
 
-  return { ...updated, episodeCount: Number(appearance?.n ?? 0) }
+  return {
+    ...updated,
+    episodeCount: Number(appearance?.n ?? 0),
+    novelEpisodeCount: appearance?.novel ?? 0,
+    scriptEpisodeCount: appearance?.script ?? 0,
+  }
 }
 
 /** Soft delete, so a cut character can come back without losing their notes. */

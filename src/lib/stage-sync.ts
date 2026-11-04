@@ -1,5 +1,7 @@
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
+import { episodes } from '@/db/schema'
+import { syncAppearances } from '@/lib/character-appearances'
 import { END_MARKER_SOURCE } from '@/lib/novel-progress'
 
 /**
@@ -274,7 +276,22 @@ export async function resyncEpisodeStages(episodeId: string): Promise<void> {
   try {
     await clearEmptyEpisodeStages(episodeId)
     await syncEpisodeStages(episodeId)
+
+    /*
+     * 角色出場也是從同一份正文推導的 (P0-1)，所以一起跟上。
+     *
+     * Scoped to the project rather than the episode because a name can be
+     * written out of one episode and into another in the same sitting, and
+     * recomputing only the episode just saved would leave the other wrong.
+     */
+    const [row] = await db
+      .select({ projectId: episodes.projectId })
+      .from(episodes)
+      .where(eq(episodes.id, episodeId))
+      .limit(1)
+
+    if (row) await syncAppearances(row.projectId)
   } catch {
-    /* 進度條不值得讓人家的存檔失敗。 */
+    /* 進度條與出場統計都不值得讓人家的存檔失敗。 */
   }
 }
