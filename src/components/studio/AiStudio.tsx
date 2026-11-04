@@ -107,7 +107,7 @@ export function AiStudio({
   async function wake() {
     setBusy('worker')
     try {
-      const response = await apiFetch('/api/ai/worker', { method: 'POST' })
+      const response = await apiFetch('/api/ai/worker', { method: 'POST', keepalive: true })
       if (!response.ok) throw new Error(await readApiError(response))
       const report = (await response.json()) as { claimed?: number }
       toast.success(

@@ -208,7 +208,8 @@ export function OutlineGenerator({
       const { job } = (await response.json()) as { job: { id: string } }
 
       // Hobby's cron is daily, so the worker is nudged rather than waited for.
-      void apiFetch('/api/ai/worker', { method: 'POST' }).catch(() => {})
+      // keepalive：worker 跑在這個請求裡，換頁不該把它砍掉 (Z126)。
+      void apiFetch('/api/ai/worker', { method: 'POST', keepalive: true }).catch(() => {})
 
       poll(job.id)
     } catch (cause) {

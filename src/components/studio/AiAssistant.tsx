@@ -221,7 +221,15 @@ export function AiAssistant({
 
   async function nudge(): Promise<boolean> {
     try {
-      const response = await apiFetch('/api/ai/worker', { method: 'POST' })
+      /*
+       * `keepalive` so the request survives the page (Z126).
+       *
+       * The worker runs *inside* this request. Without keepalive the browser
+       * aborts it the moment you navigate — and the job it had already
+       * claimed was left at 執行中 with a lock, looking busy, forever. That
+       * is what「按了沒反應」actually was.
+       */
+      const response = await apiFetch('/api/ai/worker', { method: 'POST', keepalive: true })
       if (!response.ok) {
         setStalled(true)
         return false

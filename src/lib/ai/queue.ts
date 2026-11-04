@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { aiJobAttempts, aiJobs, aiOutputs, expenses } from '@/db/schema'
 import { ApiError } from '@/lib/api'
@@ -35,8 +35,21 @@ export type AiJobRow = typeof aiJobs.$inferSelect
 /** Retry backoff: 30s, 2m, 8m. Capped so a stuck job stops consuming slots. */
 const BACKOFF_SECONDS = [30, 120, 480]
 
-/** A claimed job older than this is assumed abandoned and may be reclaimed. */
-const LEASE_TIMEOUT_MS = 10 * 60 * 1000
+/**
+ * A claimed job whose lease has not been renewed for this long is assumed
+ * abandoned (Z126).
+ *
+ * Ninety seconds, not ten minutes, because a living job now renews its own
+ * lease while it works (`heartbeat` below). Ten minutes was sized for a
+ * worker that could not say it was still there, and it meant a job killed
+ * mid-flight — which is what happens when the browser that nudged the worker
+ * navigates away — blocked its own retry for ten minutes. For somebody
+ * sitting in front of the screen waiting, that is forever.
+ */
+const LEASE_TIMEOUT_MS = 90 * 1000
+
+/** How often a running job renews its lease. Comfortably inside the timeout. */
+const HEARTBEAT_MS = 20 * 1000
 
 /**
  * How long to wait between asking a media provider whether it has finished.
@@ -302,6 +315,8 @@ export type WorkerReport = {
  */
 export async function runDueJobs(options: { limit?: number } = {}): Promise<WorkerReport> {
   const workerId = `w_${crypto.randomUUID().slice(0, 8)}`
+
+  const swept = await sweepAbandoned()
   const jobs = await claimJobs(workerId, options.limit ?? 2)
 
   const report: WorkerReport = {
@@ -310,15 +325,67 @@ export async function runDueJobs(options: { limit?: number } = {}): Promise<Work
     succeeded: 0,
     failed: 0,
     retrying: 0,
-    cancelled: 0,
+    cancelled: swept,
   }
 
   for (const job of jobs) {
-    const outcome = await executeJob(job)
-    report[outcome] += 1
+    /*
+     * Renew the lease while the model works (Z126).
+     *
+     * Without this the lease is a guess about how long a job *might* take,
+     * and it has to be generous enough for the slowest one — which is what
+     * made a dead job block its own retry for ten minutes. A job that is
+     * still alive says so; one that stopped saying so is gone.
+     */
+    const beat = setInterval(() => {
+      void db
+        .update(aiJobs)
+        .set({ lockedAt: new Date() })
+        .where(and(eq(aiJobs.id, job.id), eq(aiJobs.lockedBy, workerId)))
+        .catch(() => {})
+    }, HEARTBEAT_MS)
+
+    try {
+      const outcome = await executeJob(job)
+      report[outcome] += 1
+    } finally {
+      clearInterval(beat)
+    }
   }
 
   return report
+}
+
+/**
+ * Finishes off jobs that were cancelled while running and then abandoned.
+ *
+ * `requestCancel` only flags a RUNNING job and leaves the worker to honour
+ * it — which never happens if that worker died. And the claim query skips
+ * anything carrying a cancel flag, so such a row sat at 執行中 **forever**,
+ * holding a slot and telling everyone a model was working on it. One of
+ * these had been running since the previous day.
+ */
+async function sweepAbandoned(): Promise<number> {
+  const stale = sql`${aiJobs.lockedAt} <= now() - ${sql.raw(
+    `interval '${LEASE_TIMEOUT_MS} milliseconds'`
+  )}`
+
+  const finished = await db
+    .update(aiJobs)
+    .set({
+      status: 'CANCELLED',
+      finishedAt: new Date(),
+      lockedAt: null,
+      lockedBy: '',
+      progressNote: '已取消（執行中斷）',
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(aiJobs.status, 'RUNNING'), isNotNull(aiJobs.cancelRequestedAt), stale)
+    )
+    .returning({ id: aiJobs.id })
+
+  return finished.length
 }
 
 type Outcome = 'succeeded' | 'failed' | 'retrying' | 'cancelled'

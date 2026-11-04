@@ -209,6 +209,9 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
 
       const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
       const candidates: AiRunResult['candidates'] = []
+      /** Why each attempt came back with no text, for a usable error. */
+      const emptyReasons: string[] = []
+
       let refusal: AiRunResult['refusal']
 
       for (let i = 0; i < candidateCount; i++) {
@@ -268,7 +271,22 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
             .join('')
             .trim()
 
-          if (!text) continue
+          if (!text) {
+            /*
+             * Empty output is not one failure, it is several, and they need
+             * different answers (Z126). The commonest is the thinking budget
+             * eating the whole of `max_tokens` so there is nothing left to
+             * write with — which looks identical from here to a model that
+             * simply said nothing. Record what the API actually reported so
+             * the error can name it instead of saying 「請重試」.
+             */
+            emptyReasons.push(
+              `stop_reason=${message.stop_reason ?? '?'}` +
+                `, 區塊=${message.content.map((b) => b.type).join('+') || '無'}` +
+                `, 輸出 ${message.usage.output_tokens ?? 0} token（上限 ${maxTokens}）`
+            )
+            continue
+          }
 
           candidates.push({
             label: candidateCount > 1 ? `候選${String.fromCharCode(65 + i)}` : '候選',
@@ -285,7 +303,22 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
       }
 
       if (candidates.length === 0 && !refusal) {
-        throw new AiAdapterError('模型沒有產出任何內容，請重試。', 'empty_result', true)
+        /*
+         * `max_tokens` with nothing but a thinking block is not a transient
+         * failure — retrying spends the same money to reach the same place.
+         * Say so, and say what to change.
+         */
+        const starved = emptyReasons.some((reason) => reason.includes('stop_reason=max_tokens'))
+
+        throw new AiAdapterError(
+          starved
+            ? `模型把輸出額度用在思考上，沒有留下內容（${emptyReasons[0]}）。` +
+              '在系統設定把這個任務的思考程度調低，或把輸出上限調高。'
+            : `模型沒有產出任何內容（${emptyReasons.join('；') || '沒有更多資訊'}）。`,
+          'empty_result',
+          // Retrying a starved request just spends the money again.
+          !starved
+        )
       }
 
       const price = priceFor(modelId)
