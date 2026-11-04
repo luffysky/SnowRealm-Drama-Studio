@@ -26,7 +26,27 @@ import type { CastedChunk } from '@/lib/narration'
  * measurement of reading speed, not a guarantee, and a request that overruns
  * is a failed request rather than a slightly long one.
  */
-const MAX_SECONDS_PER_REQUEST = 8 * 60
+const AZURE_CEILING_SEC = 8 * 60
+
+/**
+ * 真正在管事的不是 Azure 的上限，是我們自己的函式上限。
+ *
+ * The worker runs with `maxDuration = 60` (`api/ai/worker/route.ts`), and
+ * synthesising eight minutes of audio cannot finish inside sixty seconds at
+ * any plausible rate. So a part is sized for **our** budget, not Azure's:
+ * small enough that several fit in one invocation, which is also what makes
+ * the whole thing resumable — a job that renders 42 small parts can stop
+ * after any of them and pick up where it left off, and one that renders four
+ * big ones cannot.
+ *
+ * Deliberately conservative. Azure is almost certainly several times faster
+ * than real time, but 「almost certainly」 is not a number, and the cost of
+ * being wrong is a job that can never finish. It is raised once there is a
+ * measurement.
+ */
+const FUNCTION_BUDGET_SEC = 45
+
+const MAX_SECONDS_PER_REQUEST = Math.min(AZURE_CEILING_SEC, FUNCTION_BUDGET_SEC)
 
 /**
  * Characters of Chinese prose per second, measured: 70 characters took 18.3
@@ -201,4 +221,6 @@ export const TTS_LIMITS = {
   MAX_SECONDS_PER_REQUEST,
   MAX_CHARS_PER_REQUEST,
   CHARS_PER_SEC,
+  AZURE_CEILING_SEC,
+  FUNCTION_BUDGET_SEC,
 } as const

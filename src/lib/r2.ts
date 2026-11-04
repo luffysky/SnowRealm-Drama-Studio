@@ -379,6 +379,41 @@ export async function getObjectText(objectKey: string): Promise<string | null> {
   }
 }
 
+/**
+ * Writes bytes straight from the server (Z129).
+ *
+ * Every other write in this file hands the browser a presigned URL, because
+ * every other write is a person uploading a file they chose. Synthesised
+ * audio never exists in a browser — the worker holds the bytes — so a
+ * presigned round trip would be the server uploading to itself.
+ */
+export async function putObject(input: {
+  objectKey: string
+  body: Buffer
+  contentType: string
+}): Promise<void> {
+  await r2().send(
+    new PutObjectCommand({
+      Bucket: bucket(),
+      Key: input.objectKey,
+      Body: input.body,
+      ContentType: input.contentType,
+      ContentLength: input.body.length,
+    })
+  )
+}
+
+/** The raw bytes. `getObjectText` is the same thing for text. */
+export async function getObjectBytes(objectKey: string): Promise<Buffer | null> {
+  try {
+    const out = await r2().send(new GetObjectCommand({ Bucket: bucket(), Key: objectKey }))
+    if (!out.Body) return null
+    return Buffer.from(await out.Body.transformToByteArray())
+  } catch {
+    return null
+  }
+}
+
 export async function deleteObject(objectKey: string): Promise<void> {
   await r2().send(new DeleteObjectCommand({ Bucket: bucket(), Key: objectKey }))
 }
