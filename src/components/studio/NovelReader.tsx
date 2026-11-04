@@ -47,11 +47,10 @@ import {
 } from '@/lib/novel-reader-view'
 import {
   loadVoices,
-  pauseSpeech,
-  resumeSpeech,
   speak,
   speechSupported,
   splitForSpeech,
+  type SpeechHandle,
   type Voice,
 } from '@/lib/speech'
 import { cn } from '@/lib/utils'
@@ -118,7 +117,7 @@ export function NovelReader({
   const [reading, setReading] = useState<'off' | 'playing' | 'paused'>('off')
   /** Which chunk is being spoken, for the highlight. */
   const [spokenAt, setSpokenAt] = useState(-1)
-  const stopRef = useRef<(() => void) | null>(null)
+  const speechRef = useRef<SpeechHandle | null>(null)
   const spokenRef = useRef<HTMLParagraphElement | null>(null)
   const [index, setIndex] = useState(() => {
     const found = chapters.findIndex((c) => c.id === initialChapterId)
@@ -243,8 +242,8 @@ export function NovelReader({
   }, [])
 
   const stopReading = useCallback(() => {
-    stopRef.current?.()
-    stopRef.current = null
+    speechRef.current?.stop()
+    speechRef.current = null
     setReading('off')
     setSpokenAt(-1)
   }, [])
@@ -256,15 +255,16 @@ export function NovelReader({
   const startReading = useCallback(() => {
     if (chunks.length === 0) return
 
-    stopRef.current?.()
+    speechRef.current?.stop()
     setReading('playing')
 
-    stopRef.current = speak(chunks, {
+    speechRef.current = speak(chunks, {
       voiceId: settings.voiceId || undefined,
       rate: settings.speechRate,
       pitch: settings.speechPitch,
       volume: 1,
-      onBoundary: (i) => setSpokenAt(i),
+      // The paragraph, not the chunk — a long paragraph is several chunks.
+      onBoundary: (paragraph) => setSpokenAt(paragraph),
       onEnd: () => {
         setReading('off')
         setSpokenAt(-1)
@@ -295,7 +295,7 @@ export function NovelReader({
 
   useEffect(() => {
     if (reading !== 'playing') return
-    if (stopRef.current) return
+    if (speechRef.current) return
     if (!autoplay.current) {
       autoplay.current = true
       return
@@ -363,36 +363,35 @@ export function NovelReader({
       </header>
 
       {/*
-        While reading aloud the prose is rendered from the same chunks the
-        synthesiser is working through, so the highlight lands on exactly the
-        sentence being spoken. Rendering the paragraphs and guessing which
-        sentence that maps to would drift within a page.
+        One <p> per real paragraph, reading or not.
+
+        It used to render the *chunks* while reading, so the highlight could
+        land on a sentence — which meant pressing play reflowed the whole
+        page into different paragraphs. That was invisible only as long as
+        every paragraph happened to fit in one utterance. Now that a long
+        paragraph is deliberately split into several short ones, rendering
+        chunks would visibly shatter the prose the moment you pressed play.
+
+        So the chunk carries its paragraph index and the highlight follows
+        that. In this novel a paragraph is mostly one line of dialogue, so
+        the granularity is barely different from before.
       */}
-      {reading === 'off'
-        ? chapter.paragraphs.map((paragraph, i) => (
-            <p key={i} style={{ textIndent: '2em', margin: '0 0 0.9em' }}>
-              {paragraph}
-            </p>
-          ))
-        : chunks.map((chunk, i) => (
-            <p
-              key={i}
-              ref={i === spokenAt ? spokenRef : undefined}
-              style={{
-                textIndent: '2em',
-                margin: '0 0 0.9em',
-                transition: 'background-color 160ms',
-                ...(i === spokenAt
-                  ? {
-                      backgroundColor: `${theme.faint}33`,
-                      borderRadius: '0.25em',
-                    }
-                  : {}),
-              }}
-            >
-              {chunk}
-            </p>
-          ))}
+      {chapter.paragraphs.map((paragraph, i) => (
+        <p
+          key={i}
+          ref={i === spokenAt ? spokenRef : undefined}
+          style={{
+            textIndent: '2em',
+            margin: '0 0 0.9em',
+            transition: 'background-color 160ms',
+            ...(reading !== 'off' && i === spokenAt
+              ? { backgroundColor: `${theme.faint}33`, borderRadius: '0.25em' }
+              : {}),
+          }}
+        >
+          {paragraph}
+        </p>
+      ))}
     </article>
   )
 
@@ -473,17 +472,17 @@ export function NovelReader({
               type="button"
               onClick={() => {
                 if (reading === 'playing') {
-                  pauseSpeech()
+                  speechRef.current?.pause()
                   setReading('paused')
                 } else if (reading === 'paused') {
-                  resumeSpeech()
+                  speechRef.current?.resume()
                   setReading('playing')
                 } else {
                   startReading()
                 }
               }}
-              aria-label={reading === 'playing' ? '暂停朗讀' : '朗讀'}
-              title={reading === 'playing' ? '暂停朗讀' : '朗讀這一章'}
+              aria-label={reading === 'playing' ? '暫停朗讀' : '朗讀'}
+              title={reading === 'playing' ? '暫停朗讀' : '朗讀這一章'}
               className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
             >
               {reading === 'playing' ? (
@@ -491,7 +490,7 @@ export function NovelReader({
               ) : (
                 <Play aria-hidden className="size-3.5" />
               )}
-              {reading === 'off' ? '朗讀' : reading === 'paused' ? '繼續' : '暂停'}
+              {reading === 'off' ? '朗讀' : reading === 'paused' ? '繼續' : '暫停'}
             </button>
 
             {reading !== 'off' && (

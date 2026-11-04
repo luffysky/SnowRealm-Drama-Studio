@@ -11,6 +11,16 @@
  * The tradeoff is that the voices are whatever the operating system ships.
  * Windows and macOS both include Chinese voices; a bare Linux install may
  * have none, which is why the reader checks before offering the control.
+ *
+ * **The hard part is not speaking. It is noticing that it stopped.**
+ * `speechSynthesis` is a global queue in the browser with a long history of
+ * dropping its own `end` event — through garbage collection, through
+ * `pause()`/`resume()` on some platforms' local voices, through its fifteen
+ * second cut-off. Every one of those looks identical from here: the chain is
+ * waiting for an event that will never arrive, and the reading simply stops
+ * mid-chapter with no error. So this does not try to enumerate the causes.
+ * It keeps a reference so nothing can be collected, it never pokes a queue
+ * that is working, and it watches for silence and moves on.
  */
 
 export type Voice = {
@@ -71,57 +81,125 @@ export function loadVoices(): Promise<Voice[]> {
   })
 }
 
-/**
- * Splits prose into utterances.
- *
- * Long strings are unreliable: Chrome truncates somewhere past a few thousand
- * characters, and a single utterance cannot be resumed partway. Splitting on
- * sentence endings also gives the caller somewhere to report progress and
- * somewhere to stop cleanly.
- */
-export function splitForSpeech(paragraphs: string[], maxChars = 180): string[] {
-  const out: string[] = []
+/* -------------------------------------------------------------------------- */
+/* Splitting                                                                   */
+/* -------------------------------------------------------------------------- */
 
-  for (const paragraph of paragraphs) {
+export type SpeechChunk = {
+  text: string
+  /**
+   * Which paragraph this came from.
+   *
+   * Carried explicitly because the reader highlights the paragraph being
+   * spoken. It used to assume one chunk per paragraph and highlight by chunk
+   * index — true only while every paragraph fits in one utterance, and
+   * silently wrong from the first long paragraph onward, with the highlight
+   * drifting further behind for the rest of the chapter.
+   */
+  paragraph: number
+}
+
+/**
+ * Roughly 40 characters.
+ *
+ * Measured in Chrome: 70 characters of Chinese took 18.3 seconds, so about
+ * 3.9 characters a second. 40 keeps an utterance near ten seconds — under
+ * Chrome's fifteen-second cut-off with room to spare, so the cut-off never
+ * has to be worked around.
+ */
+const MAX_CHARS = 40
+
+/**
+ * Splits prose into utterances, one paragraph at a time.
+ *
+ * Paragraphs are never merged. A chapter of this novel is 238 paragraphs with
+ * a median of 12 characters — mostly dialogue — and merging them would read
+ * more smoothly but would make the highlight coarser than the line you are
+ * looking at.
+ */
+export function splitForSpeech(paragraphs: string[], maxChars = MAX_CHARS): SpeechChunk[] {
+  const out: SpeechChunk[] = []
+
+  paragraphs.forEach((paragraph, index) => {
     const sentences = paragraph
       // Keep the punctuation: it is what makes the synthesiser pause.
-      .split(/(?<=[。！？!?；;…])/)
+      .split(/(?<=[。！？!?；;…，、：])/)
       .map((s) => s.trim())
       .filter(Boolean)
 
     let buffer = ''
-    for (const sentence of sentences) {
-      if (buffer && buffer.length + sentence.length > maxChars) {
-        out.push(buffer)
-        buffer = sentence
-      } else {
-        buffer += sentence
-      }
+
+    const flush = () => {
+      if (buffer) out.push({ text: buffer, paragraph: index })
+      buffer = ''
     }
-    if (buffer) out.push(buffer)
-  }
+
+    for (const sentence of sentences) {
+      if (buffer && buffer.length + sentence.length > maxChars) flush()
+
+      /*
+       * A single sentence longer than the cap — one unbroken clause — is cut
+       * on length. Ugly, but better than one 40-second utterance, which is
+       * exactly where the browser stops speaking without telling anyone.
+       */
+      if (sentence.length > maxChars) {
+        flush()
+        for (let at = 0; at < sentence.length; at += maxChars) {
+          out.push({ text: sentence.slice(at, at + maxChars), paragraph: index })
+        }
+        continue
+      }
+
+      buffer += sentence
+    }
+
+    flush()
+  })
 
   return out
 }
+
+/* -------------------------------------------------------------------------- */
+/* Speaking                                                                    */
+/* -------------------------------------------------------------------------- */
 
 export type SpeakOptions = {
   voiceId?: string | undefined
   rate: number
   pitch: number
   volume: number
-  onBoundary?: (index: number) => void
+  /** The paragraph now being spoken. */
+  onBoundary?: (paragraph: number) => void
   onEnd?: () => void
   onError?: () => void
 }
 
+export type SpeechHandle = {
+  stop: () => void
+  pause: () => void
+  resume: () => void
+}
+
 /**
- * Reads a list of chunks aloud, in order.
+ * How long silence is allowed to last before it counts as a dropped event.
  *
- * Returns a stop function. Speaking is a single global queue in the browser,
- * so starting a second one without stopping the first produces both at once.
+ * Long enough that the gap between two utterances is never mistaken for a
+ * stall — measured at around 100ms — and short enough that a reader notices
+ * a hiccup rather than a stop.
  */
-export function speak(chunks: string[], options: SpeakOptions): () => void {
-  if (!speechSupported() || chunks.length === 0) return () => {}
+const SILENCE_MS = 2000
+const WATCH_MS = 400
+
+/**
+ * Reads chunks aloud, in order, and keeps reading.
+ *
+ * Speaking is a single global queue in the browser, so starting a second one
+ * without stopping the first produces both at once; `stop()` on the handle is
+ * not optional.
+ */
+export function speak(chunks: SpeechChunk[], options: SpeakOptions): SpeechHandle {
+  const idle: SpeechHandle = { stop: () => {}, pause: () => {}, resume: () => {} }
+  if (!speechSupported() || chunks.length === 0) return idle
 
   const synth = window.speechSynthesis
   synth.cancel()
@@ -133,72 +211,158 @@ export function speak(chunks: string[], options: SpeakOptions): () => void {
 
   let index = 0
   let stopped = false
+  let paused = false
+  /** Bumped on every advance, so a late `end` cannot advance twice. */
+  let turn = 0
+  let spokeAt = Date.now()
 
   /*
-   * Chrome stops synthesising after roughly fifteen seconds unless it is
-   * poked. This is a long-standing bug with no better workaround; without it
-   * the reading dies mid-chapter and looks like a crash.
+   * A live reference to the utterance being spoken.
+   *
+   * Not a tidiness detail. Chrome can garbage-collect an utterance that only
+   * the browser's internal queue still points at, and when it does, `onend`
+   * never fires and the chain stops for good. Holding it here is what keeps
+   * that from happening.
    */
-  const keepAlive = window.setInterval(() => {
-    if (stopped) return
-    if (synth.speaking && !synth.paused) {
-      synth.pause()
-      synth.resume()
-    }
-  }, 10_000)
+  let current: SpeechSynthesisUtterance | null = null
 
-  const next = () => {
-    if (stopped || index >= chunks.length) {
-      window.clearInterval(keepAlive)
-      if (!stopped) options.onEnd?.()
+  let watchdog = 0
+
+  const cleanup = () => {
+    window.clearInterval(watchdog)
+
+    /*
+     * Detach before dropping it. `cancel()` fires `error: interrupted` on the
+     * utterance that was speaking, and a handler still attached to a chunk
+     * from a chapter nobody is reading any more would advance a chain that is
+     * supposed to be over.
+     */
+    if (current) {
+      current.onstart = null
+      current.onend = null
+      current.onerror = null
+      current = null
+    }
+  }
+
+  const advance = (from: number) => {
+    if (stopped || from !== turn) return
+    turn += 1
+    index += 1
+    spokeAt = Date.now()
+    say()
+  }
+
+  function say() {
+    if (stopped) return
+
+    if (index >= chunks.length) {
+      cleanup()
+      options.onEnd?.()
       return
     }
 
     const chunk = chunks[index]
-    if (!chunk) {
+    if (!chunk || !chunk.text.trim()) {
       index += 1
-      next()
+      say()
       return
     }
 
-    const utterance = new SpeechSynthesisUtterance(chunk)
+    const mine = turn
+    const utterance = new SpeechSynthesisUtterance(chunk.text)
     if (voice) utterance.voice = voice
     utterance.lang = voice?.lang ?? 'zh-TW'
     utterance.rate = options.rate
     utterance.pitch = options.pitch
     utterance.volume = options.volume
 
-    utterance.onstart = () => options.onBoundary?.(index)
+    utterance.onstart = () => {
+      spokeAt = Date.now()
+      options.onBoundary?.(chunk.paragraph)
+    }
 
     utterance.onend = () => {
-      index += 1
-      next()
+      spokeAt = Date.now()
+      advance(mine)
     }
 
     utterance.onerror = (event) => {
       // `interrupted` and `canceled` are what stopping looks like; they are
       // not failures and must not surface as one.
       if (event.error === 'interrupted' || event.error === 'canceled') return
-      window.clearInterval(keepAlive)
-      options.onError?.()
+
+      /*
+       * Anything else is this one chunk failing, not the chapter. Skipping a
+       * line is a far better outcome than stopping the reading — which is
+       * what the old code did for every error.
+       */
+      advance(mine)
     }
 
+    current = utterance
+    spokeAt = Date.now()
     synth.speak(utterance)
   }
 
-  next()
+  /*
+   * The watchdog.
+   *
+   * There used to be a `pause()` / `resume()` poke here every ten seconds —
+   * the standard workaround for Chrome cutting a long utterance off at
+   * fifteen. With this novel's paragraphs (median 12 characters, about three
+   * seconds) no utterance ever comes close to that limit, so the poke had
+   * nothing to fix and could only break things: on some platforms' local
+   * voices a `pause()` landing between two utterances never resumes, and the
+   * reading dies around the ten second mark. Which is two or three
+   * paragraphs in — exactly the reported symptom.
+   *
+   * So nothing pokes a queue that is working. This only watches: when the
+   * browser is neither speaking nor holding anything queued, and has not been
+   * for two seconds, the `end` event is not coming. Move on.
+   */
+  watchdog = window.setInterval(() => {
+    if (stopped || paused) return
 
-  return () => {
-    stopped = true
-    window.clearInterval(keepAlive)
-    synth.cancel()
+    if (synth.speaking || synth.pending) {
+      spokeAt = Date.now()
+      return
+    }
+
+    if (Date.now() - spokeAt < SILENCE_MS) return
+
+    advance(turn)
+  }, WATCH_MS)
+
+  say()
+
+  return {
+    stop: () => {
+      stopped = true
+      cleanup()
+      synth.cancel()
+    },
+    pause: () => {
+      paused = true
+      synth.pause()
+    },
+    resume: () => {
+      paused = false
+      synth.resume()
+      spokeAt = Date.now()
+
+      /*
+       * `resume()` is unreliable on some platforms: it returns, `paused`
+       * goes false, and nothing comes out. Nudging the queue back to life
+       * from the current chunk is the only recovery that does not need the
+       * reader to work out what happened.
+       */
+      window.setTimeout(() => {
+        if (stopped || paused) return
+        if (synth.speaking || synth.pending) return
+        turn += 1
+        say()
+      }, 350)
+    },
   }
-}
-
-export function pauseSpeech(): void {
-  if (speechSupported()) window.speechSynthesis.pause()
-}
-
-export function resumeSpeech(): void {
-  if (speechSupported()) window.speechSynthesis.resume()
 }
