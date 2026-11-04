@@ -1,6 +1,4 @@
 import type { Metadata } from 'next'
-import Link from 'next/link'
-import { ChevronLeft } from 'lucide-react'
 import { notFound, redirect } from 'next/navigation'
 import { NovelReader } from '@/components/studio/NovelReader'
 import { getSessionUser } from '@/lib/auth/session'
@@ -48,30 +46,17 @@ export default async function ReadNovelPage({ params, searchParams }: Params) {
   const requested = (await searchParams).chapter
   const chapterId = typeof requested === 'string' ? requested : undefined
 
+  /*
+   * No surrounding chrome. The reader covers the viewport, so the breadcrumb
+   * that used to sit above it would be painted over — the way back out is the
+   * 退出 button inside the reader itself.
+   */
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center gap-2 px-3 pt-3 sm:px-4 lg:px-6">
-        <Link
-          href="/read"
-          className="tap inline-flex items-center gap-1 text-[11px] text-ink-500 transition-colors hover:text-ink-200"
-        >
-          <ChevronLeft aria-hidden className="size-3.5" />
-          書架
-        </Link>
-        <span className="text-[11px] text-ink-700">/</span>
-        <Link
-          href={`/projects/${project.id}/novel`}
-          className="tap text-[11px] text-ink-500 transition-colors hover:text-ink-200"
-        >
-          編輯這本
-        </Link>
-      </div>
-
-      <NovelReader
-        bookTitle={novelTitleOf(project)}
-        chapters={chapters}
-        initialChapterId={chapterId}
-      />
-    </div>
+    <NovelReader
+      bookTitle={novelTitleOf(project)}
+      chapters={chapters}
+      initialChapterId={chapterId}
+      exitHref="/read"
+    />
   )
 }

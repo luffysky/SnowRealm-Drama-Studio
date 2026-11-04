@@ -1,6 +1,8 @@
 'use client'
 
 import { ChevronLeft, ChevronRight, List, Settings2, X } from 'lucide-react'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   BRIGHTNESS_MAX,
@@ -56,10 +58,13 @@ export function NovelReader({
   bookTitle,
   chapters,
   initialChapterId,
+  exitHref,
 }: {
   bookTitle: string
   chapters: ReaderChapter[]
   initialChapterId?: string | undefined
+  /** Where 退出 goes — the shelf, or the editor it was opened from. */
+  exitHref: string
 }) {
   /*
    * `localStorage` does not exist during the server render.
@@ -75,6 +80,7 @@ export function NovelReader({
 
   const [stored, setStored] = useState<ReaderSettings | null>(null)
   const settings = stored ?? (ready ? loadReaderSettings() : READER_DEFAULTS)
+  const router = useRouter()
   const [panel, setPanel] = useState<'none' | 'toc' | 'settings'>('none')
   const [index, setIndex] = useState(() => {
     const found = chapters.findIndex((c) => c.id === initialChapterId)
@@ -191,12 +197,16 @@ export function NovelReader({
       if (event.target instanceof HTMLInputElement) return
       if (event.key === 'ArrowRight' || event.key === 'PageDown') flip('next')
       if (event.key === 'ArrowLeft' || event.key === 'PageUp') flip('prev')
-      if (event.key === 'Escape') setPanel('none')
+      if (event.key === 'Escape') {
+        // Closes the drawer first; a second press leaves the reader.
+        if (panel !== 'none') setPanel('none')
+        else router.push(exitHref)
+      }
     }
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [flip])
+  }, [flip, panel, router, exitHref])
 
   /* --------------------------------------------------------------- render */
 
@@ -241,7 +251,18 @@ export function NovelReader({
 
   return (
     <div
-      className="relative min-h-[calc(100dvh-8rem)] transition-colors"
+      /*
+       * The whole viewport, over the studio chrome.
+       *
+       * Reading is the one thing here that wants the screen to itself: the
+       * rail, the tab strip and the breadcrumb are all navigation for making
+       * the thing, not for reading it. 100dvh rather than 100vh so a phone's
+       * address bar sliding away does not leave a strip of page behind.
+       *
+       * Above the rail (z-50) and the floating chat, or they sit on top of
+       * the page and the 退出 button is behind the sidebar.
+       */
+      className="fixed inset-0 z-[60] flex flex-col transition-colors"
       style={{ background: theme.bg }}
     >
       {/*
@@ -252,20 +273,35 @@ export function NovelReader({
       {settings.brightness < 1 && (
         <div
           aria-hidden
-          className="pointer-events-none fixed inset-0 z-20 bg-black"
+          className="pointer-events-none fixed inset-0 z-[65] bg-black"
           style={{ opacity: 1 - settings.brightness }}
         />
       )}
 
       {/* ---- toolbar ---------------------------------------------------- */}
       <div
-        className="sticky top-0 z-30 flex items-center gap-2 border-b px-3 py-2 backdrop-blur-sm"
+        className="flex shrink-0 items-center gap-2 border-b px-3 py-2 backdrop-blur-sm"
         style={{
           borderColor: `${theme.faint}33`,
           background: `${theme.bg}e6`,
           color: theme.ink,
         }}
       >
+        {/*
+          Leaves the reader entirely rather than collapsing it. A full-screen
+          surface with no visible way out is the thing people close the tab
+          over.
+        */}
+        <Link
+          href={exitHref}
+          aria-label="退出閱讀器"
+          title="退出閱讀器"
+          className="tap inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
+        >
+          <X aria-hidden className="size-3.5" />
+          退出
+        </Link>
+
         <button
           type="button"
           onClick={() => setPanel(panel === 'toc' ? 'none' : 'toc')}
@@ -291,7 +327,7 @@ export function NovelReader({
 
       {/* ---- the page --------------------------------------------------- */}
       <div
-        className="relative mx-auto w-full max-w-2xl px-5 py-8 sm:px-8"
+        className="relative mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-5 py-8 sm:px-8"
         onTouchStart={(event) => {
           const point = event.touches[0]
           if (point) touch.current = { x: point.clientX, y: point.clientY }
@@ -376,10 +412,17 @@ export function NovelReader({
             type="button"
             aria-label="關閉面板"
             onClick={() => setPanel('none')}
-            className="fixed inset-0 z-40 cursor-default bg-black/40"
+            className="fixed inset-0 z-[70] cursor-default bg-black/40"
           />
           <div
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[70dvh] overflow-y-auto rounded-t-2xl border-t p-4 shadow-2xl sm:inset-x-auto sm:top-0 sm:right-0 sm:bottom-0 sm:max-h-none sm:w-80 sm:rounded-none sm:border-t-0 sm:border-l"
+            /*
+              A side drawer at every width. It used to be a bottom sheet below
+              `sm`, which made sense when the reader was a page inside the
+              studio — it is not any more, and a table of contents that slides
+              up from the floor of a full-screen reader reads as something
+              that went wrong.
+            */
+            className="animate-slide-left fixed inset-y-0 right-0 z-[75] w-[min(20rem,85vw)] overflow-y-auto border-l p-4 shadow-2xl"
             style={{ background: theme.bg, borderColor: `${theme.faint}44`, color: theme.ink }}
           >
             <div className="mb-3 flex items-center justify-between">
