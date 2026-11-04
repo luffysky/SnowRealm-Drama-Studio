@@ -3,7 +3,14 @@
 import { AlertTriangle, Ban, CheckCircle2, Loader2, Play, RefreshCw, RotateCcw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { Tabs } from '@/components/ui/Tabs'
 import { useToast } from '@/components/ui/Toast'
+import { AiBatch, type BatchProject } from '@/components/studio/AiBatch'
+import { AiInbox } from '@/components/studio/AiInbox'
+import { AiFindings, AiSpend, AiThroughput } from '@/components/studio/AiNumbers'
+import type { InboxItem, SpendSummary, ThroughputRow } from '@/lib/ai/insights'
+import type { Finding } from '@/lib/production-findings'
+import type { CurrencyValue, FxRates } from '@/lib/money'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import {
   AI_JOB_KIND_LABEL,
@@ -15,11 +22,27 @@ import {
 import { cn } from '@/lib/utils'
 
 /**
- * AI 製片中心 (Z88).
+ * AI 製片中心 (Z88, rebuilt Z127).
  *
- * Two questions, nothing else: what is the queue doing, and is the provider
- * reachable. Both were answerable only with a database client before this —
- * the API has existed all along, nothing rendered it.
+ * It started as two questions — what is the queue doing, is the provider
+ * reachable — and 「只是一堆排程那沒必要特別做」 was a fair verdict on that.
+ * A queue with statuses is a database client with rounded corners.
+ *
+ * What a production centre owes you is the things no single row can tell you,
+ * so there are now five tabs:
+ *
+ * | 分頁 | 回答 |
+ * |---|---|
+ * | 待確認 | 已經付錢產出、但還沒人看的東西（最有感的一個） |
+ * | 體檢 | 產出跟設定對不上的地方 |
+ * | 批次 | 一次下一整段集數 |
+ * | 花費 | 花了多少、估得準不準、120 集要多少 |
+ * | 產能 | 每種任務多久、失敗率、哪個模型划算 |
+ * | 佇列 | 原本的那兩個問題 |
+ *
+ * 待確認 is the default when anything is in it, because the whole point of
+ * finding out two outlines had been waiting a day is not having to go looking
+ * for the third.
  *
  * It refreshes itself while anything is still running, and stops when nothing
  * is. A queue page that polls forever is a page that keeps a laptop warm all
@@ -67,22 +90,49 @@ const STATUS_TONE: Record<AiJobStatusValue, string> = {
   CANCELLED: 'bg-stage-800 text-ink-600',
 }
 
+export type AiStudioData = {
+  jobs: QueueJob[]
+  counts: Record<string, number>
+  providers: ProviderCard[]
+  inbox: InboxItem[]
+  spend: SpendSummary
+  throughput: { byKind: ThroughputRow[]; byModel: ThroughputRow[] }
+  findings: Finding[]
+  batchProjects: BatchProject[]
+  currency: CurrencyValue
+  fx: FxRates
+  canRun: boolean
+}
+
+type PanelId = 'inbox' | 'findings' | 'batch' | 'spend' | 'throughput' | 'queue'
+
 export function AiStudio({
   jobs,
   counts,
   providers,
+  inbox,
+  spend,
+  throughput,
+  findings,
+  batchProjects,
+  currency,
+  fx,
   canRun,
-}: {
-  jobs: QueueJob[]
-  counts: Record<string, number>
-  providers: ProviderCard[]
-  canRun: boolean
-}) {
+}: AiStudioData) {
   const router = useRouter()
   const toast = useToast()
 
   const [filter, setFilter] = useState<AiJobStatusValue | 'all'>('all')
   const [busy, setBusy] = useState<string | null>(null)
+
+  /*
+   * Lands on whatever is actually waiting for a person. Checked once on mount
+   * rather than kept in step with the data: switching the tab out from under
+   * somebody because a job finished is worse than a stale default.
+   */
+  const [panel, setPanel] = useState<PanelId>(() =>
+    inbox.length > 0 ? 'inbox' : findings.some((f) => f.severity === 'warn') ? 'findings' : 'queue'
+  )
 
   const running = jobs.filter((job) => LIVE.includes(job.status)).length
 
@@ -145,200 +195,237 @@ export function AiStudio({
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-lg font-medium text-ink-50">AI 製片中心</h1>
         <p className="text-[11px] text-ink-500">
-          跨作品的任務佇列與供應商狀態。要為某一部作品產生東西，在那部作品裡面做。
+          跨作品的花費、產能與待確認產出。單集的生成在那一集自己的頁面做，這裡只排隊、不寫正文。
         </p>
       </header>
 
-      {/* ---- providers --------------------------------------------------- */}
-      <section className="flex flex-col gap-2">
-        <h2 className="text-[11px] font-medium text-ink-300">供應商</h2>
+      <Tabs
+        appearance="pill"
+        activeId={panel}
+        onChange={(id) => setPanel(id as PanelId)}
+        tabs={[
+          { id: 'inbox', label: '待確認', badge: inbox.length > 0 ? inbox.length : undefined },
+          {
+            id: 'findings',
+            label: '體檢',
+            badge: findings.length > 0 ? findings.length : undefined,
+          },
+          { id: 'batch', label: '批次生成' },
+          { id: 'spend', label: '花費' },
+          { id: 'throughput', label: '產能' },
+          { id: 'queue', label: '佇列', badge: running > 0 ? running : undefined },
+        ]}
+      />
 
-        {providers.length === 0 ? (
-          <p className="rounded-lg bg-stage-900 px-3 py-2.5 text-[11px] leading-relaxed text-ink-500 ring-1 ring-stage-700/60">
-            還沒有設定任何供應商。目前是用環境變數裡的{' '}
-            <span className="font-mono text-ink-400">ANTHROPIC_API_KEY</span> 在跑——
-            能用，但換金鑰要重新部署。
-          </p>
-        ) : (
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {providers.map((provider) => (
-              <li
-                key={provider.id}
-                className="flex flex-col gap-1 rounded-lg bg-stage-900 p-3 ring-1 ring-stage-700/60"
-              >
-                <div className="flex items-center gap-2">
-                  {provider.available ? (
-                    <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-emerald-400" />
-                  ) : (
-                    <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-amber-400" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink-100">
-                    {provider.name}
-                  </span>
-                  {!provider.enabled && (
-                    <span className="shrink-0 rounded bg-stage-800 px-1.5 py-0.5 text-[9px] text-ink-600">
-                      已停用
-                    </span>
-                  )}
-                </div>
+      {panel === 'inbox' && <AiInbox items={inbox} canRun={canRun} />}
 
-                <p className="text-[10px] leading-relaxed text-ink-500">
-                  {provider.detail || (provider.available ? '可以用。' : '連不上。')}
-                </p>
+      {panel === 'findings' && <AiFindings findings={findings} />}
 
-                <p className="flex flex-wrap gap-x-3 text-[10px] text-ink-700">
-                  <span className="font-mono">{provider.kind}</span>
-                  {provider.defaultModel && (
-                    <span className="font-mono">{provider.defaultModel}</span>
-                  )}
-                  {provider.keyHint && <span className="font-mono">金鑰 ⋯{provider.keyHint}</span>}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {panel === 'batch' && (
+        <AiBatch projects={batchProjects} currency={currency} fx={fx} canRun={canRun} />
+      )}
 
-      {/* ---- queue ------------------------------------------------------- */}
-      <section className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-[11px] font-medium text-ink-300">任務佇列</h2>
-          {running > 0 && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-accent-300">
-              <Loader2 aria-hidden className="size-3 animate-spin" />
-              {running} 個進行中，每 4 秒更新
-            </span>
-          )}
-          <div className="ml-auto flex items-center gap-1.5">
-            {canRun && (counts.QUEUED ?? 0) > 0 && (
-              <button
-                type="button"
-                onClick={() => void wake()}
-                disabled={busy === 'worker'}
-                className="tap inline-flex items-center gap-1 rounded-lg bg-accent-600 px-2 py-1 text-[10px] text-white transition-colors hover:bg-accent-500 disabled:opacity-50"
-              >
-                {busy === 'worker' ? (
-                  <Loader2 aria-hidden className="size-3 animate-spin" />
-                ) : (
-                  <Play aria-hidden className="size-3" />
-                )}
-                執行佇列
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => router.refresh()}
-              className="tap inline-flex items-center gap-1 rounded-lg bg-stage-800 px-2 py-1 text-[10px] text-ink-300 hover:bg-stage-700"
-            >
-              <RefreshCw aria-hidden className="size-3" />
-              重新整理
-            </button>
-          </div>
-        </div>
+      {panel === 'spend' && <AiSpend spend={spend} currency={currency} fx={fx} />}
 
-        <ul className="flex flex-wrap gap-1.5">
-          <Chip active={filter === 'all'} onClick={() => setFilter('all')}>
-            全部 {jobs.length}
-          </Chip>
-          {AI_JOB_STATUSES.filter((status) => (counts[status] ?? 0) > 0).map((status) => (
-            <Chip key={status} active={filter === status} onClick={() => setFilter(status)}>
-              {AI_JOB_STATUS_LABEL[status]} {counts[status]}
-            </Chip>
-          ))}
-        </ul>
+      {panel === 'throughput' && (
+        <AiThroughput byKind={throughput.byKind} byModel={throughput.byModel} />
+      )}
 
-        {shown.length === 0 ? (
-          <p className="rounded-lg bg-stage-900 px-3 py-6 text-center text-[11px] text-ink-600 ring-1 ring-stage-700/60">
-            {jobs.length === 0 ? '還沒有任何 AI 任務。' : '這個狀態底下沒有任務。'}
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-1.5">
-            {shown.map((job) => (
-              <li
-                key={job.id}
-                className="flex flex-col gap-1.5 rounded-lg bg-stage-900 p-3 ring-1 ring-stage-700/60"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={cn(
-                      'shrink-0 rounded px-1.5 py-0.5 text-[9px]',
-                      STATUS_TONE[job.status]
+      {panel === 'queue' && (
+        <>
+        {/* ---- providers --------------------------------------------------- */}
+        <section className="flex flex-col gap-2">
+          <h2 className="text-[11px] font-medium text-ink-300">供應商</h2>
+
+          {providers.length === 0 ? (
+            <p className="rounded-lg bg-stage-900 px-3 py-2.5 text-[11px] leading-relaxed text-ink-500 ring-1 ring-stage-700/60">
+              還沒有設定任何供應商。目前是用環境變數裡的{' '}
+              <span className="font-mono text-ink-400">ANTHROPIC_API_KEY</span> 在跑——
+              能用，但換金鑰要重新部署。
+            </p>
+          ) : (
+            <ul className="grid gap-2 sm:grid-cols-2">
+              {providers.map((provider) => (
+                <li
+                  key={provider.id}
+                  className="flex flex-col gap-1 rounded-lg bg-stage-900 p-3 ring-1 ring-stage-700/60"
+                >
+                  <div className="flex items-center gap-2">
+                    {provider.available ? (
+                      <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-emerald-400" />
+                    ) : (
+                      <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-amber-400" />
                     )}
-                  >
-                    {AI_JOB_STATUS_LABEL[job.status]}
-                  </span>
-
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink-100">
-                    {AI_JOB_KIND_LABEL[job.kind] ?? job.kind}
-                  </span>
-
-                  <span className="shrink-0 text-[10px] text-ink-600 tabular-nums">
-                    {formatWhen(job.createdAt)}
-                  </span>
-                </div>
-
-                <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-ink-600">
-                  {job.projectTitle && <span>{job.projectTitle}</span>}
-                  {job.episodeNumber !== null && (
-                    <span className="tabular-nums">
-                      EP{String(job.episodeNumber).padStart(3, '0')}
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-ink-100">
+                      {provider.name}
                     </span>
-                  )}
-                  {job.model && <span className="font-mono">{job.model}</span>}
-                  {job.attemptCount > 1 && (
-                    <span>
-                      第 {job.attemptCount} / {job.maxAttempts} 次
-                    </span>
-                  )}
-                  <Cost estimated={job.estimatedCost} actual={job.actualCost} />
-                </p>
-
-                {job.errorMessage && (
-                  <p className="rounded bg-rose-500/10 px-2 py-1 text-[10px] leading-relaxed text-rose-200">
-                    {job.errorMessage}
-                  </p>
-                )}
-
-                {canRun && (
-                  <div className="flex items-center gap-1.5">
-                    {LIVE.includes(job.status) && (
-                      <button
-                        type="button"
-                        onClick={() => void act(job.id, 'cancel')}
-                        disabled={busy === job.id}
-                        className="tap inline-flex items-center gap-1 rounded-md bg-stage-800 px-2 py-1 text-[10px] text-ink-300 transition-colors hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-50"
-                      >
-                        {busy === job.id ? (
-                          <Loader2 aria-hidden className="size-3 animate-spin" />
-                        ) : (
-                          <Ban aria-hidden className="size-3" />
-                        )}
-                        取消
-                      </button>
-                    )}
-
-                    {job.status === 'FAILED' && (
-                      <button
-                        type="button"
-                        onClick={() => void act(job.id, 'retry')}
-                        disabled={busy === job.id}
-                        className="tap inline-flex items-center gap-1 rounded-md bg-stage-800 px-2 py-1 text-[10px] text-ink-300 transition-colors hover:bg-stage-700 hover:text-ink-100 disabled:opacity-50"
-                      >
-                        {busy === job.id ? (
-                          <Loader2 aria-hidden className="size-3 animate-spin" />
-                        ) : (
-                          <RotateCcw aria-hidden className="size-3" />
-                        )}
-                        重試
-                      </button>
+                    {!provider.enabled && (
+                      <span className="shrink-0 rounded bg-stage-800 px-1.5 py-0.5 text-[9px] text-ink-600">
+                        已停用
+                      </span>
                     )}
                   </div>
-                )}
-              </li>
+
+                  <p className="text-[10px] leading-relaxed text-ink-500">
+                    {provider.detail || (provider.available ? '可以用。' : '連不上。')}
+                  </p>
+
+                  <p className="flex flex-wrap gap-x-3 text-[10px] text-ink-700">
+                    <span className="font-mono">{provider.kind}</span>
+                    {provider.defaultModel && (
+                      <span className="font-mono">{provider.defaultModel}</span>
+                    )}
+                    {provider.keyHint && <span className="font-mono">金鑰 ⋯{provider.keyHint}</span>}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* ---- queue ------------------------------------------------------- */}
+        <section className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-[11px] font-medium text-ink-300">任務佇列</h2>
+            {running > 0 && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-accent-300">
+                <Loader2 aria-hidden className="size-3 animate-spin" />
+                {running} 個進行中，每 4 秒更新
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-1.5">
+              {canRun && (counts.QUEUED ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void wake()}
+                  disabled={busy === 'worker'}
+                  className="tap inline-flex items-center gap-1 rounded-lg bg-accent-600 px-2 py-1 text-[10px] text-white transition-colors hover:bg-accent-500 disabled:opacity-50"
+                >
+                  {busy === 'worker' ? (
+                    <Loader2 aria-hidden className="size-3 animate-spin" />
+                  ) : (
+                    <Play aria-hidden className="size-3" />
+                  )}
+                  執行佇列
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => router.refresh()}
+                className="tap inline-flex items-center gap-1 rounded-lg bg-stage-800 px-2 py-1 text-[10px] text-ink-300 hover:bg-stage-700"
+              >
+                <RefreshCw aria-hidden className="size-3" />
+                重新整理
+              </button>
+            </div>
+          </div>
+
+          <ul className="flex flex-wrap gap-1.5">
+            <Chip active={filter === 'all'} onClick={() => setFilter('all')}>
+              全部 {jobs.length}
+            </Chip>
+            {AI_JOB_STATUSES.filter((status) => (counts[status] ?? 0) > 0).map((status) => (
+              <Chip key={status} active={filter === status} onClick={() => setFilter(status)}>
+                {AI_JOB_STATUS_LABEL[status]} {counts[status]}
+              </Chip>
             ))}
           </ul>
-        )}
-      </section>
+
+          {shown.length === 0 ? (
+            <p className="rounded-lg bg-stage-900 px-3 py-6 text-center text-[11px] text-ink-600 ring-1 ring-stage-700/60">
+              {jobs.length === 0 ? '還沒有任何 AI 任務。' : '這個狀態底下沒有任務。'}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {shown.map((job) => (
+                <li
+                  key={job.id}
+                  className="flex flex-col gap-1.5 rounded-lg bg-stage-900 p-3 ring-1 ring-stage-700/60"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={cn(
+                        'shrink-0 rounded px-1.5 py-0.5 text-[9px]',
+                        STATUS_TONE[job.status]
+                      )}
+                    >
+                      {AI_JOB_STATUS_LABEL[job.status]}
+                    </span>
+
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-ink-100">
+                      {AI_JOB_KIND_LABEL[job.kind] ?? job.kind}
+                    </span>
+
+                    <span className="shrink-0 text-[10px] text-ink-600 tabular-nums">
+                      {formatWhen(job.createdAt)}
+                    </span>
+                  </div>
+
+                  <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-ink-600">
+                    {job.projectTitle && <span>{job.projectTitle}</span>}
+                    {job.episodeNumber !== null && (
+                      <span className="tabular-nums">
+                        EP{String(job.episodeNumber).padStart(3, '0')}
+                      </span>
+                    )}
+                    {job.model && <span className="font-mono">{job.model}</span>}
+                    {job.attemptCount > 1 && (
+                      <span>
+                        第 {job.attemptCount} / {job.maxAttempts} 次
+                      </span>
+                    )}
+                    <Cost estimated={job.estimatedCost} actual={job.actualCost} />
+                  </p>
+
+                  {job.errorMessage && (
+                    <p className="rounded bg-rose-500/10 px-2 py-1 text-[10px] leading-relaxed text-rose-200">
+                      {job.errorMessage}
+                    </p>
+                  )}
+
+                  {canRun && (
+                    <div className="flex items-center gap-1.5">
+                      {LIVE.includes(job.status) && (
+                        <button
+                          type="button"
+                          onClick={() => void act(job.id, 'cancel')}
+                          disabled={busy === job.id}
+                          className="tap inline-flex items-center gap-1 rounded-md bg-stage-800 px-2 py-1 text-[10px] text-ink-300 transition-colors hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-50"
+                        >
+                          {busy === job.id ? (
+                            <Loader2 aria-hidden className="size-3 animate-spin" />
+                          ) : (
+                            <Ban aria-hidden className="size-3" />
+                          )}
+                          取消
+                        </button>
+                      )}
+
+                      {job.status === 'FAILED' && (
+                        <button
+                          type="button"
+                          onClick={() => void act(job.id, 'retry')}
+                          disabled={busy === job.id}
+                          className="tap inline-flex items-center gap-1 rounded-md bg-stage-800 px-2 py-1 text-[10px] text-ink-300 transition-colors hover:bg-stage-700 hover:text-ink-100 disabled:opacity-50"
+                        >
+                          {busy === job.id ? (
+                            <Loader2 aria-hidden className="size-3 animate-spin" />
+                          ) : (
+                            <RotateCcw aria-hidden className="size-3" />
+                          )}
+                          重試
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        </>
+      )}
+
     </div>
   )
 }

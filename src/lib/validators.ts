@@ -868,3 +868,28 @@ export const replaceChapterSchema = z.object({
   label: z.string().trim().min(1).max(120),
   aiJobId: uuid.nullish(),
 })
+
+/**
+ * 批次生成 (Z127-3).
+ *
+ * The range is validated here rather than clamped, deliberately: a batch is
+ * the one request in this app that can spend real money per episode, and
+ * silently narrowing somebody's range is how 「我明明選了 EP006–EP020」
+ * becomes a support question. `MAX_BATCH` still caps what gets queued — this
+ * only refuses nonsense.
+ */
+export const aiBatchSchema = z.object({
+  projectId: uuid,
+  task: z.enum([
+    'OUTLINE_GENERATE',
+    'NOVEL_TO_SCRIPT',
+    'SCRIPT_ANALYZE',
+    'STORYBOARD_GENERATE',
+    'NOVEL_REVIEW',
+  ]),
+  from: z.coerce.number().int().min(1).max(9999),
+  to: z.coerce.number().int().min(1).max(9999),
+  model: z.string().trim().max(80).optional(),
+  providerId: uuid.nullable().optional(),
+  userInstruction: z.string().trim().max(4000).optional().default(''),
+})

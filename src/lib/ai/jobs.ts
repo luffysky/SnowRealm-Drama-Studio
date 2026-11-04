@@ -503,3 +503,46 @@ export async function getJobWithAttempts(jobId: string): Promise<{
 
   return { job, attempts }
 }
+
+/**
+ * 看過了，不要這一份 (Z127-5).
+ *
+ * Distinct from `requestCancel`, which refuses anything past `RUNNING` — and
+ * rightly: 「取消」 means stop doing this, and there is nothing left to stop.
+ * This is the other half of a review, and until now it did not exist: output
+ * you did not want could only be left in `AWAITING_REVIEW` forever, which is
+ * how two outlines came to be sitting in it unread.
+ *
+ * The result payload is **kept**. It cost money, the model's refusal to write
+ * EP001 from thin material was the single most useful thing it produced all
+ * day, and 「捨棄」 is a decision about the novel, not a request to destroy
+ * evidence.
+ */
+export async function discardCandidate(input: {
+  user: SessionUser
+  jobId: string
+}): Promise<AiJobRow> {
+  const [updated] = await db
+    .update(aiJobs)
+    .set({
+      status: 'CANCELLED',
+      finishedAt: sql`coalesce(${aiJobs.finishedAt}, now())`,
+      progressNote: '已由人工捨棄',
+      updatedAt: new Date(),
+    })
+    .where(and(eq(aiJobs.id, input.jobId), eq(aiJobs.status, 'AWAITING_REVIEW')))
+    .returning()
+
+  if (!updated) throw ApiError.badRequest('只有「待人工確認」的任務可以捨棄')
+
+  await logActivity({
+    user: input.user,
+    action: 'ai.discard',
+    entityType: 'ai_job',
+    entityId: updated.id,
+    projectId: updated.projectId,
+    summary: `捨棄 AI 產出（${updated.kind}）`,
+  })
+
+  return updated
+}
