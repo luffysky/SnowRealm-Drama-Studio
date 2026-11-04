@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation'
 import { FloatingChat } from '@/components/chat/FloatingChat'
+import { MiniPlayer } from '@/components/studio/MiniPlayer'
+import { PlayerProvider } from '@/components/studio/PlayerProvider'
 import { getSessionUser } from '@/lib/auth/session'
 import { StudioShell } from '@/components/studio/StudioShell'
 import { openDirectConversation } from '@/lib/chat'
@@ -24,9 +26,19 @@ export default async function StudioLayout({ children }: { children: React.React
   ])
 
   return (
-    <StudioShell user={user}>
-      {children}
-      <FloatingChat conversationId={conversationId} meId={user.id} iceServers={iceServers} />
-    </StudioShell>
+    /*
+     * 播放器在這一層 (Z124)。
+     *
+     * The audio element has to live above the pages or navigating unmounts
+     * it — opening the episode you are scoring used to stop the music you
+     * were scoring it to.
+     */
+    <PlayerProvider>
+      <StudioShell user={user}>
+        {children}
+        <FloatingChat conversationId={conversationId} meId={user.id} iceServers={iceServers} />
+        <MiniPlayer />
+      </StudioShell>
+    </PlayerProvider>
   )
 }

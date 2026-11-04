@@ -15,10 +15,10 @@ import {
   VolumeX,
 } from 'lucide-react'
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { assetUrl } from '@/lib/asset-url'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MUSIC_CATEGORY_LABEL } from '@/lib/music-view'
 import { cn, formatDurationZh } from '@/lib/utils'
+import { usePlayer, type PlayerTrack } from '@/components/studio/PlayerProvider'
 
 /**
  * 音樂播放器 — every track in the studio, with a queue.
@@ -33,155 +33,63 @@ import { cn, formatDurationZh } from '@/lib/utils'
  * and 上一首 after a random jump has nowhere to go back to.
  */
 
-export type PlayerTrack = {
-  assetId: string
-  projectId: string
-  projectTitle: string
-  title: string
-  name: string
-  artist: string
-  category: string
-  durationSec: number | null
-  licenseStatus: string
-}
-
-type RepeatMode = 'off' | 'all' | 'one'
+/*
+ * 型別搬到 `PlayerProvider` 了 (Z124)——播放狀態在那裡，型別跟著它走，
+ * 兩份定義遲早會分岔。這裡重新匯出，呼叫端的 import 不用全部改。
+ */
+export type { PlayerTrack }
 
 export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  /*
+   * 播放狀態不在這裡 (Z124)。
+   *
+   * It lives in `PlayerProvider`, mounted in the studio layout, because an
+   * `<audio>` element owned by a page stops the moment you navigate — and
+   * the thing people do while listening is navigate. This component is the
+   * full-size view onto that: the queue, the list, the controls.
+   */
+  const player = usePlayer()
 
-  const [index, setIndex] = useState(0)
-  const [playing, setPlaying] = useState(false)
-  const [current, setCurrent] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [volume, setVolume] = useState(1)
-  const [muted, setMuted] = useState(false)
-  const [repeat, setRepeat] = useState<RepeatMode>('off')
-  const [shuffle, setShuffle] = useState(false)
   const [filter, setFilter] = useState('')
-  const [error, setError] = useState<string | null>(null)
 
   /*
-   * The play order. Shuffling produces one permutation and keeps it until
-   * shuffle is turned off again, so 上一首 still means the track you just
-   * heard and every track plays exactly once.
+   * Hand the library over. `load` keeps the queue — and whatever is playing —
+   * when the same list arrives again, so coming back to this page does not
+   * restart the song.
    */
-  const [orderState, setOrderState] = useState<number[]>(() => tracks.map((_, i) => i))
-
-  /*
-   * Derived, not stored, when the list length changes under it — a stale
-   * permutation would index past the end.
-   */
-  const order =
-    orderState.length === tracks.length ? orderState : tracks.map((_, i) => i)
-
-  /*
-   * Shuffling happens here, in the click, rather than during render: a
-   * `Math.random()` in a `useMemo` is not a pure computation, and React is
-   * free to re-run it, which would reorder the queue under someone mid-track.
-   */
-  function toggleShuffle() {
-    const next = !shuffle
-    setShuffle(next)
-    setOrderState(next ? shuffled(tracks.length) : tracks.map((_, i) => i))
-  }
-
-  const track = tracks[index]
-
-  const step = useCallback(
-    (direction: 1 | -1) => {
-      const position = order.indexOf(index)
-      const next = position + direction
-
-      if (next < 0) {
-        setIndex(order[order.length - 1] ?? 0)
-        return
-      }
-      if (next >= order.length) {
-        // Stop at the end unless 循環全部 is on, rather than looping silently.
-        if (repeat === 'all') setIndex(order[0] ?? 0)
-        else setPlaying(false)
-        return
-      }
-
-      setIndex(order[next] ?? 0)
-    },
-    [order, index, repeat]
-  )
-
-  /* ---------------------------------------------------------------- audio */
-
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio) return
+    player.load(tracks)
+  }, [tracks, player])
 
-    const onTime = () => setCurrent(audio.currentTime)
-    const onMeta = () => {
-      if (Number.isFinite(audio.duration)) setDuration(audio.duration)
-    }
-    const onPlay = () => setPlaying(true)
-    const onPause = () => setPlaying(false)
-    const onError = () => setError('這個檔案瀏覽器播不了。')
-    /*
-     * A new src resets the readout here rather than in an effect on the track
-     * id: the element is the thing that knows a different file started, and
-     * `playing` carries over so picking the next track does not stop the
-     * music the way a bare src swap does.
-     */
-    const onLoadStart = () => {
-      setCurrent(0)
-      setError(null)
-      if (playing) void audio.play().catch(() => setPlaying(false))
-    }
-    const onEnded = () => {
-      if (repeat === 'one') {
-        audio.currentTime = 0
-        void audio.play().catch(() => {})
-        return
-      }
-      step(1)
-    }
+  const {
+    index,
+    playing,
+    current,
+    duration,
+    volume,
+    muted,
+    repeat,
+    shuffle,
+    error,
+    track,
+    toggle,
+    step,
+    seek,
+    setVolume,
+    setMuted,
+    setRepeat,
+  } = player
 
-    audio.addEventListener('timeupdate', onTime)
-    audio.addEventListener('loadedmetadata', onMeta)
-    audio.addEventListener('play', onPlay)
-    audio.addEventListener('pause', onPause)
-    audio.addEventListener('error', onError)
-    audio.addEventListener('ended', onEnded)
-    audio.addEventListener('loadstart', onLoadStart)
+  const setIndex = player.playAt
+  const toggleShuffle = () => player.setShuffle(!shuffle)
 
-    return () => {
-      audio.removeEventListener('timeupdate', onTime)
-      audio.removeEventListener('loadedmetadata', onMeta)
-      audio.removeEventListener('play', onPlay)
-      audio.removeEventListener('pause', onPause)
-      audio.removeEventListener('error', onError)
-      audio.removeEventListener('ended', onEnded)
-      audio.removeEventListener('loadstart', onLoadStart)
-    }
-  }, [repeat, step, playing])
-
-  useEffect(() => {
-    const audio = audioRef.current
-    if (audio) audio.volume = muted ? 0 : volume
-  }, [volume, muted])
-
-
-  const toggle = useCallback(() => {
-    const audio = audioRef.current
-    if (!audio) return
-    if (audio.paused) void audio.play().catch(() => setError('播放被瀏覽器擋下了，再按一次。'))
-    else audio.pause()
-  }, [])
 
   const seekTo = useCallback(
     (seconds: number) => {
-      const audio = audioRef.current
-      if (!audio || duration <= 0) return
-      audio.currentTime = Math.min(Math.max(seconds, 0), duration)
-      setCurrent(audio.currentTime)
+      if (duration <= 0) return
+      seek(Math.min(Math.max(seconds, 0), duration))
     },
-    [duration]
+    [duration, seek]
   )
 
   /* --------------------------------------------------------------- queue */
@@ -207,8 +115,7 @@ export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
 
   return (
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-      { }
-      <audio ref={audioRef} key={track.assetId} src={assetUrl(track.assetId)} preload="metadata" />
+      {/* The audio element is in `PlayerProvider`, above every page (Z124). */}
 
       {/* ---- now playing ------------------------------------------------ */}
       <section className="panel flex flex-col gap-4 rounded-xl bg-stage-900 p-5 ring-1 ring-stage-700">
@@ -301,7 +208,7 @@ export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
             }
             active={repeat !== 'off'}
             onClick={() =>
-              setRepeat((mode) => (mode === 'off' ? 'all' : mode === 'all' ? 'one' : 'off'))
+              setRepeat(repeat === 'off' ? 'all' : repeat === 'all' ? 'one' : 'off')
             }
           >
             {repeat === 'one' ? (
@@ -315,7 +222,7 @@ export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
             <IconButton
               label={muted ? '取消靜音' : '靜音'}
               active={muted}
-              onClick={() => setMuted((on) => !on)}
+              onClick={() => setMuted(!muted)}
             >
               {muted ? (
                 <VolumeX aria-hidden className="size-4" />
@@ -385,10 +292,7 @@ export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
               <li key={item.assetId}>
                 <button
                   type="button"
-                  onClick={() => {
-                    setIndex(i)
-                    setPlaying(true)
-                  }}
+                  onClick={() => setIndex(i)}
                   className={cn(
                     'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
                     i === index
@@ -461,19 +365,3 @@ function IconButton({
   )
 }
 
-/** Fisher-Yates. Called from an event handler, never during render. */
-function shuffled(length: number): number[] {
-  const next = Array.from({ length }, (_, i) => i)
-
-  for (let i = next.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const a = next[i]
-    const b = next[j]
-    if (a !== undefined && b !== undefined) {
-      next[i] = b
-      next[j] = a
-    }
-  }
-
-  return next
-}
