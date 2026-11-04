@@ -11,6 +11,7 @@ import { assetUrl } from '@/lib/asset-url'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { acceptFor, familyOf, resolveMimeType } from '@/lib/media-types'
 import { cn, formatDurationZh } from '@/lib/utils'
+import { GENRE_TAGS, MOOD_TAGS, suggestTags } from '@/lib/music-tags'
 
 /**
  * 84 音樂新增／編輯 (Z6).
@@ -66,6 +67,7 @@ export function MusicForm({
   assetId,
   initial,
   fileInfo,
+  usedTags,
 }: {
   projectId: string
   mode: 'create' | 'edit'
@@ -74,6 +76,8 @@ export function MusicForm({
   initial?: MusicFormValues
   /** Shown when editing, so the file being described is identifiable. */
   fileInfo?: { name: string; sizeBytes: number; durationSec: number | null; hasWaveform: boolean }
+  /** Tags already used in this project, offered beside the presets (Z119). */
+  usedTags?: { genre: string[]; mood: string[] }
 }) {
   const router = useRouter()
   const toast = useToast()
@@ -301,15 +305,17 @@ export function MusicForm({
 
         <TagField
           label="風格標籤"
-          hint="例如：古風、大氣、勵志"
+          hint="點就加上去，沒有的直接打，按 Enter 建立"
           values={values.genreTags}
+          suggestions={suggestTags(GENRE_TAGS, usedTags?.genre ?? [])}
           onChange={(genreTags) => setValues({ ...values, genreTags })}
         />
 
         <TagField
           label="情緒氛圍"
-          hint="例如：磅礡、熱血、溫暖"
+          hint="點就加上去，沒有的直接打，按 Enter 建立"
           values={values.moodTags}
+          suggestions={suggestTags(MOOD_TAGS, usedTags?.mood ?? [])}
           onChange={(moodTags) => setValues({ ...values, moodTags })}
         />
 
@@ -428,14 +434,18 @@ function TagField({
   label,
   hint,
   values,
+  suggestions = [],
   onChange,
 }: {
   label: string
   hint: string
   values: string[]
+  /** Click to add. Typing still works for anything not on the list. */
+  suggestions?: string[]
   onChange: (values: string[]) => void
 }) {
   const [draft, setDraft] = useState('')
+  const unused = suggestions.filter((tag) => !values.includes(tag))
 
   function commit() {
     const tag = draft.trim()
@@ -485,6 +495,32 @@ function TagField({
           className="min-w-24 flex-1 bg-transparent px-1 text-xs text-ink-50 placeholder:text-ink-600 focus:outline-none"
         />
       </div>
+
+      {/*
+        按的那一排 (Z119).
+
+        Only the ones not already chosen, so the row shrinks as you pick —
+        a suggestion you have taken is no longer a suggestion, and leaving it
+        there invites a click that does nothing.
+      */}
+      {unused.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {unused.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => {
+                if (values.length >= 12) return
+                onChange([...values, tag])
+              }}
+              disabled={values.length >= 12}
+              className="tap rounded-full bg-stage-850 px-2 py-0.5 text-[10px] text-ink-400 ring-1 ring-stage-700 transition-colors hover:bg-stage-800 hover:text-ink-100 disabled:opacity-40"
+            >
+              ＋{tag}
+            </button>
+          ))}
+        </div>
+      )}
     </Field>
   )
 }

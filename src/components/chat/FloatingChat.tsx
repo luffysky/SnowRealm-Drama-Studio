@@ -13,6 +13,8 @@ import {
 } from '@/components/chat/useChatChannel'
 import { notify, requestNotifications, useNotificationPermission } from '@/lib/notifications'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import { useDraggableBall } from '@/components/chat/useDraggableBall'
+import { cn } from '@/lib/utils'
 
 /**
  * 懸浮對話球.
@@ -58,6 +60,14 @@ export function FloatingChat({
   iceServers: RTCIceServer[]
 }) {
   const pathname = usePathname()
+  /** 拖得動，而且記得放在哪 (Z120)。 */
+  const {
+    ref: ballRef,
+    position: ballPosition,
+    dragging: ballDragging,
+    justDragged,
+    handlers: ballHandlers,
+  } = useDraggableBall()
   const [state, setState] = useState<'hidden' | 'ball' | 'open'>('ball')
   const restored = useRef(false)
   const [draft, setDraft] = useState('')
@@ -256,7 +266,28 @@ export function FloatingChat({
 
   if (state === 'ball') {
     return (
-      <div style={DOCK_CLEARANCE_BALL} className="fixed right-4 bottom-4 z-40 flex items-center gap-1.5">
+      <div
+        ref={ballRef}
+        {...ballHandlers}
+        /*
+         * 可以拖走 (Z120).
+         *
+         * Once it has been moved, its own coordinates win over the corner the
+         * class sets — and `bottom`/`right` have to be cleared or the two
+         * fight and it lands somewhere neither asked for.
+         */
+        style={
+          ballPosition
+            ? { left: ballPosition.x, top: ballPosition.y, right: 'auto', bottom: 'auto' }
+            : DOCK_CLEARANCE_BALL
+        }
+        className={cn(
+          'fixed right-4 bottom-4 z-40 flex touch-none items-center gap-1.5',
+          ballDragging ? 'cursor-grabbing' : 'cursor-grab',
+          // No transition while dragging, or it lags behind the finger.
+          !ballDragging && 'transition-[left,top] duration-200'
+        )}
+      >
         {/* Collapsed, but still able to ring. */}
         <span className="hidden">{callPanel}</span>
 
@@ -272,7 +303,11 @@ export function FloatingChat({
 
         <button
           type="button"
-          onClick={() => persist('open')}
+          onClick={() => {
+            // A drag that ends on the ball must not also open the panel.
+            if (justDragged()) return
+            persist('open')
+          }}
           aria-label={unread > 0 ? `對話，${unread} 則未讀` : '對話'}
           className="bg-brand-gradient glow-accent relative grid size-14 place-items-center rounded-full text-white transition-transform hover:scale-105"
         >

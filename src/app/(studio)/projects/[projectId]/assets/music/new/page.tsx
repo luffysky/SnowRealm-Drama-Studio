@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { MusicForm } from '@/components/assets/MusicForm'
 import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
+import { usedMusicTags } from '@/lib/music-tags-db'
 
 export const metadata: Metadata = { title: '新增音樂' }
 
@@ -17,6 +18,8 @@ export default async function NewMusicPage({ params }: Params) {
 
   const { projectId } = await params
   const project = await requireProjectPage(projectId, user.id)
+  // 這個作品已經用過的標籤，跟預設的一起列出來給人按 (Z119)。
+  const usedTags = await usedMusicTags(project.id)
 
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
@@ -33,7 +36,7 @@ export default async function NewMusicPage({ params }: Params) {
         </Link>
       </header>
 
-      <MusicForm projectId={project.id} mode="create" />
+      <MusicForm projectId={project.id} mode="create" usedTags={usedTags} />
     </div>
   )
 }

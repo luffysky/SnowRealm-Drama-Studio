@@ -6,6 +6,7 @@ import { MusicForm } from '@/components/assets/MusicForm'
 import { getSessionUser } from '@/lib/auth/session'
 import { getMusic } from '@/lib/music'
 import { requireProjectPage } from '@/lib/project-access'
+import { usedMusicTags } from '@/lib/music-tags-db'
 
 export const metadata: Metadata = { title: '編輯音樂' }
 
@@ -19,7 +20,11 @@ export default async function EditMusicPage({ params }: Params) {
   const { projectId, assetId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const track = await getMusic(project.id, assetId)
+  const [track, usedTags] = await Promise.all([
+    getMusic(project.id, assetId),
+    // 這個作品已經用過的標籤，跟預設的一起列出來給人按 (Z119)。
+    usedMusicTags(project.id),
+  ])
   if (!track) notFound()
 
   return (
@@ -40,6 +45,7 @@ export default async function EditMusicPage({ params }: Params) {
       <MusicForm
         projectId={project.id}
         mode="edit"
+        usedTags={usedTags}
         assetId={track.assetId}
         initial={{
           title: track.title || track.name,
