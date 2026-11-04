@@ -76,6 +76,14 @@ export const READER_FONT_STACK: Record<ReaderFont, string> = {
   sans: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif',
 }
 
+export const SPEECH_RATE_MIN = 0.5
+export const SPEECH_RATE_MAX = 2
+export const SPEECH_RATE_DEFAULT = 1
+
+export const SPEECH_PITCH_MIN = 0.5
+export const SPEECH_PITCH_MAX = 1.5
+export const SPEECH_PITCH_DEFAULT = 1
+
 export type ReaderSettings = {
   mode: ReadingMode
   theme: ReaderTheme
@@ -83,6 +91,10 @@ export type ReaderSettings = {
   fontSize: number
   lineHeight: number
   brightness: number
+  /** 朗讀的音色。空字串＝系統預設。 */
+  voiceId: string
+  speechRate: number
+  speechPitch: number
 }
 
 export const READER_DEFAULTS: ReaderSettings = {
@@ -92,9 +104,12 @@ export const READER_DEFAULTS: ReaderSettings = {
   fontSize: FONT_SIZE_DEFAULT,
   lineHeight: LINE_HEIGHT_DEFAULT,
   brightness: BRIGHTNESS_DEFAULT,
+  voiceId: '',
+  speechRate: SPEECH_RATE_DEFAULT,
+  speechPitch: SPEECH_PITCH_DEFAULT,
 }
 
-export const READER_STORAGE_KEY = 'srds.reader.settings.v1'
+export const READER_STORAGE_KEY = 'srds.reader.settings.v2'
 
 const clamp = (value: number, min: number, max: number) =>
   Number.isFinite(value) ? Math.min(Math.max(value, min), max) : min
@@ -129,6 +144,11 @@ export function loadReaderSettings(): ReaderSettings {
       fontSize: clamp(Number(parsed.fontSize), FONT_SIZE_MIN, FONT_SIZE_MAX),
       lineHeight: clamp(Number(parsed.lineHeight), LINE_HEIGHT_MIN, LINE_HEIGHT_MAX),
       brightness: clamp(Number(parsed.brightness), BRIGHTNESS_MIN, BRIGHTNESS_MAX),
+      // A voice id from another machine simply will not match any installed
+      // voice, and the speech layer falls back to the system default.
+      voiceId: typeof parsed.voiceId === 'string' ? parsed.voiceId : '',
+      speechRate: clamp(Number(parsed.speechRate), SPEECH_RATE_MIN, SPEECH_RATE_MAX),
+      speechPitch: clamp(Number(parsed.speechPitch), SPEECH_PITCH_MIN, SPEECH_PITCH_MAX),
     }
   } catch {
     return READER_DEFAULTS

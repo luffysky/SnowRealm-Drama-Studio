@@ -114,3 +114,51 @@ describe('showsChapterTitle', () => {
     expect(showsChapterTitle(many('三文錢的生意'), '')).toBe(false)
   })
 })
+
+/**
+ * 朗讀的斷句（Z100 前置）。
+ *
+ * 長字串在 Chrome 會被截斷，而且一段話一旦開始唸就沒辦法從中間接續——
+ * 所以要切。切在標點後面是因為那個標點正是合成器用來換氣的依據，
+ * 丟掉它整段會黏成一條線唸完。
+ */
+describe('splitForSpeech', () => {
+  it('切在句末標點後面，而且把標點留著', async () => {
+    const { splitForSpeech } = await import('@/lib/speech')
+
+    const out = splitForSpeech(['她猛地睜開眼。映入眼簾的不是夜市。'], 10)
+
+    expect(out).toEqual(['她猛地睜開眼。', '映入眼簾的不是夜市。'])
+  })
+
+  it('短句會合併到上限為止，不是一句一段', async () => {
+    const { splitForSpeech } = await import('@/lib/speech')
+
+    // 一句一段會讓合成器在每個句號都停頓一次，聽起來像在報帳。
+    const out = splitForSpeech(['一。二。三。'], 100)
+
+    expect(out).toEqual(['一。二。三。'])
+  })
+
+  it('沒有標點的長段落也會被切開', async () => {
+    const { splitForSpeech } = await import('@/lib/speech')
+
+    const long = '字'.repeat(500)
+    const out = splitForSpeech([long], 180)
+
+    // 沒有可切的位置時至少不會整段丟給合成器。
+    expect(out.join('')).toBe(long)
+  })
+
+  it('空白段落不會變成空的 utterance', async () => {
+    const { splitForSpeech } = await import('@/lib/speech')
+
+    expect(splitForSpeech(['', '   ', '正文。'])).toEqual(['正文。'])
+  })
+
+  it('問號與驚嘆號也算句末', async () => {
+    const { splitForSpeech } = await import('@/lib/speech')
+
+    expect(splitForSpeech(['三百文？破車！'], 5)).toEqual(['三百文？', '破車！'])
+  })
+})

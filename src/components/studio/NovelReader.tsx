@@ -1,10 +1,30 @@
 'use client'
 
-import { ChevronLeft, ChevronRight, List, Settings2, X } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  List,
+  Pause,
+  Play,
+  Settings2,
+  Square,
+  X,
+} from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
+import {
+  SPEECH_PITCH_MAX,
+  SPEECH_PITCH_MIN,
+  SPEECH_RATE_MAX,
+  SPEECH_RATE_MIN,
   BRIGHTNESS_MAX,
   BRIGHTNESS_MIN,
   FONT_SIZE_MAX,
@@ -25,6 +45,15 @@ import {
   saveReaderSettings,
   type ReaderSettings,
 } from '@/lib/novel-reader-view'
+import {
+  loadVoices,
+  pauseSpeech,
+  resumeSpeech,
+  speak,
+  speechSupported,
+  splitForSpeech,
+  type Voice,
+} from '@/lib/speech'
 import { cn } from '@/lib/utils'
 
 /**
@@ -82,6 +111,15 @@ export function NovelReader({
   const settings = stored ?? (ready ? loadReaderSettings() : READER_DEFAULTS)
   const router = useRouter()
   const [panel, setPanel] = useState<'none' | 'toc' | 'settings'>('none')
+
+  /* ---------------------------------------------------------------- 朗讀 */
+
+  const [voices, setVoices] = useState<Voice[]>([])
+  const [reading, setReading] = useState<'off' | 'playing' | 'paused'>('off')
+  /** Which chunk is being spoken, for the highlight. */
+  const [spokenAt, setSpokenAt] = useState(-1)
+  const stopRef = useRef<(() => void) | null>(null)
+  const spokenRef = useRef<HTMLParagraphElement | null>(null)
   const [index, setIndex] = useState(() => {
     const found = chapters.findIndex((c) => c.id === initialChapterId)
     return found >= 0 ? found : 0
@@ -188,6 +226,89 @@ export function NovelReader({
     [paged, page, pageCount, index, chapters.length, goChapter, settings.mode]
   )
 
+  const chunks = useMemo(
+    () => (chapter ? splitForSpeech(chapter.paragraphs) : []),
+    [chapter]
+  )
+
+  useEffect(() => {
+    if (!speechSupported()) return
+    let cancelled = false
+    void loadVoices().then((list) => {
+      if (!cancelled) setVoices(list)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const stopReading = useCallback(() => {
+    stopRef.current?.()
+    stopRef.current = null
+    setReading('off')
+    setSpokenAt(-1)
+  }, [])
+
+  // Leaving the page must silence it. Speech is a global queue that outlives
+  // the component, so an unmounted reader would keep talking.
+  useEffect(() => () => stopReading(), [stopReading])
+
+  const startReading = useCallback(() => {
+    if (chunks.length === 0) return
+
+    stopRef.current?.()
+    setReading('playing')
+
+    stopRef.current = speak(chunks, {
+      voiceId: settings.voiceId || undefined,
+      rate: settings.speechRate,
+      pitch: settings.speechPitch,
+      volume: 1,
+      onBoundary: (i) => setSpokenAt(i),
+      onEnd: () => {
+        setReading('off')
+        setSpokenAt(-1)
+        /*
+         * Roll into the next chapter. Reading a novel aloud and stopping dead
+         * at every chapter break is the one thing this feature exists to
+         * avoid.
+         */
+        if (index < chapters.length - 1) {
+          goChapter(index + 1)
+          // The new chapter's chunks are not computed yet; let the render
+          // settle before speaking them.
+          window.setTimeout(() => setReading('playing'), 50)
+        }
+      },
+      onError: () => {
+        setReading('off')
+        setSpokenAt(-1)
+      },
+    })
+  }, [chunks, settings.voiceId, settings.speechRate, settings.speechPitch, index, chapters.length, goChapter])
+
+  /*
+   * Picks the reading back up after an automatic chapter change. Keyed on the
+   * chunks rather than the index, so it runs once the new text is ready.
+   */
+  const autoplay = useRef(false)
+
+  useEffect(() => {
+    if (reading !== 'playing') return
+    if (stopRef.current) return
+    if (!autoplay.current) {
+      autoplay.current = true
+      return
+    }
+    startReading()
+  }, [chunks, reading, startReading])
+
+  /** Follows the voice down the page, so reading along needs no scrolling. */
+  useEffect(() => {
+    if (reading !== 'playing' || spokenAt < 0) return
+    spokenRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [spokenAt, reading])
+
   /* ------------------------------------------------------------- gestures */
 
   const touch = useRef<{ x: number; y: number } | null>(null)
@@ -241,11 +362,37 @@ export function NovelReader({
         </h2>
       </header>
 
-      {chapter.paragraphs.map((paragraph, i) => (
-        <p key={i} style={{ textIndent: '2em', margin: '0 0 0.9em' }}>
-          {paragraph}
-        </p>
-      ))}
+      {/*
+        While reading aloud the prose is rendered from the same chunks the
+        synthesiser is working through, so the highlight lands on exactly the
+        sentence being spoken. Rendering the paragraphs and guessing which
+        sentence that maps to would drift within a page.
+      */}
+      {reading === 'off'
+        ? chapter.paragraphs.map((paragraph, i) => (
+            <p key={i} style={{ textIndent: '2em', margin: '0 0 0.9em' }}>
+              {paragraph}
+            </p>
+          ))
+        : chunks.map((chunk, i) => (
+            <p
+              key={i}
+              ref={i === spokenAt ? spokenRef : undefined}
+              style={{
+                textIndent: '2em',
+                margin: '0 0 0.9em',
+                transition: 'background-color 160ms',
+                ...(i === spokenAt
+                  ? {
+                      backgroundColor: `${theme.faint}33`,
+                      borderRadius: '0.25em',
+                    }
+                  : {}),
+              }}
+            >
+              {chunk}
+            </p>
+          ))}
     </article>
   )
 
@@ -314,6 +461,52 @@ export function NovelReader({
         <span className="min-w-0 flex-1 truncate text-center text-[11px]" style={{ color: theme.faint }}>
           {bookTitle}
         </span>
+
+        {/*
+          Only when the browser can actually synthesise speech. Linux without
+          a speech engine has no voices at all, and a play button that does
+          nothing is worse than no play button.
+        */}
+        {speechSupported() && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                if (reading === 'playing') {
+                  pauseSpeech()
+                  setReading('paused')
+                } else if (reading === 'paused') {
+                  resumeSpeech()
+                  setReading('playing')
+                } else {
+                  startReading()
+                }
+              }}
+              aria-label={reading === 'playing' ? '暂停朗讀' : '朗讀'}
+              title={reading === 'playing' ? '暂停朗讀' : '朗讀這一章'}
+              className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
+            >
+              {reading === 'playing' ? (
+                <Pause aria-hidden className="size-3.5" />
+              ) : (
+                <Play aria-hidden className="size-3.5" />
+              )}
+              {reading === 'off' ? '朗讀' : reading === 'paused' ? '繼續' : '暂停'}
+            </button>
+
+            {reading !== 'off' && (
+              <button
+                type="button"
+                onClick={stopReading}
+                aria-label="停止朗讀"
+                title="停止朗讀"
+                className="tap inline-flex items-center rounded-md px-1.5 py-1 transition-opacity hover:opacity-70"
+              >
+                <Square aria-hidden className="size-3" />
+              </button>
+            )}
+          </>
+        )}
 
         <button
           type="button"
@@ -571,8 +764,72 @@ export function NovelReader({
                   onChange={(brightness) => update({ brightness })}
                 />
 
+                {speechSupported() && (
+                  <>
+                    <Field
+                      label="朗讀音色"
+                      hint={
+                        voices.length === 0
+                          ? '這台裝置沒有裝語音引擎'
+                          : '音色來自作業系統，換一台電腦清單會不一樣。'
+                      }
+                    >
+                      <select
+                        value={settings.voiceId}
+                        onChange={(event) => {
+                          update({ voiceId: event.target.value })
+                          // Restart so the change is audible immediately
+                          // rather than at the next chapter.
+                          if (reading !== 'off') {
+                            stopReading()
+                            window.setTimeout(startReading, 60)
+                          }
+                        }}
+                        disabled={voices.length === 0}
+                        className="w-full rounded-md border px-2 py-1.5 text-[11px]"
+                        style={{
+                          background: 'transparent',
+                          borderColor: `${theme.faint}55`,
+                          color: theme.ink,
+                        }}
+                      >
+                        <option value="">系統預設</option>
+                        {voices.map((voice) => (
+                          <option key={voice.id} value={voice.id}>
+                            {voice.name}（{voice.lang}）
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+
+                    <Slider
+                      label="朗讀語速"
+                      value={settings.speechRate}
+                      min={SPEECH_RATE_MIN}
+                      max={SPEECH_RATE_MAX}
+                      step={0.05}
+                      display={`${settings.speechRate.toFixed(2)}×`}
+                      theme={theme}
+                      onChange={(speechRate) => update({ speechRate })}
+                    />
+
+                    <Slider
+                      label="朗讀音調"
+                      value={settings.speechPitch}
+                      min={SPEECH_PITCH_MIN}
+                      max={SPEECH_PITCH_MAX}
+                      step={0.05}
+                      display={settings.speechPitch.toFixed(2)}
+                      theme={theme}
+                      onChange={(speechPitch) => update({ speechPitch })}
+                    />
+                  </>
+                )}
+
                 <p className="text-[10px] leading-relaxed" style={{ color: theme.faint }}>
                   這些設定只存在這台裝置的瀏覽器裡，不會同步給另一位成員。
+                  <br />
+                  朗讀用瀏覽器內建的語音合成，不計費也不用聯網。
                 </p>
               </div>
             )}
