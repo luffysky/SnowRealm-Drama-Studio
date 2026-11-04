@@ -46,6 +46,7 @@ import {
   type ReaderSettings,
 } from '@/lib/novel-reader-view'
 import { ReadingRail } from '@/components/studio/ReadingRail'
+import { castChunks, type CastMember } from '@/lib/narration'
 import {
   loadVoices,
   speak,
@@ -86,11 +87,14 @@ export type ReaderChapter = {
 export function NovelReader({
   bookTitle,
   chapters,
+  cast = [],
   initialChapterId,
   exitHref,
 }: {
   bookTitle: string
   chapters: ReaderChapter[]
+  /** 分角色朗讀用的角色名單 (Z111)。空陣列＝全部用旁白聲。 */
+  cast?: CastMember[]
   initialChapterId?: string | undefined
   /** Where 退出 goes — the shelf, or the editor it was opened from. */
   exitHref: string
@@ -226,10 +230,24 @@ export function NovelReader({
     [paged, page, pageCount, index, chapters.length, goChapter, settings.mode]
   )
 
-  const chunks = useMemo(
-    () => (chapter ? splitForSpeech(chapter.paragraphs) : []),
-    [chapter]
-  )
+  const chunks = useMemo(() => {
+    if (!chapter) return []
+    const plain = splitForSpeech(chapter.paragraphs)
+
+    /*
+     * 分角色朗讀 (Z111). Off unless asked for, and a no-op without a cast —
+     * `castChunks` then returns the chunks untouched, so the narrator reads
+     * everything exactly as before.
+     */
+    if (!settings.castVoices || cast.length === 0) return plain
+
+    return castChunks(
+      plain,
+      chapter.paragraphs,
+      cast,
+      voices.map((voice) => ({ id: voice.id, lang: voice.lang }))
+    )
+  }, [chapter, cast, settings.castVoices, voices])
 
   useEffect(() => {
     if (!speechSupported()) return
@@ -833,6 +851,52 @@ export function NovelReader({
                         ))}
                       </select>
                     </Field>
+
+                    {/*
+                      分角色朗讀 (Z111).
+
+                      Only offered when this work has characters to match
+                      against — with none, the toggle would be a switch that
+                      provably does nothing.
+                    */}
+                    {cast.length > 0 && (
+                      <Field
+                        label="分角色朗讀"
+                        hint={`對白換成角色的聲音，語氣也會調語速。認不出是誰說的就用旁白聲。這部作品有 ${cast.length} 個角色。`}
+                      >
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={settings.castVoices}
+                          onClick={() => {
+                            update({ castVoices: !settings.castVoices })
+                            if (reading !== 'off') {
+                              stopReading()
+                              window.setTimeout(startReading, 60)
+                            }
+                          }}
+                          className="tap flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-[11px]"
+                          style={{ borderColor: `${theme.faint}55`, color: theme.ink }}
+                        >
+                          <span>{settings.castVoices ? '開著' : '關著（全部旁白聲）'}</span>
+                          <span
+                            aria-hidden
+                            className="relative inline-block h-4 w-7 rounded-full transition-colors"
+                            style={{
+                              background: settings.castVoices ? theme.ink : `${theme.faint}55`,
+                            }}
+                          >
+                            <span
+                              className="absolute top-0.5 size-3 rounded-full transition-all"
+                              style={{
+                                background: theme.bg,
+                                left: settings.castVoices ? '0.875rem' : '0.125rem',
+                              }}
+                            />
+                          </span>
+                        </button>
+                      </Field>
+                    )}
 
                     <Slider
                       label="朗讀語速"

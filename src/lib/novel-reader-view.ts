@@ -95,6 +95,14 @@ export type ReaderSettings = {
   voiceId: string
   speechRate: number
   speechPitch: number
+  /**
+   * 分角色朗讀 (Z111)。
+   *
+   * Off by default. Attribution is guesswork at the edges, and somebody who
+   * just wants the chapter read to them should not have to notice that a
+   * voice changed for a reason they did not ask about.
+   */
+  castVoices: boolean
 }
 
 export const READER_DEFAULTS: ReaderSettings = {
@@ -107,6 +115,7 @@ export const READER_DEFAULTS: ReaderSettings = {
   voiceId: '',
   speechRate: SPEECH_RATE_DEFAULT,
   speechPitch: SPEECH_PITCH_DEFAULT,
+  castVoices: false,
 }
 
 export const READER_STORAGE_KEY = 'srds.reader.settings.v2'
@@ -149,6 +158,7 @@ export function loadReaderSettings(): ReaderSettings {
       voiceId: typeof parsed.voiceId === 'string' ? parsed.voiceId : '',
       speechRate: clamp(Number(parsed.speechRate), SPEECH_RATE_MIN, SPEECH_RATE_MAX),
       speechPitch: clamp(Number(parsed.speechPitch), SPEECH_PITCH_MIN, SPEECH_PITCH_MAX),
+      castVoices: parsed.castVoices === true,
     }
   } catch {
     return READER_DEFAULTS

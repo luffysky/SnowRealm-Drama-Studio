@@ -88,6 +88,19 @@ export function loadVoices(): Promise<Voice[]> {
 export type SpeechChunk = {
   text: string
   /**
+   * Whose line this is, and how it sounds (Z111).
+   *
+   * All optional: without a cast every chunk is narration, which is exactly
+   * what this was before. `rate` and `pitch` are **multipliers** on whatever
+   * the reader has set, so someone who reads at 1.4x keeps their pace and
+   * still hears a raised voice as raised.
+   */
+  voiceId?: string | null
+  rate?: number
+  pitch?: number
+  /** The character's name, for showing who is speaking. */
+  speaker?: string | null
+  /**
    * Which paragraph this came from.
    *
    * Carried explicitly because the reader highlights the paragraph being
@@ -187,6 +200,10 @@ export type SpeechHandle = {
  * stall — measured at around 100ms — and short enough that a reader notices
  * a hiccup rather than a stop.
  */
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(high, Math.max(low, value))
+}
+
 const SILENCE_MS = 2000
 const WATCH_MS = 400
 
@@ -205,9 +222,8 @@ export function speak(chunks: SpeechChunk[], options: SpeakOptions): SpeechHandl
   synth.cancel()
 
   const voices = synth.getVoices()
-  const voice = options.voiceId
-    ? (voices.find((v) => v.voiceURI === options.voiceId) ?? null)
-    : null
+  const byId = new Map(voices.map((v) => [v.voiceURI, v]))
+  const narrator = options.voiceId ? (byId.get(options.voiceId) ?? null) : null
 
   let index = 0
   let stopped = false
@@ -270,11 +286,19 @@ export function speak(chunks: SpeechChunk[], options: SpeakOptions): SpeechHandl
     }
 
     const mine = turn
+
+    /*
+     * Per chunk, not once per chapter: a character's voice is the whole point
+     * of `SpeechChunk.voiceId`, and `voice` is a property of the utterance.
+     */
+    const voice = (chunk.voiceId ? byId.get(chunk.voiceId) : null) ?? narrator
+
     const utterance = new SpeechSynthesisUtterance(chunk.text)
     if (voice) utterance.voice = voice
     utterance.lang = voice?.lang ?? 'zh-TW'
-    utterance.rate = options.rate
-    utterance.pitch = options.pitch
+    // Clamped to what the API accepts, so a bad multiplier cannot silence it.
+    utterance.rate = clamp(options.rate * (chunk.rate ?? 1), 0.1, 10)
+    utterance.pitch = clamp(options.pitch * (chunk.pitch ?? 1), 0, 2)
     utterance.volume = options.volume
 
     utterance.onstart = () => {

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import { NovelReader } from '@/components/studio/NovelReader'
 import { getSessionUser } from '@/lib/auth/session'
+import { getCharacters } from '@/lib/characters'
 import { novelForReading } from '@/lib/novel-export'
 import { requireProjectPage } from '@/lib/project-access'
 import { novelTitleOf } from '@/lib/project-titles'
@@ -40,8 +41,25 @@ export default async function ReadNovelPage({ params, searchParams }: Params) {
   const { projectId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const chapters = await novelForReading(project.id)
+  const [chapters, characters] = await Promise.all([
+    novelForReading(project.id),
+    getCharacters(project.id),
+  ])
   if (chapters.length === 0) notFound()
+
+  /*
+   * Only what 分角色朗讀 needs. Sending the whole character record to the
+   * browser would ship every background note and prompt into a page whose job
+   * is to read the prose.
+   */
+  const cast = characters.characters.map((character) => ({
+    id: character.id,
+    name: character.name,
+    alias: character.alias,
+    gender: character.gender,
+    tier: character.tier,
+    voiceId: character.voiceId,
+  }))
 
   const requested = (await searchParams).chapter
   const chapterId = typeof requested === 'string' ? requested : undefined
@@ -57,6 +75,12 @@ export default async function ReadNovelPage({ params, searchParams }: Params) {
       chapters={chapters}
       initialChapterId={chapterId}
       exitHref="/read"
+      /*
+       * The cast, for 分角色朗讀 (Z111). Names only — attribution matches
+       * against names this work actually has, which is what keeps a stray
+       * 「他說」 from being handed somebody's voice.
+       */
+      cast={cast}
     />
   )
 }
