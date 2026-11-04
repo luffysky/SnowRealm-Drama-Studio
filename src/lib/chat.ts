@@ -11,6 +11,7 @@ import {
   users,
 } from '@/db/schema'
 import { ApiError } from '@/lib/api'
+import type { ProposalRow } from '@/lib/assistant/proposals'
 import type { MessageKind } from '@/lib/chat-view'
 
 /**
@@ -31,6 +32,10 @@ export type ChatMessage = {
   senderId: string | null
   senderName: string
   senderColor: string
+  /** Said by the assistant rather than a member. */
+  fromAssistant: boolean
+  /** Edits it proposed in this reply. Empty for everything else. */
+  proposals: ProposalRow[]
   kind: MessageKind
   body: string
   assetId: string | null
@@ -117,6 +122,7 @@ const SELECT = {
   senderId: messages.senderId,
   senderName: users.name,
   senderColor: users.color,
+  fromAssistant: messages.fromAssistant,
   kind: messages.kind,
   body: messages.body,
   assetId: messages.assetId,
@@ -133,16 +139,18 @@ const SELECT = {
 
 function hydrate(
   rows: Awaited<ReturnType<typeof selectMessages>>,
-  quoted: Map<string, { body: string; sender: string }>
+  quoted: Map<string, { body: string; sender: string }>,
+  proposals: Map<string, ProposalRow[]> = new Map()
 ): ChatMessage[] {
   return rows.map((row) => {
     const quote = row.replyToId ? quoted.get(row.replyToId) : undefined
 
     return {
       ...row,
+      proposals: proposals.get(row.id) ?? [],
       kind: row.kind as MessageKind,
-      senderName: row.senderName ?? '已離開的成員',
-      senderColor: row.senderColor ?? '#8b5cf6',
+      senderName: row.fromAssistant ? 'AI 助理' : (row.senderName ?? '已離開的成員'),
+      senderColor: row.fromAssistant ? '#22d3ee' : (row.senderColor ?? '#8b5cf6'),
       assetName: row.assetName ?? null,
       assetMime: row.assetMime ?? null,
       assetSize: row.assetSize ?? null,
@@ -161,6 +169,15 @@ function selectMessages() {
 }
 
 /** The one-line quotes for a page of replies, in a single extra query. */
+/** Proposals for the assistant rows in a page. Nothing else can have any. */
+async function proposalsFor(rows: { id: string; fromAssistant: boolean }[]) {
+  const ids = rows.filter((row) => row.fromAssistant).map((row) => row.id)
+  if (ids.length === 0) return new Map<string, ProposalRow[]>()
+
+  const { proposalsForMessages } = await import('@/lib/assistant/proposals')
+  return proposalsForMessages(ids)
+}
+
 async function quotesFor(rows: { replyToId: string | null }[]) {
   const ids = [...new Set(rows.map((row) => row.replyToId).filter(Boolean))] as string[]
   if (ids.length === 0) return new Map<string, { body: string; sender: string }>()
@@ -239,7 +256,7 @@ export async function listMessages(input: {
     .orderBy(desc(messages.seq))
     .limit(limit)
 
-  return hydrate(rows, await quotesFor(rows)).reverse()
+  return hydrate(rows, await quotesFor(rows), await proposalsFor(rows)).reverse()
 }
 
 /**
@@ -268,7 +285,7 @@ export async function messagesSince(
     .orderBy(asc(messages.seq))
     .limit(200)
 
-  return hydrate(rows, await quotesFor(rows))
+  return hydrate(rows, await quotesFor(rows), await proposalsFor(rows))
 }
 
 /* -------------------------------------------------------------------------- */
@@ -277,12 +294,16 @@ export async function messagesSince(
 
 export type SendInput = {
   conversationId: string
-  senderId: string
+  /** Null when the assistant is speaking; it has no account. */
+  senderId: string | null
   kind?: MessageKind
   body?: string
   assetId?: string | null
   durationSec?: number | null
   replyToId?: string | null
+  fromAssistant?: boolean
+  /** The message this answers, for a turn's provenance. */
+  repliesToId?: string | null
 }
 
 /**
@@ -347,27 +368,32 @@ export async function sendMessage(input: SendInput): Promise<ChatMessage> {
         assetId: input.assetId ?? null,
         durationSec: input.durationSec ?? null,
         replyToId: input.replyToId ?? null,
+        fromAssistant: input.fromAssistant ?? false,
+        repliesToId: input.repliesToId ?? null,
       })
       .returning({ id: messages.id })
 
     if (!created) throw new ApiError(500, '送出失敗', 'message_create_failed')
 
-    // The sender has by definition read their own message.
-    await tx
-      .update(conversationMembers)
-      .set({ readSeq: row.seq })
-      .where(
-        and(
-          eq(conversationMembers.conversationId, input.conversationId),
-          eq(conversationMembers.userId, input.senderId)
+    // The sender has by definition read their own message. The assistant has
+    // no membership row, so there is nothing to move.
+    if (input.senderId) {
+      await tx
+        .update(conversationMembers)
+        .set({ readSeq: row.seq })
+        .where(
+          and(
+            eq(conversationMembers.conversationId, input.conversationId),
+            eq(conversationMembers.userId, input.senderId)
+          )
         )
-      )
+    }
 
     return created.id
   })
 
   const rows = await selectMessages().where(eq(messages.id, id))
-  const [message] = hydrate(rows, await quotesFor(rows))
+  const [message] = hydrate(rows, await quotesFor(rows), await proposalsFor(rows))
   if (!message) throw new ApiError(500, '送出後讀不回來', 'message_read_failed')
 
   return message
@@ -434,7 +460,7 @@ export async function editMessage(
 
 async function byId(messageId: string): Promise<ChatMessage | undefined> {
   const rows = await selectMessages().where(eq(messages.id, messageId))
-  return hydrate(rows, await quotesFor(rows))[0]
+  return hydrate(rows, await quotesFor(rows), await proposalsFor(rows))[0]
 }
 
 /* -------------------------------------------------------------------------- */

@@ -6,6 +6,7 @@ import {
   sendMessage,
 } from '@/lib/chat'
 import { handle, jsonOk, parseJson, requireUser } from '@/lib/api'
+import { detectTrigger } from '@/lib/assistant/triggers'
 import { chatSendSchema } from '@/lib/validators'
 
 export const runtime = 'nodejs'
@@ -75,5 +76,12 @@ export const POST = handle(async (request: Request) => {
     replyToId: input.replyToId ?? null,
   })
 
-  return jsonOk({ message }, { status: 201 })
+  /*
+   * Tells the client to start a turn. The run itself is a separate request:
+   * a send must return in milliseconds so the message appears, and a model
+   * turn takes seconds.
+   */
+  const trigger = detectTrigger(message.body)
+
+  return jsonOk({ message, assistantTriggered: Boolean(trigger) }, { status: 201 })
 })

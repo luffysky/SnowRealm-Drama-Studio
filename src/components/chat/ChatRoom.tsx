@@ -7,6 +7,7 @@ import {
   Paperclip,
   Search,
   Send,
+  Sparkles,
   Square,
   X,
 } from 'lucide-react'
@@ -16,6 +17,7 @@ import { MessageBubble } from '@/components/chat/MessageBubble'
 import { useChatChannel, type ChannelMessage, type ChannelSignal } from '@/components/chat/useChatChannel'
 import { useToast } from '@/components/ui/Toast'
 import { useUploader } from '@/components/studio/useUploader'
+import { SLASH_COMMANDS, willTrigger } from '@/lib/assistant/triggers'
 import { dayKey, formatDay, kindForMime } from '@/lib/chat-view'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { acceptAnyMedia, resolveMimeType } from '@/lib/media-types'
@@ -59,6 +61,8 @@ export function ChatRoom({
   const [replyTo, setReplyTo] = useState<ChannelMessage | null>(null)
   const [sending, setSending] = useState(false)
   const [searching, setSearching] = useState(false)
+  /** The assistant is working on a turn. */
+  const [thinking, setThinking] = useState(false)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ChannelMessage[] | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -227,10 +231,32 @@ export function ChatRoom({
         })
         if (!response.ok) throw new Error(await readApiError(response))
 
-        const body = (await response.json()) as { message: ChannelMessage }
+        const body = (await response.json()) as {
+          message: ChannelMessage
+          assistantTriggered?: boolean
+        }
         // Shown immediately rather than waiting for the stream to echo it —
         // a message that takes a second to appear feels broken.
         absorb([body.message])
+
+        /*
+         * Fire and forget. The reply comes back over the stream like any
+         * other message, so there is nothing to await here — and awaiting it
+         * would block the composer for the length of a model turn.
+         */
+        if (body.assistantTriggered) {
+          setThinking(true)
+          void apiFetch('/api/chat/assistant', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ conversationId, messageId: body.message.id }),
+          })
+            .then(async (res) => {
+              if (!res.ok) toast.error('助理沒有回應', await readApiError(res))
+            })
+            .catch(() => toast.error('助理沒有回應'))
+            .finally(() => setThinking(false))
+        }
         setReplyTo(null)
         stickRef.current = true
         setTyping(false)
@@ -515,6 +541,54 @@ export function ChatRoom({
               <X aria-hidden className="size-3.5" />
             </button>
           </div>
+        )}
+
+        {/*
+          The command picker. Only while the draft is a bare slash-word, so it
+          never covers the thread once someone is writing an actual message.
+        */}
+        {draft.startsWith('/') && !draft.includes(' ') && (
+          <ul className="mb-2 flex flex-col gap-0.5 rounded-lg bg-stage-850 p-1 ring-1 ring-stage-700">
+            {SLASH_COMMANDS.filter((command) =>
+              command.label.startsWith(draft.split(' ')[0] ?? '/')
+            ).map((command) => (
+              <li key={command.name}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(`${command.label} `)
+                    document.getElementById('chat-draft')?.focus()
+                  }}
+                  className="flex w-full items-baseline gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-stage-800"
+                >
+                  <span className="shrink-0 font-mono text-[11px] text-accent-300">
+                    {command.label}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[10px] text-ink-500">
+                    {command.hint}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {thinking && (
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] text-cyan-300">
+            <Sparkles aria-hidden className="size-3 animate-pulse" />
+            助理正在想⋯
+          </p>
+        )}
+
+        {/*
+          Says so before the send, so nobody is surprised that a line they
+          typed went to a model.
+        */}
+        {!thinking && willTrigger(draft) && (
+          <p className="mb-2 flex items-center gap-1.5 text-[10px] text-ink-500">
+            <Sparkles aria-hidden className="size-3 text-cyan-400" />
+            送出後會交給 AI 助理
+          </p>
         )}
 
         {uploading > 0 && (

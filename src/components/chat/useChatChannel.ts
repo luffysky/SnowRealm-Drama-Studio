@@ -26,6 +26,19 @@ export type ChannelMessage = {
   senderId: string | null
   senderName: string
   senderColor: string
+  fromAssistant: boolean
+  /** Edits the assistant proposed in this reply; decided by a person. */
+  proposals?: {
+    id: string
+    targetType: string
+    targetId: string
+    field: string
+    beforeValue: string
+    afterValue: string
+    rationale: string
+    state: string
+    stale: boolean
+  }[]
   kind: string
   body: string
   assetId: string | null

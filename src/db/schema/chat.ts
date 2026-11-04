@@ -1,5 +1,14 @@
 import { relations } from 'drizzle-orm'
-import { index, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core'
 import { users } from './auth'
 import { assets } from './assets'
 import { callStateEnum, messageKindEnum } from './enums'
@@ -95,6 +104,16 @@ export const messages = pgTable(
      * without this the other side never heard about it and had to reload.
      */
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Said by the assistant rather than a member.
+     *
+     * A column rather than a null `sender_id`, because a deleted account also
+     * leaves that null — and 「助理說的」 and 「寄件人已離開」 must not
+     * render the same way.
+     */
+    fromAssistant: boolean('from_assistant').notNull().default(false),
+    /** The message that triggered this reply, for a turn's provenance. */
+    repliesToId: uuid('replies_to_id'),
   },
   (t) => [
     unique('messages_conversation_seq').on(t.conversationId, t.seq),
@@ -196,3 +215,47 @@ export const messageRelations = relations(messages, ({ one }) => ({
   sender: one(users, { fields: [messages.senderId], references: [users.id] }),
   asset: one(assets, { fields: [messages.assetId], references: [assets.id] }),
 }))
+
+/**
+ * 助理的修改提案 (Z100).
+ *
+ * The assistant never writes to the work directly. It proposes, against a
+ * snapshot of what it was shown, and a person decides. Applying takes a
+ * `versions` snapshot of whatever is there at that moment first — so
+ * 「取代」 and 「取代並備份原來的」 are the same code path. Backing up is
+ * not an option on the dialog; it is part of applying. Overwriting without
+ * one would give a model the power to delete something a person wrote.
+ *
+ * `beforeValue` is kept so a proposal can be shown as a diff later, and so
+ * one raised against content that has since changed can be marked STALE
+ * rather than silently applied over somebody's newer work.
+ */
+export const assistantProposals = pgTable(
+  'assistant_proposals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
+    projectId: uuid('project_id'),
+    /** 'chapter' | 'episode_outline' | 'character' | 'world_entry' */
+    targetType: text('target_type').notNull(),
+    targetId: uuid('target_id').notNull(),
+    field: text('field').notNull(),
+    beforeValue: text('before_value').notNull().default(''),
+    afterValue: text('after_value').notNull().default(''),
+    rationale: text('rationale').notNull().default(''),
+    /** PENDING | APPLIED | REJECTED | STALE */
+    state: text('state').notNull().default('PENDING'),
+    /** The snapshot of what was replaced, created when applying. */
+    backupVersionId: uuid('backup_version_id'),
+    decidedById: uuid('decided_by_id').references(() => users.id, { onDelete: 'set null' }),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('assistant_proposals_conversation_idx').on(t.conversationId, t.createdAt),
+    index('assistant_proposals_target_idx').on(t.targetType, t.targetId, t.state),
+  ]
+)

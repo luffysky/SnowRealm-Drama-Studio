@@ -9,9 +9,11 @@ import {
   FileText,
   Pencil,
   Phone,
+  Sparkles,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { ProposalCard } from '@/components/chat/ProposalCard'
 import type { ChannelMessage } from '@/components/chat/useChatChannel'
 import { assetDownloadUrl, assetPreviewUrl, assetUrl } from '@/lib/asset-url'
 import { formatClock, formatVoiceLength } from '@/lib/chat-view'
@@ -102,10 +104,13 @@ export function MessageBubble({
       {!mine && (
         <span
           aria-hidden
+          title={message.senderName}
           className="mt-auto grid size-6 shrink-0 place-items-center self-end rounded-full text-[10px] font-semibold text-white"
           style={{ background: message.senderColor }}
         >
-          {message.senderName.charAt(0)}
+          {/* The assistant gets a mark rather than an initial, so a reply from
+              it is never mistaken for one from the other member. */}
+          {message.fromAssistant ? <Sparkles aria-hidden className="size-3" /> : message.senderName.charAt(0)}
         </span>
       )}
 
@@ -133,7 +138,9 @@ export function MessageBubble({
               ? 'bg-stage-850 text-ink-600 italic ring-1 ring-stage-700'
               : mine
                 ? 'bg-accent-600 text-white'
-                : 'bg-stage-800 text-ink-100'
+                : message.fromAssistant
+                  ? 'bg-cyan-500/10 text-ink-100 ring-1 ring-cyan-500/30'
+                  : 'bg-stage-800 text-ink-100'
           )}
         >
           {recalled ? (
@@ -200,6 +207,15 @@ export function MessageBubble({
             <Content message={message} mine={mine} />
           )}
         </div>
+
+        {/*
+          Proposals sit under the reply they came with. Outside the bubble,
+          because they are controls rather than something that was said — and
+          a diff inside a chat bubble is unreadable at that width.
+        */}
+        {message.proposals?.map((proposal) => (
+          <ProposalCard key={proposal.id} proposal={proposal} />
+        ))}
 
         <span className="flex items-center gap-1 px-1 text-[9px] text-ink-600 tabular-nums">
           {message.editedAt && !recalled && <span>已編輯</span>}

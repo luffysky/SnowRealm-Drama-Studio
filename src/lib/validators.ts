@@ -759,3 +759,23 @@ export const profileUpdateSchema = z
     (value) => Object.keys(value).filter((key) => key !== 'userId').length > 0,
     { message: '沒有要變更的欄位' }
   )
+
+/* -------------------------------------------------------------------------- */
+/* AI 助理 (Z100)                                                              */
+/* -------------------------------------------------------------------------- */
+
+export const assistantRunSchema = z.object({
+  conversationId: uuid.optional(),
+  /** The message that triggered it. Re-checked server-side. */
+  messageId: uuid,
+})
+
+export const proposalDecisionSchema = z.object({
+  decision: z.enum(['apply', 'reject']),
+  /**
+   * Applies even though the target changed after the proposal was written.
+   * Deliberately explicit: the default refuses, because the assistant never
+   * saw whatever was written since.
+   */
+  force: z.boolean().optional().default(false),
+})

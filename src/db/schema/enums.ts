@@ -41,6 +41,8 @@ export const versionTargetEnum = pgEnum('version_target', [
   'CHARACTER',
   'WORLD_ENTRY',
   'ASSET',
+  /** 分集大綱 — the thing the assistant proposes changes to most often. */
+  'EPISODE',
 ])
 
 export const reviewStateEnum = pgEnum('review_state', [
