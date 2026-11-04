@@ -53,6 +53,25 @@ afterAll(async () => {
 })
 
 describe.skipIf(!hasDb)('listProjects', () => {
+  /*
+   * Put the stage board back to 未開始 before each case.
+   *
+   * These tests used to rely on the seed still being pristine, which held
+   * only because **nothing in the app ever wrote to that table** — the bug
+   * Z117 fixed. The moment saving a chapter started marking 小說 as
+   * in_progress, a chapter created by another suite made 「zero progress」
+   * fail here for a reason that had nothing to do with this code.
+   *
+   * A test that needs a precondition should establish it rather than hope.
+   */
+  beforeEach(async () => {
+    if (!hasDb) return
+    await db
+      .update(schema.episodeProductionStages)
+      .set({ status: 'not_started', progressPercent: 0, startedAt: null, completedAt: null })
+      .where(eq(schema.episodeProductionStages.projectId, projectId))
+  })
+
   it('returns the seeded project with its real episode count', async () => {
     const { cards } = await projectsLib.listProjects(ownerId)
 

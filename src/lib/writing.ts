@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { chapters, documents, episodes, scenes, users, versions } from '@/db/schema'
 import { ApiError } from '@/lib/api'
+import { resyncEpisodeStages } from '@/lib/stage-sync'
 import type { SessionUser } from '@/lib/auth/session'
 import type { DocumentKindValue } from '@/lib/constants'
 import { countRichTextChars } from '@/lib/utils'
@@ -400,16 +401,18 @@ export async function deleteChapter(input: {
     .select({
       id: chapters.id,
       documentId: chapters.documentId,
+      episodeId: documents.episodeId,
       title: chapters.title,
       sortOrder: chapters.sortOrder,
     })
     .from(chapters)
+    .innerJoin(documents, eq(documents.id, chapters.documentId))
     .where(eq(chapters.id, input.chapterId))
     .limit(1)
 
   if (!chapter) throw ApiError.notFound('找不到這個章節')
 
-  return db.transaction(async (tx) => {
+  const removed = await db.transaction(async (tx) => {
     // Conditional update: matches nothing when the document moved on.
     const bumped = await tx
       .update(documents)
@@ -476,6 +479,11 @@ export async function deleteChapter(input: {
       backupVersion: version,
     }
   })
+
+  // Deleting the last chapter has to be able to take 小說 back to 未開始.
+  if (chapter.episodeId) await resyncEpisodeStages(chapter.episodeId)
+
+  return removed
 }
 
 /**
@@ -675,8 +683,13 @@ export async function saveChapter(input: {
   user: SessionUser
 }): Promise<SaveResult> {
   const [chapter] = await db
-    .select({ id: chapters.id, documentId: chapters.documentId })
+    .select({
+      id: chapters.id,
+      documentId: chapters.documentId,
+      episodeId: documents.episodeId,
+    })
     .from(chapters)
+    .innerJoin(documents, eq(documents.id, chapters.documentId))
     .where(eq(chapters.id, input.chapterId))
     .limit(1)
 
@@ -685,7 +698,7 @@ export async function saveChapter(input: {
   // Rich text: the markup must not inflate the count.
   const charCount = countRichTextChars(input.content)
 
-  return db.transaction(async (tx) => {
+  const saved = await db.transaction(async (tx) => {
     // Conditional update: matches nothing when the revision moved on.
     const bumped = await tx
       .update(documents)
@@ -747,6 +760,18 @@ export async function saveChapter(input: {
       savedAt: updated.updatedAt,
     }
   })
+
+  /*
+   * Keep 製作進度 in step with what was just written (Z117).
+   *
+   * After the transaction, not inside it: the board is a reflection of the
+   * work, and a stage row that would not update is no reason to refuse a
+   * save. `resyncEpisodeStages` swallows its own failure for the same
+   * reason.
+   */
+  if (chapter.episodeId) await resyncEpisodeStages(chapter.episodeId)
+
+  return saved
 }
 
 /**

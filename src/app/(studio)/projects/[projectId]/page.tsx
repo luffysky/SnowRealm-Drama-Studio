@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { LiveData } from '@/components/studio/LiveData'
 import { notFound, redirect } from 'next/navigation'
 import { ProjectOverview } from '@/components/studio/ProjectOverview'
 import { getSessionUser } from '@/lib/auth/session'
@@ -34,5 +35,11 @@ export default async function ProjectOverviewPage({ params }: Params) {
   ])
   if (!project) notFound()
 
-  return <ProjectOverview project={project} currency={user.displayCurrency} fx={fx} />
+  return (
+    <>
+      {/* 數字自己跟上，不用手動重新整理 (Z117)。 */}
+      <LiveData />
+      <ProjectOverview project={project} currency={user.displayCurrency} fx={fx} />
+    </>
+  )
 }

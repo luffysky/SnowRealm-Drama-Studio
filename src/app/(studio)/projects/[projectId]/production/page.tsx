@@ -1,4 +1,5 @@
 import { Flag, Layers, PieChart, TrendingUp } from 'lucide-react'
+import { LiveData } from '@/components/studio/LiveData'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import type { ReactNode } from 'react'
@@ -81,6 +82,8 @@ export default async function ProductionPage({ params, searchParams }: Params) {
 
   return (
     <div className="flex flex-col">
+      {/* 數字自己跟上，不用手動重新整理 (Z117)。 */}
+      <LiveData />
       <div className="flex flex-col gap-4 p-3 pb-0 sm:p-4 sm:pb-0 lg:p-6 lg:pb-0">
         <SubTabs />
 

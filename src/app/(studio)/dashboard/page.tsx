@@ -26,6 +26,7 @@ import {
 import { cn, formatRelativeZh } from '@/lib/utils'
 import { AltTitles } from '@/components/studio/AltTitles'
 import { assetPreviewUrl } from '@/lib/asset-url'
+import { LiveData } from '@/components/studio/LiveData'
 
 export const metadata: Metadata = { title: '工作室儀表板' }
 
@@ -67,6 +68,10 @@ export default async function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
+      {/*
+        儀表板常常是開著不動的那一頁，所以除了切回分頁之外也慢慢輪詢。
+      */}
+      <LiveData intervalSec={60} />
       <GreetingHero name={user.name} data={data} />
       <KpiRow data={data} />
 
