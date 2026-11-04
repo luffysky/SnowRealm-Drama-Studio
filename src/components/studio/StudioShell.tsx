@@ -46,6 +46,7 @@ import {
   type NavLeaf,
   type NavSection,
 } from '@/lib/navigation'
+import { useUiScript } from '@/components/ScriptProvider'
 import { cn } from '@/lib/utils'
 
 /**
@@ -244,6 +245,7 @@ function UserChip({ user }: { user: SessionUser }) {
             </div>
 
             <CurrencyPicker current={user.displayCurrency} />
+            <ScriptPicker />
             <button
               type="button"
               role="menuitem"
@@ -330,6 +332,50 @@ function CurrencyPicker({ current }: { current: CurrencyValue }) {
  * Member avatar. A gradient initial stands in until real portraits exist —
  * see the asset list in the README.
  */
+/**
+ * 繁簡切換 (Z135).
+ *
+ * 只有兩個狀態，而且刻意這樣：原始字串是繁體，所以「繁體」就是不轉，
+ * 「简体」是轉。簡轉繁那個一對多的方向（`干` 可能是乾／幹／干）永遠不會
+ * 被執行。
+ *
+ * 切回繁體會重新載入——轉換是就地改寫文字節點，原字沒有留著；為了支援還原
+ * 而在記憶體裡放一份整份文件的影本，是一個附帶功能的記憶體洩漏。
+ */
+function ScriptPicker() {
+  const { script, setScript } = useUiScript()
+
+  return (
+    <div className="px-3 py-2" data-script-keep>
+      <p className="mb-1 text-[10px] text-ink-600">介面文字</p>
+      <div className="flex gap-1 rounded-lg bg-stage-900 p-0.5 ring-1 ring-stage-700">
+        {(
+          [
+            ['simplified', '简体'],
+            ['traditional', '繁體'],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="menuitemradio"
+            aria-checked={script === value}
+            onClick={() => setScript(value)}
+            className={cn(
+              'flex-1 rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors',
+              script === value
+                ? 'bg-accent-600/25 text-ink-50 ring-1 ring-inset ring-accent-500/50'
+                : 'text-ink-400 hover:text-ink-100'
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function Avatar({ user }: { user: SessionUser }) {
   const initial = user.name.trim().charAt(0) || '?'
   const isLead = user.title.toUpperCase().includes('CEO')

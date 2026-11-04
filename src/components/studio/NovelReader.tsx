@@ -55,6 +55,7 @@ import {
   type SpeechHandle,
   type Voice,
 } from '@/lib/speech'
+import { useScriptConversion } from '@/lib/use-script-conversion'
 import { cn } from '@/lib/utils'
 
 /**
@@ -365,6 +366,16 @@ export function NovelReader({
   /** The scrolling prose column, for the reading rail. */
   const pageRef = useRef<HTMLDivElement | null>(null)
 
+  /*
+   * 正文自己的繁簡轉換 (Z135)。
+   *
+   * 跟整個介面那一份用同一個 hook，所以行為完全一樣——各寫一次遲早會分岔成
+   * 「介面轉了正文沒轉」那種讀起來像壞掉的狀態。範圍限在這一欄，而這一欄
+   * 標了 `data-script-own`，所以介面那份會跳過它。
+   */
+  const proseRoot = useCallback(() => pageRef.current, [])
+  useScriptConversion(proseRoot, settings.script === 'simplified')
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.target instanceof HTMLInputElement) return
@@ -578,6 +589,14 @@ export function NovelReader({
       {/* ---- the page --------------------------------------------------- */}
       <div
         ref={pageRef}
+        /*
+         * 正文的繁簡由這裡自己決定 (Z135).
+         *
+         * `data-script-own` 讓整個介面的那份轉換跳過這一塊。分開是因為它們
+         * 是兩件事：介面是給操作的人看的，正文是作品本身——有人想用簡體介面
+         * 讀繁體原文，也有人反過來。綁在一起就少了那兩種讀法。
+         */
+        data-script-own
         className="relative mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-5 py-8 sm:px-8"
         onTouchStart={(event) => {
           const point = event.touches[0]
@@ -869,6 +888,48 @@ export function NovelReader({
                           </option>
                         ))}
                       </select>
+                    </Field>
+
+                    {/*
+                      正文的繁簡 (Z135).
+
+                      Separate from the interface switch on purpose: somebody
+                      may want a 简体 interface around 繁體 prose, or the
+                      other way round. Tying them together removes both of
+                      those readings.
+                    */}
+                    <Field
+                      label="正文字體"
+                      hint="只改顯示，作者寫的字沒有被動過。跟介面的設定分開。"
+                    >
+                      <div
+                        data-script-keep
+                        className="flex gap-1 rounded-md border p-0.5"
+                        style={{ borderColor: `${theme.faint}55` }}
+                      >
+                        {(
+                          [
+                            ['simplified', '简体'],
+                            ['original', '繁體（原文）'],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={settings.script === value}
+                            onClick={() => update({ script: value })}
+                            className="tap flex-1 rounded px-1.5 py-1 text-[11px] transition-opacity"
+                            style={
+                              settings.script === value
+                                ? { background: `${theme.faint}33`, color: theme.ink }
+                                : { color: theme.faint }
+                            }
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                     </Field>
 
                     {/*

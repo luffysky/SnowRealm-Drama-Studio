@@ -103,6 +103,15 @@ export type ReaderSettings = {
    * voice changed for a reason they did not ask about.
    */
   castVoices: boolean
+  /**
+   * 正文顯示繁體還是簡體 (Z135)。
+   *
+   * **跟介面的設定分開。** 介面是給操作的人看的，正文是作品本身——有人想用
+   * 簡體介面讀繁體原文，也有人反過來。綁在一起就少了那兩種讀法。
+   *
+   * `original` 是作者寫的字（繁體），所以切回去不需要任何轉換。
+   */
+  script: 'original' | 'simplified'
 }
 
 export const READER_DEFAULTS: ReaderSettings = {
@@ -116,6 +125,8 @@ export const READER_DEFAULTS: ReaderSettings = {
   speechRate: SPEECH_RATE_DEFAULT,
   speechPitch: SPEECH_PITCH_DEFAULT,
   castVoices: false,
+  // 預設簡體，跟介面一致——大陸市場是主要讀者。
+  script: 'simplified',
 }
 
 export const READER_STORAGE_KEY = 'srds.reader.settings.v2'
@@ -159,6 +170,9 @@ export function loadReaderSettings(): ReaderSettings {
       speechRate: clamp(Number(parsed.speechRate), SPEECH_RATE_MIN, SPEECH_RATE_MAX),
       speechPitch: clamp(Number(parsed.speechPitch), SPEECH_PITCH_MIN, SPEECH_PITCH_MAX),
       castVoices: parsed.castVoices === true,
+      // Anything unrecognised falls back to the default rather than being
+      // trusted — the same rule every other field here follows.
+      script: parsed.script === 'original' ? 'original' : READER_DEFAULTS.script,
     }
   } catch {
     return READER_DEFAULTS
