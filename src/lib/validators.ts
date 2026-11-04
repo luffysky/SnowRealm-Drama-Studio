@@ -765,9 +765,16 @@ export const profileUpdateSchema = z
 /* -------------------------------------------------------------------------- */
 
 export const assistantRunSchema = z.object({
-  conversationId: uuid.optional(),
-  /** The message that triggered it. Re-checked server-side. */
+  /** The message to answer. Must be in the thread named by the route. */
   messageId: uuid,
+})
+
+export const assistantThreadCreateSchema = z.object({
+  title: z.string().trim().max(60, '標題最多 60 字').optional(),
+})
+
+export const assistantThreadPatchSchema = z.object({
+  title: z.string().trim().min(1, '標題不能空白').max(60, '標題最多 60 字'),
 })
 
 export const proposalDecisionSchema = z.object({

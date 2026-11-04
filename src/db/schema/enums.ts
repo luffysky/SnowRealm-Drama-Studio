@@ -405,3 +405,14 @@ export const callStateEnum = pgEnum('call_state', [
   'MISSED',
   'DECLINED',
 ])
+
+/**
+ * 對話的種類 (Z100).
+ *
+ * `DIRECT` is the thread between the two members. `ASSISTANT` is one person's
+ * thread with the AI, which is a separate conversation on purpose — the
+ * assistant used to live inside the direct thread, woken by `@助理`, and that
+ * meant every question to a model landed in the middle of two people talking
+ * to each other. Different audience, different history, different place.
+ */
+export const conversationKindEnum = pgEnum('conversation_kind', ['DIRECT', 'ASSISTANT'])

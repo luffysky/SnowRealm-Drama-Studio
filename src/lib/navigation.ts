@@ -103,6 +103,22 @@ export const NAV_SECTIONS: NavSection[] = [
     href: '/chat',
     ready: true,
   },
+  /*
+   * Its own entry, next to 訊息 rather than inside it (Z100).
+   *
+   * The assistant used to be summoned into the two-person conversation with
+   * `@助理`. Separate entries because they are separate audiences: 訊息 is
+   * what you say to the other person, and this is what you ask a model.
+   * Cross-project, so the rail is where it belongs — you ask it about a work,
+   * you do not arrive with one.
+   */
+  {
+    key: 'assistant',
+    label: 'AI 助理',
+    icon: 'Bot',
+    href: '/assistant',
+    ready: true,
+  },
   {
     key: 'tasks',
     label: '跨作品任務',

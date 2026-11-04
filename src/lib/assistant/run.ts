@@ -16,7 +16,7 @@ import { ApiError } from '@/lib/api'
 import { BUILT_IN_PRICING, DEFAULT_MODEL } from '@/lib/ai/anthropic'
 import { sendMessage } from '@/lib/chat'
 import { getModelPricing } from '@/lib/settings'
-import type { Trigger } from '@/lib/assistant/triggers'
+import { COMMAND_GROUPS, SLASH_COMMANDS, type Trigger } from '@/lib/assistant/triggers'
 
 /**
  * AI 助理 (Z100).
@@ -28,9 +28,10 @@ import type { Trigger } from '@/lib/assistant/triggers'
  *
  * Two rules shape everything here:
  *
- *  1. **It is only ever awake when addressed.** `detectTrigger` decides that,
- *     and nothing in this file runs otherwise. The conversation between two
- *     people is not sent to a model.
+ *  1. **It only ever reads its own thread.** Since the assistant moved out of
+ *     the two-person conversation (`assistant/threads.ts`), a run is scoped to
+ *     one `kind = 'ASSISTANT'` conversation owned by the caller. What the two
+ *     of them say to each other is in a different row and is never read.
  *  2. **It never writes to the work.** Tools that change something record a
  *     proposal against a snapshot of what the assistant was shown; a person
  *     applies it, and applying takes a backup first.
@@ -550,17 +551,6 @@ export async function runAssistant(input: {
     return { messageId: sent.id, proposals: 0, costUsd: 0 }
   }
 
-  if (input.trigger.kind === 'command' && input.trigger.command === 'help') {
-    const sent = await sendMessage({
-      conversationId: input.conversationId,
-      senderId: null,
-      body: HELP_TEXT,
-      fromAssistant: true,
-      repliesToId: input.triggerMessageId,
-    })
-    return { messageId: sent.id, proposals: 0, costUsd: 0 }
-  }
-
   const history = await recentTurns(input.conversationId)
   const client = new Anthropic({ apiKey })
 
@@ -649,35 +639,129 @@ export async function runAssistant(input: {
   return { messageId: sent.id, proposals: pending.length, costUsd }
 }
 
-const HELP_TEXT = `我平常不讀這裡的訊息，也不會插話。要我做事就 @助理 或用 / 開頭。
+/**
+ * `/help`, as a message.
+ *
+ * Built from `SLASH_COMMANDS` rather than written out, so the list in the
+ * conversation and the list behind the 「?」 in the header cannot drift apart
+ * — which is what happens to a help text maintained by hand the first time a
+ * command is renamed.
+ */
+export function helpText(): string {
+  const lines = ['這裡只有你跟我。「訊息」那邊你們兩個人的對話我讀不到。', '']
 
-**查東西**
-@助理 第三集在講什麼
-/find 沈知味的廚房
+  for (const group of COMMAND_GROUPS) {
+    const commands = SLASH_COMMANDS.filter((command) => command.group === group.key)
+    if (commands.length === 0) continue
 
-**改東西**（我只會提案，套不套用你決定）
-/rewrite 把第二集開頭改得更緊一點
-/outline 幫第四集寫大綱
-/character 補一下許山河的背景
+    lines.push(`**${group.label}**`)
+    for (const command of commands) {
+      lines.push(`- \`${command.usage}\` — ${command.hint}`)
+    }
+    lines.push('')
+  }
 
-我看得到：作品、集數、小說正文、角色設定、世界觀。
-我**不會**直接改任何東西——提案會附 diff，你按了套用才會動，
-而且套用之前會先把原本的存成版本快照。`
+  lines.push('不用指令直接說也可以，我會自己判斷要查什麼。')
+  lines.push('')
+  lines.push('我看得到：作品、集數、小說正文、角色設定、世界觀。')
+  lines.push('我**不會**直接改任何東西——提案會附 diff，你按了套用才會動，')
+  lines.push('而且套用之前會先把原本的存成版本快照，可以從版本紀錄還原。')
 
+  return lines.join('\n')
+}
+
+/**
+ * Turns a command into instructions.
+ *
+ * This is where a command earns its existence. `/polish` and `/write` both
+ * end at `propose_edit`, and the difference between them is entirely here:
+ * one may change what happens in the story and the other may not. A sentence
+ * saying 「改一下第二集開頭」 cannot carry that distinction, which is why the
+ * two are separate commands rather than one `/rewrite`.
+ *
+ * The read-only ones say so explicitly rather than relying on the model not
+ * to reach for the write tool. 「我只是想問一下」 coming back as a proposal
+ * is a decision somebody now has to make about something they did not ask to
+ * have changed.
+ */
 function promptFor(trigger: NonNullable<Trigger>): string {
   if (trigger.kind === 'mention') return trigger.prompt
 
   switch (trigger.command) {
+    /* ---- read-only ----------------------------------------------------- */
     case 'ask':
-      return `${trigger.prompt}\n\n（只回答，不要提案修改。）`
-    case 'rewrite':
-      return `改寫需求：${trigger.prompt}\n\n先讀目標內容，再用 propose_edit 提案。`
-    case 'outline':
-      return `大綱需求：${trigger.prompt}\n\n讀過這部作品現有的設定再寫，用 propose_edit 提案。`
-    case 'character':
-      return `角色設定需求：${trigger.prompt}\n\n先看現有角色，再用 propose_edit 提案。`
+      return `${trigger.prompt}
+
+先查過再回答。不要提案修改，這一輪只是問問題。`
+
     case 'find':
-      return `在作品裡找：${trigger.prompt}`
+      return `在作品裡找：${trigger.prompt}
+
+查小說正文、角色設定、世界觀、分集大綱。回報它出現在哪幾集、哪一段，
+附上足夠辨認的上下文。找不到就說找不到，不要給近似的東西當答案。
+這一輪不要提案修改。`
+
+    case 'recap':
+      return `回顧：${trigger.prompt}
+
+讀那幾集的正文（不是只讀大綱），然後整理成：
+1. 發生了什麼
+2. 誰在這幾集裡知道了什麼（視角與資訊落差）
+3. 開了哪些伏筆、收了哪些
+
+只整理現有內容，不要補你覺得應該有的東西。這一輪不要提案修改。`
+
+    case 'check':
+      return `檢查這個範圍有沒有矛盾：${trigger.prompt}
+
+讀正文、角色設定、世界觀跟分集大綱，然後只回報問題，每一條要寫：
+- 哪裡跟哪裡對不上（指明集數／段落）
+- 兩邊各自寫了什麼
+- 為什麼這是矛盾，不是你的誤讀
+
+重點放在：角色設定前後不一致、時間線對不上、伏筆開了沒收、
+同一件事在不同集的說法不同。
+
+**不要提案修改。** 這一輪的任務是找出來，怎麼改是人的決定。
+沒找到矛盾就說沒找到——硬湊幾條出來比沒檢查更糟。`
+
+    /* ---- proposes an edit ---------------------------------------------- */
+    case 'write':
+      return `寫作需求：${trigger.prompt}
+
+先讀這部作品現有的設定、相鄰的集數跟角色，再用 propose_edit 提案。
+可以動情節。提案的理由要說清楚你接的是哪一條線。`
+
+    case 'polish':
+      return `潤稿需求：${trigger.prompt}
+
+**只能改文字，不能改內容。** 具體說：
+- 可以改——節奏、重複的詞、鬆散的句子、標點、語序
+- 不可以改——發生的事、對話的意思、人物的決定、任何設定
+- 不可以加——原文沒有的情節、心理描寫、場景細節
+
+先讀目標內容，再用 propose_edit 提案。
+提案的理由要寫你動了哪幾處、為什麼那樣更好。
+如果讀完覺得不需要改，就說不需要，不要為了交差而改。`
+
+    case 'outline':
+      return `大綱需求：${trigger.prompt}
+
+先看這部作品現有的設定跟前後幾集，再用 propose_edit 提案，
+免得寫出一個接不上的大綱。`
+
+    case 'character':
+      return `角色設定需求：${trigger.prompt}
+
+先看現有的角色資料，再讀正文裡這個角色實際做過、說過什麼，
+然後用 propose_edit 提案。設定要能對應正文，不是另外想一個人。`
+
+    case 'world':
+      return `世界觀需求：${trigger.prompt}
+
+先看現有的世界觀條目，再讀正文裡真的寫過的部分，然後用 propose_edit 提案。
+正文沒寫過的東西不要當成既有設定寫進去。`
+
     default:
       return trigger.prompt
   }
@@ -686,26 +770,25 @@ function promptFor(trigger: NonNullable<Trigger>): string {
 /**
  * The last few turns, so the assistant can follow a thread.
  *
- * Only its own exchanges — messages it was addressed in, and its replies.
- * Everything the two of them said to each other stays out, which is what the
- * trigger rule promises.
+ * The whole thread, because the thread is its own. This used to filter to
+ * 「訊息開頭是 @ 或 /」 — the only way to tell its exchanges apart from two
+ * people's conversation when they shared one scrollback, and a filter that
+ * dropped every follow-up question someone asked without a handle. Moving the
+ * assistant to its own thread is what removes the filter, not a shortcut past
+ * it: nothing said to the other member is in here to read.
+ *
+ * `MAX_TURNS * 2` because a turn is a pair. The cap is the cost control —
+ * 120 episodes of back-and-forth would otherwise be re-sent every message.
  */
 async function recentTurns(conversationId: string): Promise<Anthropic.MessageParam[]> {
   const rows = await db
     .select({
       body: messages.body,
       fromAssistant: messages.fromAssistant,
-      repliesToId: messages.repliesToId,
       seq: messages.seq,
     })
     .from(messages)
-    .where(
-      and(
-        eq(messages.conversationId, conversationId),
-        isNull(messages.recalledAt),
-        or(eq(messages.fromAssistant, true), sql`${messages.body} ~ '^(@|/)'`)
-      )
-    )
+    .where(and(eq(messages.conversationId, conversationId), isNull(messages.recalledAt)))
     .orderBy(desc(messages.seq))
     .limit(MAX_TURNS * 2)
 

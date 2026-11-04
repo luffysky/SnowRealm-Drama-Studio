@@ -6,7 +6,6 @@ import {
   sendMessage,
 } from '@/lib/chat'
 import { handle, jsonOk, parseJson, requireUser } from '@/lib/api'
-import { detectTrigger } from '@/lib/assistant/triggers'
 import { chatSendSchema } from '@/lib/validators'
 
 export const runtime = 'nodejs'
@@ -77,11 +76,10 @@ export const POST = handle(async (request: Request) => {
   })
 
   /*
-   * Tells the client to start a turn. The run itself is a separate request:
-   * a send must return in milliseconds so the message appears, and a model
-   * turn takes seconds.
+   * Nothing here wakes the assistant. It used to — `@助理` at the start of a
+   * line summoned it into this thread — and that is what Z100 moved out:
+   * the assistant has its own conversations under `/assistant`, and this one
+   * is between the two of them only.
    */
-  const trigger = detectTrigger(message.body)
-
-  return jsonOk({ message, assistantTriggered: Boolean(trigger) }, { status: 201 })
+  return jsonOk({ message }, { status: 201 })
 })

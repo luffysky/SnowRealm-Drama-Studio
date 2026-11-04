@@ -11,7 +11,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { users } from './auth'
 import { assets } from './assets'
-import { callStateEnum, messageKindEnum } from './enums'
+import { callStateEnum, conversationKindEnum, messageKindEnum } from './enums'
 
 /**
  * 即時對話 (Z99).
@@ -28,20 +28,45 @@ import { callStateEnum, messageKindEnum } from './enums'
  * than re-fetching the thread.
  */
 
-export const conversations = pgTable('conversations', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  /** Empty for a direct thread; set for a named group. */
-  title: text('title').notNull().default(''),
-  /**
-   * Monotonic within the conversation, assigned on insert.
-   *
-   * Not a timestamp: two messages in the same millisecond are indistinguishable
-   * by time, and a reconnecting client would either miss one or replay it.
-   */
-  lastSeq: integer('last_seq').notNull().default(0),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const conversations = pgTable(
+  'conversations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    /**
+     * Which kind of thread this is (Z100).
+     *
+     * `DIRECT` is the two members. `ASSISTANT` is one person's thread with the
+     * AI. They are separate rows rather than one thread with a flag on the
+     * messages, because a question to a model and a message to your colleague
+     * do not belong in the same scrollback: they have different readers, and
+     * mixing them meant the assistant's history and theirs were the same
+     * history.
+     */
+    kind: conversationKindEnum('kind').notNull().default('DIRECT'),
+    /**
+     * Whose thread this is, for an `ASSISTANT` one. Null for `DIRECT`.
+     *
+     * An assistant thread belongs to one person even though membership is
+     * what every route checks: the owner is also the only member, so the
+     * existing `assertMember` guard keeps working, and this column is what
+     * lets the list be 「我的對話」 rather than everyone's.
+     */
+    ownerId: uuid('owner_id').references(() => users.id, { onDelete: 'cascade' }),
+    /** Empty for a direct thread; the assistant names its own threads. */
+    title: text('title').notNull().default(''),
+    /**
+     * Monotonic within the conversation, assigned on insert.
+     *
+     * Not a timestamp: two messages in the same millisecond are
+     * indistinguishable by time, and a reconnecting client would either miss
+     * one or replay it.
+     */
+    lastSeq: integer('last_seq').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('conversations_owner_idx').on(t.ownerId, t.kind, t.updatedAt)]
+)
 
 export const conversationMembers = pgTable(
   'conversation_members',

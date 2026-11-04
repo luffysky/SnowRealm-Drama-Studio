@@ -72,17 +72,29 @@ export async function openDirectConversation(userId: string): Promise<string> {
     throw ApiError.forbidden('你不在這個工作室裡')
   }
 
+  /*
+   * Filtered to DIRECT, not just 「我所屬的第一個對話」.
+   *
+   * Since Z100 the assistant has its own threads, and the owner is a member
+   * of each one. Without this filter the first assistant thread somebody
+   * created could come back here — and 「訊息」 would open on a conversation
+   * with a model in it instead of their colleague.
+   */
   const mine = await db
     .select({ conversationId: conversationMembers.conversationId })
     .from(conversationMembers)
-    .where(eq(conversationMembers.userId, userId))
+    .innerJoin(conversations, eq(conversations.id, conversationMembers.conversationId))
+    .where(and(eq(conversationMembers.userId, userId), eq(conversations.kind, 'DIRECT')))
     .limit(1)
 
   const existing = mine[0]?.conversationId
   if (existing) return existing
 
   return db.transaction(async (tx) => {
-    const [conversation] = await tx.insert(conversations).values({}).returning({ id: conversations.id })
+    const [conversation] = await tx
+      .insert(conversations)
+      .values({ kind: 'DIRECT' })
+      .returning({ id: conversations.id })
     if (!conversation) throw new ApiError(500, '建立對話失敗', 'conversation_create_failed')
 
     // Everyone in the studio. With two accounts that is the direct thread; the

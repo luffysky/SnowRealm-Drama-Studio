@@ -3,6 +3,7 @@
 import {
   Bell,
   BookOpen,
+  Bot,
   ChevronDown,
   CircleHelp,
   Clapperboard,
@@ -58,6 +59,7 @@ import { cn } from '@/lib/utils'
 
 const ICONS: Record<string, LucideIcon> = {
   LayoutDashboard,
+  Bot,
   Clapperboard,
   Film,
   PenLine,

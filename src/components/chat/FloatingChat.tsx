@@ -31,6 +31,22 @@ import { apiFetch, readApiError } from '@/lib/client-fetch'
 
 const STORAGE_KEY = 'srds.floatingChat.v1'
 
+/**
+ * Keeps the widget off a page's own bottom-right control.
+ *
+ * It is `fixed right bottom`, so on a page whose primary action lives in the
+ * same corner it sits on top of it. On the assistant page at phone width the
+ * ball covered the send button almost completely — the composer was there,
+ * the text went in, and the button could not be pressed.
+ *
+ * A page that owns that corner publishes its height as `--dock-height` on the
+ * root element (`useBottomDock`), and the widget rides above it. Pages that do
+ * not set it are unaffected: the fallback is 0.
+ */
+const clearance = (gap: string) => ({ bottom: `calc(var(--dock-height, 0px) + ${gap})` })
+const DOCK_CLEARANCE = clearance('0.5rem')
+const DOCK_CLEARANCE_BALL = clearance('1rem')
+
 export function FloatingChat({
   conversationId,
   meId,
@@ -229,6 +245,7 @@ export function FloatingChat({
           onClick={() => persist('ball')}
           aria-label="顯示對話"
           title="顯示對話"
+          style={DOCK_CLEARANCE}
           className="tap fixed right-2 bottom-2 z-30 grid size-7 place-items-center rounded-full bg-stage-800/70 text-ink-600 ring-1 ring-stage-700 transition-colors hover:text-ink-200"
         >
           <MessageSquare aria-hidden className="size-3.5" />
@@ -239,7 +256,7 @@ export function FloatingChat({
 
   if (state === 'ball') {
     return (
-      <div className="fixed right-4 bottom-4 z-40 flex items-center gap-1.5">
+      <div style={DOCK_CLEARANCE_BALL} className="fixed right-4 bottom-4 z-40 flex items-center gap-1.5">
         {/* Collapsed, but still able to ring. */}
         <span className="hidden">{callPanel}</span>
 
@@ -280,6 +297,7 @@ export function FloatingChat({
 
   return (
     <div
+      style={DOCK_CLEARANCE}
       className="panel fixed right-2 bottom-2 z-40 flex max-h-[min(32rem,calc(100dvh-5rem))] w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl bg-stage-850 ring-1 shadow-2xl ring-stage-700"
       role="dialog"
       aria-label="對話"
