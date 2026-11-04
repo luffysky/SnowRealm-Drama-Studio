@@ -109,6 +109,16 @@ export type AttributedLine = {
   index: number
   /** Null means the model declined — narration, or it could not tell. */
   speaker: string | null
+  /**
+   * 男 / 女 / null，決定配音用男聲還是女聲 (Z132).
+   *
+   * Asked for because the model is already reading the prose and the answer
+   * is usually written in the appellation itself — 婦人、嬸子、小男孩、老伯.
+   * Without it every speaker the cast table has never heard of falls into the
+   * neutral pool and takes whatever voice comes next: the first run put 婦人
+   * and 賣包子的嬸子 in men's voices and 陸承安 in a woman's.
+   */
+  gender: string | null
   /** The model named somebody who is not in the cast table. */
   isNew: boolean
   /** 0–1 as reported. Clamped; a missing one is treated as uncertain. */
@@ -172,9 +182,16 @@ export function parseAttribution(raw: string, plan: AttributionPlan): Attributio
     const isNew = speaker !== null && !castNames.has(speaker)
     if (isNew) newNames.add(speaker)
 
+    const rawGender = (entry as { gender?: unknown }).gender
+    const gender =
+      typeof rawGender === 'string' && /^[男女]/.test(rawGender.trim())
+        ? rawGender.trim()[0]!
+        : null
+
     lines.push({
       index,
       speaker,
+      gender,
       isNew,
       confidence: normaliseConfidence((entry as { confidence?: unknown }).confidence),
       reason: String((entry as { reason?: unknown }).reason ?? '').slice(0, 200),
@@ -267,6 +284,34 @@ export function mergeAttribution(
     if (line.isNew && !options.includeNew) continue
 
     out.set(line.index, line.speaker)
+  }
+
+  return out
+}
+
+/**
+ * 每個說話的人是男是女，由他講過的句子投票決定.
+ *
+ * Per line rather than per speaker is what comes back, and the model can
+ * disagree with itself across a long episode. The majority answer is the one
+ * worth keeping; a tie leaves it unknown, which is honest — a coin flip here
+ * puts somebody in the wrong voice for the whole book.
+ */
+export function gendersFrom(lines: readonly AttributedLine[]): Map<string, string> {
+  const votes = new Map<string, Map<string, number>>()
+
+  for (const line of lines) {
+    if (!line.speaker || !line.gender) continue
+    const tally = votes.get(line.speaker) ?? new Map<string, number>()
+    tally.set(line.gender, (tally.get(line.gender) ?? 0) + 1)
+    votes.set(line.speaker, tally)
+  }
+
+  const out = new Map<string, string>()
+  for (const [speaker, tally] of votes) {
+    const ranked = [...tally.entries()].sort((a, b) => b[1] - a[1])
+    const [top, second] = ranked
+    if (top && (!second || top[1] > second[1])) out.set(speaker, top[0])
   }
 
   return out

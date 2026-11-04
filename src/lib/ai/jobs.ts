@@ -297,6 +297,21 @@ export async function applyCandidate(input: {
   const candidate = result?.candidates?.[input.candidateIndex]
   if (!candidate) throw ApiError.badRequest('找不到指定的候選內容')
 
+  /*
+   * 對白歸屬自己有一條路 (Z132).
+   *
+   * 它寫的不是正文，是「第 37 段是誰說的」，所以 `applyToDocument` 幫不上
+   * 忙。沒有這個分支的話，採用會走到下面去、把任務標成已採用、然後什麼都
+   * 沒寫——正是 Z123 那個「說有寫入其實沒有」的老問題換一個殼。
+   */
+  if (job.targetType === 'episode_speakers') {
+    const { applyAttribution } = await import('@/lib/attribution-job')
+    await applyAttribution({ jobId: job.id, user: input.user })
+
+    const [done] = await db.select().from(aiJobs).where(eq(aiJobs.id, job.id)).limit(1)
+    return { job: done ?? job, versionId: null }
+  }
+
   let versionId: string | null = null
 
   // Only document targets are written automatically; other target types are

@@ -1,0 +1,358 @@
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import crypto from 'node:crypto'
+import { db } from '@/db'
+import { aiJobs, characters, episodeLineSpeakers, episodes } from '@/db/schema'
+import { ApiError, logActivity } from '@/lib/api'
+import { buildContext, estimateJob } from '@/lib/ai/jobs'
+import { enqueueJob } from '@/lib/ai/queue'
+import type { SessionUser } from '@/lib/auth/session'
+import {
+  attributionCoverage,
+  gendersFrom,
+  mergeAttribution,
+  parseAttribution,
+  planAttribution,
+  type AttributionPlan,
+} from '@/lib/attribution'
+import type { CastMember } from '@/lib/narration'
+import { novelForReading } from '@/lib/novel-export'
+
+/**
+ * 問模型「這句話是誰說的」，然後把答案存下來 (Z132).
+ *
+ * 走一般的任務佇列，所以花費、重試、待確認全部是既有的那一套——它跟其他
+ * 文字任務的差別只在輸出是結構化的，而且**套用的對象不是正文**。
+ *
+ * 那一點很要緊：其他 AI 產出套用時會覆蓋稿子，所以必須人看過。這個不會動到
+ * 任何一個字——它寫的是「第 37 段是許山河說的」，而正文一個字都沒變。所以
+ * 它的風險低得多，但仍然停在待確認：配錯聲音也是錯，只是改回來便宜。
+ */
+
+/** Per request. An episode of this novel is ~300 lines, which fits. */
+const MAX_LINES = 400
+
+async function loadEpisode(projectId: string, episodeId: string) {
+  const [episode] = await db
+    .select({ id: episodes.id, number: episodes.number })
+    .from(episodes)
+    .where(
+      and(
+        eq(episodes.id, episodeId),
+        eq(episodes.projectId, projectId),
+        isNull(episodes.deletedAt)
+      )
+    )
+    .limit(1)
+
+  if (!episode) throw ApiError.notFound('找不到這一集')
+
+  const chapters = (await novelForReading(projectId)).filter(
+    (chapter) => chapter.episodeId === episodeId
+  )
+  if (chapters.length === 0) throw ApiError.badRequest('這一集還沒有小說內容')
+
+  const cast = await db
+    .select({
+      id: characters.id,
+      name: characters.name,
+      alias: characters.alias,
+      gender: characters.gender,
+      tier: characters.tier,
+    })
+    .from(characters)
+    .where(and(eq(characters.projectId, projectId), isNull(characters.deletedAt)))
+
+  return {
+    episode,
+    /*
+     * The whole episode flattened, in the same order `novelForReading` gives
+     * the reader and the audiobook. The paragraph index is the key everything
+     * downstream uses, so it has to be the same flattening in all three.
+     */
+    paragraphs: chapters.flatMap((chapter) => chapter.paragraphs),
+    cast: cast.map(
+      (row): CastMember => ({
+        id: row.id,
+        name: row.name,
+        gender: row.gender ?? '',
+        tier: row.tier,
+        ...(row.alias ? { alias: row.alias } : {}),
+      })
+    ),
+  }
+}
+
+export async function enqueueAttribution(input: {
+  projectId: string
+  episodeId: string
+  user: SessionUser
+}): Promise<{ jobId: string; asked: number; settled: number; deduplicated: boolean }> {
+  const { episode, paragraphs, cast } = await loadEpisode(input.projectId, input.episodeId)
+  const plan = planAttribution(paragraphs, cast, { maxLines: MAX_LINES })
+
+  if (plan.ask.length === 0) {
+    throw ApiError.badRequest(
+      plan.settled.length > 0
+        ? '這一集的對白規則就判得出來，不需要問模型。'
+        : '這一集沒有對白。'
+    )
+  }
+
+  const context = await buildContext({
+    projectId: input.projectId,
+    episodeId: input.episodeId,
+    novelEpisodeId: null,
+    // The numbered prose is the material; everything is keyed on these indices.
+    sourceText: plan.excerpt,
+    userInstruction:
+      `要判斷的段號：${plan.ask.map((line) => line.index).join('、')}。\n` +
+      `角色名單：${plan.cast.length > 0 ? plan.cast.join('、') : '（這部作品還沒有建角色）'}。\n` +
+      `只回這些段號的結果，不要回其他段。`,
+    includeWorld: false,
+    includeCharacters: true,
+  })
+
+  let estimatedCostUsd: number | null = null
+  try {
+    const estimate = await estimateJob({
+      task: 'DIALOGUE_ATTRIBUTE',
+      providerId: null,
+      candidates: 1,
+      context,
+    })
+    estimatedCostUsd = estimate.estimatedCostUsd
+  } catch {
+    // Informational; a provider that cannot count tokens must not block it.
+  }
+
+  const { job, deduplicated } = await enqueueJob({
+    user: input.user,
+    task: 'DIALOGUE_ATTRIBUTE',
+    context,
+    projectId: input.projectId,
+    episodeId: input.episodeId,
+    providerId: null,
+    candidates: 1,
+    /*
+     * No document target. Applying this writes speaker rows, never prose —
+     * `applyAttribution` below is the only path, and the generic document
+     * apply must never pick it up.
+     */
+    targetType: 'episode_speakers',
+    targetId: input.episodeId,
+    idempotencyKey: crypto.randomUUID(),
+    estimatedCostUsd,
+  })
+
+  await logActivity({
+    user: input.user,
+    action: 'ai.enqueue',
+    entityType: 'episode',
+    entityId: input.episodeId,
+    projectId: input.projectId,
+    summary:
+      `${input.user.name} 替 EP${String(episode.number).padStart(3, '0')} 排入對白歸屬` +
+      `（${plan.ask.length} 句要判斷，${plan.settled.length} 句規則已判出）`,
+  })
+
+  return {
+    jobId: job.id,
+    asked: plan.ask.length,
+    settled: plan.settled.length,
+    deduplicated,
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+
+export type AppliedAttribution = {
+  written: number
+  /** Names the prose used that the cast table does not have. */
+  newNames: string[]
+  /** Entries the parser refused, so a bad run is visible rather than silent. */
+  rejected: number
+  coverage: { dialogue: number; attributed: number; fromRules: number; fromModel: number }
+}
+
+/**
+ * 把模型的答案寫進 `episode_line_speakers`.
+ *
+ * 重新規劃一次而不是信任任務裡存的計畫：正文可能在排隊期間被改過，而段號是
+ * 展平之後的索引——改了一段，後面全部位移。重算一次，對不上的段號就會在
+ * `parseAttribution` 那一關被擋掉，而不是安靜地把聲音配到錯的句子上。
+ *
+ * **人手動改過的列不碰。** 跟 `episode_characters` 同一條規矩：推導出來的
+ * 可以重算覆蓋，人下的判斷不行。
+ */
+export async function applyAttribution(input: {
+  jobId: string
+  user: SessionUser
+  /** Include speakers that are not in the cast table yet. */
+  includeNew?: boolean
+}): Promise<AppliedAttribution> {
+  const [job] = await db.select().from(aiJobs).where(eq(aiJobs.id, input.jobId)).limit(1)
+  if (!job) throw ApiError.notFound('找不到該 AI 任務')
+  if (job.status !== 'AWAITING_REVIEW') {
+    throw ApiError.badRequest('只有「待人工確認」的任務可以套用')
+  }
+  if (!job.projectId || !job.episodeId) {
+    throw ApiError.badRequest('這筆任務沒有綁定集數')
+  }
+
+  const result = job.result as { candidates?: { content: string }[] } | null
+  const raw = result?.candidates?.[0]?.content
+  if (!raw) throw ApiError.badRequest('這筆任務沒有產出內容')
+
+  const { paragraphs, cast } = await loadEpisode(job.projectId, job.episodeId)
+  const plan: AttributionPlan = planAttribution(paragraphs, cast, { maxLines: MAX_LINES })
+
+  const parsed = parseAttribution(raw, plan)
+  const merged = mergeAttribution(plan, parsed, { includeNew: input.includeNew ?? true })
+
+  const byName = new Map(cast.map((member) => [member.name, member.id]))
+  /*
+   * 誰是男是女，由他講過的句子投票決定——模型在長篇裡可能前後不一致，而平手
+   * 就留空白，不擲銅板。沒有這一步，角色表裡沒有的人會全部落進中性池按順序
+   * 拿音色：第一次跑完「婦人」配到男聲、「陸承安」配到女聲。
+   */
+  const genders = gendersFrom(parsed.lines)
+  const now = new Date()
+
+  const rows = [...merged.entries()].map(([paragraphIndex, speaker]) => ({
+    episodeId: job.episodeId!,
+    paragraphIndex,
+    characterId: byName.get(speaker) ?? null,
+    // Kept whatever the table knows: it is how an unlisted speaker still gets
+    // a voice, and how they are found later to be added properly.
+    spokenAs: speaker,
+    gender: genders.get(speaker) ?? '',
+    source: plan.settled.some((line) => line.index === paragraphIndex) ? 'rule' : 'model',
+    confidence: String(
+      parsed.lines.find((line) => line.index === paragraphIndex)?.confidence ?? 1
+    ),
+    aiJobId: job.id,
+    updatedAt: now,
+  }))
+
+  if (rows.length > 0) {
+    await db
+      .insert(episodeLineSpeakers)
+      .values(rows)
+      .onConflictDoUpdate({
+        target: [episodeLineSpeakers.episodeId, episodeLineSpeakers.paragraphIndex],
+        set: {
+          characterId: sql`excluded.character_id`,
+          spokenAs: sql`excluded.spoken_as`,
+          gender: sql`excluded.gender`,
+          source: sql`excluded.source`,
+          confidence: sql`excluded.confidence`,
+          aiJobId: sql`excluded.ai_job_id`,
+          updatedAt: now,
+        },
+        // 人改過的不碰。
+        setWhere: sql`${episodeLineSpeakers.source} <> 'manual'`,
+      })
+  }
+
+  await db
+    .update(aiJobs)
+    .set({
+      status: 'SUCCEEDED',
+      appliedById: input.user.id,
+      appliedAt: now,
+      progressNote: `已套用，${rows.length} 句有了說話的人`,
+      updatedAt: now,
+    })
+    .where(eq(aiJobs.id, job.id))
+
+  await logActivity({
+    user: input.user,
+    action: 'ai.apply',
+    entityType: 'episode',
+    entityId: job.episodeId,
+    projectId: job.projectId,
+    summary: `套用對白歸屬：${rows.length} 句`,
+  })
+
+  return {
+    written: rows.length,
+    newNames: parsed.newNames,
+    rejected: parsed.rejected.length,
+    coverage: attributionCoverage(plan, merged),
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 這一集每一段是誰說的，給配音用.
+ *
+ * Returns an empty map when nothing has been attributed — the audiobook then
+ * falls back to the rules, which is the behaviour it had before.
+ */
+export async function speakersFor(episodeId: string): Promise<Map<number, string>> {
+  return (await attributionFor(episodeId)).speakers
+}
+
+/**
+ * 段號 → 誰說的，以及每個人是男是女.
+ *
+ * The genders travel with it because voice assignment needs them and they
+ * belong to the speaker, not the line — a name the cast table has never heard
+ * of has no gender of its own, and without one it draws from the neutral pool
+ * and gets whatever comes next.
+ */
+export async function attributionFor(episodeId: string): Promise<{
+  speakers: Map<number, string>
+  genders: Map<string, string>
+}> {
+  const rows = await db
+    .select({
+      paragraphIndex: episodeLineSpeakers.paragraphIndex,
+      spokenAs: episodeLineSpeakers.spokenAs,
+      gender: episodeLineSpeakers.gender,
+    })
+    .from(episodeLineSpeakers)
+    .where(eq(episodeLineSpeakers.episodeId, episodeId))
+
+  const speakers = new Map<number, string>()
+  const genders = new Map<string, string>()
+
+  for (const row of rows) {
+    if (!row.spokenAs) continue
+    speakers.set(row.paragraphIndex, row.spokenAs)
+    if (row.gender) genders.set(row.spokenAs, row.gender)
+  }
+
+  return { speakers, genders }
+}
+
+/** How much of an episode has a speaker, for the UI. */
+export async function attributionStatus(episodeIds: string[]): Promise<
+  Map<string, { lines: number; characters: number }>
+> {
+  if (episodeIds.length === 0) return new Map()
+
+  const rows = await db
+    .select({
+      episodeId: episodeLineSpeakers.episodeId,
+      spokenAs: episodeLineSpeakers.spokenAs,
+    })
+    .from(episodeLineSpeakers)
+    .where(inArray(episodeLineSpeakers.episodeId, episodeIds))
+
+  const out = new Map<string, { lines: number; names: Set<string> }>()
+  for (const row of rows) {
+    const entry = out.get(row.episodeId) ?? { lines: 0, names: new Set<string>() }
+    entry.lines += 1
+    if (row.spokenAs) entry.names.add(row.spokenAs)
+    out.set(row.episodeId, entry)
+  }
+
+  return new Map(
+    [...out.entries()].map(([id, entry]) => [
+      id,
+      { lines: entry.lines, characters: entry.names.size },
+    ])
+  )
+}

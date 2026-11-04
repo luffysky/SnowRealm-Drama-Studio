@@ -284,6 +284,15 @@ export const episodeLineSpeakers = pgTable(
     characterId: uuid('character_id').references(() => characters.id, { onDelete: 'cascade' }),
     /** What the prose called them, for speakers not yet in the cast table. */
     spokenAs: text('spoken_as').notNull().default(''),
+    /**
+     * 男 / 女 / 空白。決定配音用男聲還是女聲 (Z132)。
+     *
+     * Needed because a speaker the cast table has never heard of has no
+     * gender of their own, and without one they fall into the neutral voice
+     * pool and take whatever comes next — the first run put 婦人 and
+     * 賣包子的嬸子 in men's voices and 陸承安 in a woman's.
+     */
+    gender: text('gender').notNull().default(''),
     /** `rule` | `model` | `manual`. A manual row is never overwritten. */
     source: text('source').notNull().default('model'),
     confidence: numeric('confidence', { precision: 4, scale: 3 }),

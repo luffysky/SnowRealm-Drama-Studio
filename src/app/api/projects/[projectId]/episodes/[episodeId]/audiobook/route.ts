@@ -2,6 +2,7 @@ import { ApiError, handle, jsonOk, parseJson, requirePermission, requireUser } f
 import { speechStatus, voicePool } from '@/lib/azure/speech'
 import { planEpisodeAudio } from '@/lib/tts/audiobook'
 import { audiobookProgress, enqueueAudiobook } from '@/lib/tts/job'
+import { attributionFor } from '@/lib/attribution-job'
 import { requireProjectApi } from '@/lib/project-access'
 import { audiobookSchema } from '@/lib/validators'
 
@@ -38,6 +39,13 @@ export const GET = handle(async (request: Request, context: Context) => {
   const pool = await voicePool()
   const narrator = pool.find((voice) => voice.speaksChinese)?.id ?? ''
 
+  /*
+   * 對白歸屬（Z132）決定誰用什麼聲音。沒跑過的話是空的，配音就退回規則——
+   * 而規則在這部小說上一句都判不出來，所以會全部是旁白。試算把這件事講出來，
+   * 不讓人產完才發現只有一個聲音。
+   */
+  const { speakers, genders } = await attributionFor(episodeId)
+
   const plan = await planEpisodeAudio({
     projectId,
     episodeId,
@@ -48,6 +56,7 @@ export const GET = handle(async (request: Request, context: Context) => {
       speaksChinese: voice.speaksChinese,
     })),
     narratorVoice: narrator,
+    ...(speakers.size > 0 ? { speakers, genders } : {}),
   })
 
   return jsonOk({
@@ -61,6 +70,8 @@ export const GET = handle(async (request: Request, context: Context) => {
       estimatedCostUsd: plan.estimatedCostUsd,
       cast: plan.cast,
       chapters: plan.chapters,
+      /** How many lines already know who said them. */
+      attributedLines: speakers.size,
     },
     voices: pool.map((voice) => ({
       id: voice.id,
@@ -92,9 +103,12 @@ export const POST = handle(async (request: Request, context: Context) => {
 
   if (!narrator) throw new ApiError(503, '這個區域沒有可用的中文音色', 'no_voice')
 
+  const { speakers, genders } = await attributionFor(episodeId)
+
   const queued = await enqueueAudiobook({
     projectId,
     episodeId,
+    ...(speakers.size > 0 ? { speakers, genders } : {}),
     voices: pool.map((voice) => ({
       id: voice.id,
       lang: voice.locale,

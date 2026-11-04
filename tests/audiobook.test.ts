@@ -281,7 +281,11 @@ describe.skipIf(!ready)('有聲小說的 SSML 規劃', () => {
         gender: row.gender ?? '',
         tier: row.tier,
       })),
-      VOICES
+      VOICES,
+      undefined,
+      // 旁白的音色要留給旁白——真實呼叫會傳，所以這裡也要傳，不然比的是
+      // 兩種不同的設定。
+      [NARRATOR]
     ).filter((chunk) => chunk.text.trim().length > 0)
 
     const actual = (await plan()).batches.flatMap((b) => b.chunks)

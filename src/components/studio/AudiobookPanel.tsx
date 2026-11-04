@@ -28,6 +28,8 @@ type Plan = {
   estimatedSec: number
   estimatedCostUsd: number | null
   cast: { name: string; voiceId: string | null }[]
+  /** How many lines already know who said them (Z132). */
+  attributedLines: number
 }
 
 type Progress = {
@@ -90,6 +92,36 @@ export function AudiobookPanel({
     },
     [projectId, toast]
   )
+
+  /**
+   * 讓模型讀一遍，判斷每句對白是誰說的 (Z132).
+   *
+   * 分開做而不是合成時順便，因為它是**另一種花費**，而且它的答案是會被重複
+   * 使用的：判斷一次，之後換音色重做都不用再問。合成則是每次都要重跑。
+   */
+  async function attribute(episodeId: string) {
+    setBusy(episodeId)
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/episodes/${episodeId}/attribution`,
+        { method: 'POST' }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      const body = (await response.json()) as { asked: number; settled: number }
+      toast.success(
+        `排入判斷 ${body.asked} 句`,
+        body.settled > 0
+          ? `另外 ${body.settled} 句規則就判得出來，沒有送去問。`
+          : '判斷完要到 AI 製片中心的「待確認」採用，才會生效。'
+      )
+      void apiFetch('/api/ai/worker', { method: 'POST', keepalive: true }).catch(() => {})
+    } catch (cause) {
+      toast.error('排入失敗', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(null)
+    }
+  }
 
   async function generate(episodeId: string) {
     setBusy(episodeId)
@@ -288,14 +320,42 @@ export function AudiobookPanel({
                         )}
                       </p>
 
-                      <p className="text-[10px] leading-relaxed text-ink-600">
-                        {plan.cast.length > 0
-                          ? `分出 ${plan.cast.length} 個聲音：${plan.cast
-                              .map((member) => member.name)
-                              .slice(0, 6)
-                              .join('、')}`
-                          : '目前全部用旁白的聲音——對白還沒歸屬到角色。'}
-                      </p>
+                      {plan.cast.length > 0 ? (
+                        <p className="text-[10px] leading-relaxed text-ink-500">
+                          分出 {plan.cast.length} 個聲音：
+                          {plan.cast
+                            .map((member) => member.name)
+                            .slice(0, 6)
+                            .join('、')}
+                          {plan.attributedLines > 0 && (
+                            <span className="text-ink-700">
+                              （{plan.attributedLines} 句已歸屬）
+                            </span>
+                          )}
+                        </p>
+                      ) : (
+                        <div className="flex flex-col gap-1.5 rounded-lg bg-amber-500/10 p-2.5 ring-1 ring-amber-500/20">
+                          <p className="text-[10px] leading-relaxed text-amber-200">
+                            目前<strong>全部</strong>會用旁白的聲音唸——對白還不知道是誰說的。
+                            先讓 AI 判斷一遍，再產生才會有不同聲音。
+                          </p>
+                          {canGenerate && (
+                            <button
+                              type="button"
+                              onClick={() => void attribute(episode.episodeId)}
+                              disabled={busy === episode.episodeId}
+                              className="tap inline-flex w-fit items-center gap-1.5 rounded-lg bg-stage-800 px-2.5 py-1.5 text-[11px] text-ink-200 hover:bg-stage-700 hover:text-ink-50 disabled:opacity-50"
+                            >
+                              {busy === episode.episodeId ? (
+                                <Loader2 aria-hidden className="size-3.5 animate-spin" />
+                              ) : (
+                                <Sparkles aria-hidden className="size-3.5" />
+                              )}
+                              判斷誰在說話
+                            </button>
+                          )}
+                        </div>
+                      )}
 
                       {canGenerate && (
                         <button

@@ -62,6 +62,8 @@ export async function enqueueAudiobook(input: {
   locale?: string
   /** 段號 → 說話的人, from the attribution pass. Optional. */
   speakers?: ReadonlyMap<number, string>
+  /** 名字 → 男／女，給角色表沒有的人配性別相符的音色 (Z132)。 */
+  genders?: ReadonlyMap<string, string>
   user: SessionUser
 }): Promise<{ jobId: string; parts: number; estimatedSec: number; estimatedCostUsd: number | null }> {
   const plan = await planEpisodeAudio({
@@ -71,6 +73,7 @@ export async function enqueueAudiobook(input: {
     narratorVoice: input.narratorVoice,
     ...(input.locale ? { locale: input.locale } : {}),
     ...(input.speakers ? { speakers: input.speakers } : {}),
+    ...(input.genders ? { genders: input.genders } : {}),
   })
 
   if (plan.batches.length === 0) throw ApiError.badRequest('這一集沒有可以唸的內容')

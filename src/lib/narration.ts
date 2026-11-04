@@ -251,7 +251,15 @@ export type CastMember = {
 export function assignVoices(
   cast: CastMember[],
   /** Available voices, Chinese first — `loadVoices()` already sorts that way. */
-  voices: VoiceOption[]
+  voices: VoiceOption[],
+  /**
+   * 不要發出去的音色——通常就是旁白那一個 (Z132).
+   *
+   * 旁白的聲音被分給某個角色，是最難察覺也最傷的一種錯：那個角色說話時聽起來
+   * 像敘述，而敘述聽起來像那個角色在自言自語。實測一集下來，旁白、沈知味、
+   * 婦人三個共用同一把嗓子。
+   */
+  reserve: readonly string[] = []
 ): Record<string, VoiceSlot> {
   const chinese = voices.filter((v) => v.speaksChinese ?? isChineseVoice(v.lang))
   const pool = chinese.length > 0 ? chinese : voices
@@ -313,6 +321,27 @@ export function assignVoices(
   let male = 0
   let other = 0
 
+  /*
+   * 一個音色只給一個人 (Z132).
+   *
+   * 三個池子（男／女／中性）各自從 0 開始數，但它們的成員是**重疊的**——
+   * 中性池就是全部。所以沈知味（沒填性別，中性池第 0 個）跟婦人（女聲池
+   * 第 0 個）會拿到同一個音色，而那個音色往往也正是旁白用的第一個。
+   *
+   * 實測一集下來，十個角色只分出七個聲音，其中三個共用同一把嗓子，包含旁白。
+   * 改成記住拿過的，往後找第一個還沒被拿走的。
+   */
+  const taken = new Set<string>(reserve)
+
+  /** The first voice in `from` that nobody has yet; falls back to order. */
+  const pick = (from: VoiceOption[], index: number): string | null => {
+    for (const voice of from) {
+      if (!taken.has(voice.id)) return voice.id
+    }
+    // Everything in this pool is spoken for — share rather than fall silent.
+    return from[index % Math.max(1, from.length)]?.id ?? null
+  }
+
   for (const member of ordered) {
     const steps = /女|female|f$/i.test(member.gender ?? '')
       ? HIGH
@@ -330,9 +359,11 @@ export function assignVoices(
     const override = member.voiceId && available.has(member.voiceId) ? member.voiceId : null
 
     const ownPool = steps === HIGH ? femalePool : steps === LOW ? malePool : pool
+    const voiceId = override ?? pick(ownPool, index)
+    if (voiceId) taken.add(voiceId)
 
     out[member.id] = {
-      voiceId: override ?? ownPool[index % Math.max(1, ownPool.length)]?.id ?? null,
+      voiceId,
       pitch: steps[index % steps.length] ?? 1,
       // A touch of variation so two characters sharing a pitch still differ.
       rate: 1 + ((index % 3) - 1) * 0.04,
@@ -358,7 +389,20 @@ export function assignVoices(
  * 聲音可能跟著換。要固定下來就把喜歡的音色存進那個角色的 `voiceId`——
  * `assignVoices` 會優先用它。
  */
-export function castFromSpeakers(speakers: readonly string[], known: CastMember[]): CastMember[] {
+export function castFromSpeakers(
+  speakers: readonly string[],
+  known: CastMember[],
+  /**
+   * 名字 → 男／女，從正文判斷出來的 (Z132).
+   *
+   * Only used for speakers the cast table does not have. Without it they all
+   * fall into the neutral voice pool and take whatever comes next, which put
+   * 「婦人」 and 「賣包子的嬸子」 in men's voices on the first real run.
+   * A character who *is* in the table keeps the gender recorded there — a
+   * person's answer beats a guess from the prose.
+   */
+  genders?: ReadonlyMap<string, string>
+): CastMember[] {
   const byName = new Map(known.map((member) => [member.name, member]))
   const out: CastMember[] = []
   const seen = new Set<string>()
@@ -369,7 +413,14 @@ export function castFromSpeakers(speakers: readonly string[], known: CastMember[
     seen.add(trimmed)
 
     const existing = byName.get(trimmed)
-    out.push(existing ?? { id: `name:${trimmed}`, name: trimmed, gender: '', tier: 'SUPPORTING' })
+    out.push(
+      existing ?? {
+        id: `name:${trimmed}`,
+        name: trimmed,
+        gender: genders?.get(trimmed) ?? '',
+        tier: 'SUPPORTING',
+      }
+    )
   }
 
   // Anyone in the table who did not speak still belongs to the work; they are
@@ -412,14 +463,21 @@ export function castChunks(
    * 2,657 lines of dialogue; an attribution pass that read the prose knows
    * better, including for people who are not in the cast table at all.
    */
-  overrides?: ReadonlyMap<number, string>
+  overrides?: ReadonlyMap<number, string>,
+  /**
+   * 旁白的音色，不要發給任何角色 (Z132).
+   *
+   * 旁白的聲音被分給某個角色，是最難察覺也最傷的一種錯：那個角色說話時聽
+   * 起來像敘述，而敘述聽起來像那個角色在自言自語。
+   */
+  reserve: readonly string[] = []
 ): CastedChunk[] {
   // With an attribution map there is a cast even when the table is empty —
   // `castFromSpeakers` builds one out of the names the prose used.
   if (cast.length === 0 && !overrides?.size) return chunks
 
   const names = knownNames(cast)
-  const slots = assignVoices(cast, voices)
+  const slots = assignVoices(cast, voices, reserve)
   const byName = new Map(cast.map((c) => [c.name, c.id]))
 
   /** paragraph index → who said it, worked out once. */

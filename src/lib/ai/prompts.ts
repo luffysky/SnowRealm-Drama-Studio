@@ -65,9 +65,11 @@ const TASK_INSTRUCTIONS: Record<AiTaskKind, string> = {
   ASSET_GENERATE: '依需求撰寫素材生成提示詞，包含正向提示詞與負向提示詞。',
   DIALOGUE_ATTRIBUTE:
     '判斷每一句對白是誰說的。輸入是編號過的正文，以及要判斷的段號清單。'+
-    '只回 JSON 陣列，每筆 {index, speaker, confidence, reason}：'+
+    '只回 JSON 陣列，每筆 {index, speaker, gender, confidence, reason}：'+
     'index 必須是清單裡給的段號；speaker 必須是角色名單裡的名字，'+
     '若說話的人不在名單上就照正文寫出他的稱呼，若判斷不出來就填 null；'+
+    'gender 填「男」或「女」，判斷不出來就填 null——這會決定配音用男聲還是女聲，'+
+    '「婦人」「嬸子」「小男孩」「老伯」這種稱呼本身就說明了性別；'+
     'confidence 是 0 到 1；reason 用十個字以內說明依據。'+
     '判斷依據：說話標記、一來一往的輪替、稱謂與語氣、前後文提到在場的人。'+
     '不確定就填 null 並把 confidence 壓低——寧可不答，不要答錯。'+

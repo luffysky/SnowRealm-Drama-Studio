@@ -75,6 +75,8 @@ export async function planEpisodeAudio(input: {
    * Without it the rules decide, and on this novel the rules find nobody.
    */
   speakers?: ReadonlyMap<number, string>
+  /** 名字 → 男／女，給角色表沒有的人配對性別的音色 (Z132)。 */
+  genders?: ReadonlyMap<string, string>
 }): Promise<AudiobookPlan> {
   const [episode] = await db
     .select({ id: episodes.id, number: episodes.number, title: episodes.title })
@@ -136,7 +138,7 @@ export async function planEpisodeAudio(input: {
    * attribution, which is the behaviour this had before.
    */
   const castForVoices = input.speakers
-    ? castFromSpeakers([...input.speakers.values()], members)
+    ? castFromSpeakers([...input.speakers.values()], members, input.genders)
     : members
 
   const casted = castChunks(
@@ -144,7 +146,9 @@ export async function planEpisodeAudio(input: {
     paragraphs,
     castForVoices,
     input.voices,
-    ...(input.speakers ? ([input.speakers] as const) : ([] as const))
+    input.speakers,
+    // 旁白的音色留給旁白。
+    [input.narratorVoice]
   )
 
   const batches = batchChunks(casted)

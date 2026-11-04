@@ -39,7 +39,13 @@ async function main() {
 
   const user = { id: (await db.select().from((await import('../src/db/schema')).users).limit(1))[0]!.id, name: '煙火' } as never
 
+  // 對白歸屬（Z132）決定誰用什麼聲音。
+  const { attributionFor } = await import('../src/lib/attribution-job')
+  const { speakers, genders } = await attributionFor(episode.id)
+  console.log(`  已歸屬 ${speakers.size} 句，${new Set(speakers.values()).size} 個不同的人`)
+
   const queued = await enqueueAudiobook({
+    ...(speakers.size > 0 ? { speakers, genders } : {}),
     projectId: project.id,
     episodeId: episode.id,
     voices: pool.map((v) => ({ id: v.id, lang: v.locale, gender: v.gender, speaksChinese: v.speaksChinese })),
