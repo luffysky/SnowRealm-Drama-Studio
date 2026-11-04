@@ -2,31 +2,24 @@ import { loadEnv } from '../src/lib/load-env'
 loadEnv()
 async function main() {
   const { listVoices } = await import('../src/lib/azure/speech')
-  const all = await listVoices('zh')
+  const all = await listVoices()
 
-  const byLocale = new Map<string, typeof all>()
-  for (const v of all) {
-    const list = byLocale.get(v.locale) ?? []
-    list.push(v)
-    byLocale.set(v.locale, list)
-  }
+  const count = (prefix: string) => all.filter((v) => v.locale.toLowerCase().startsWith(prefix))
 
-  for (const [locale, list] of [...byLocale.entries()].sort()) {
+  for (const [label, prefix] of [['英語 en', 'en'], ['日語 ja', 'ja'], ['韓語 ko', 'ko']] as const) {
+    const list = count(prefix)
+    const locales = [...new Set(list.map((v) => v.locale))].sort()
     const f = list.filter((v) => /female/i.test(v.gender)).length
-    const m = list.filter((v) => /^male/i.test(v.gender)).length
-    console.log(`  ${locale}：${list.length} 個（女 ${f} / 男 ${m}）`)
+    console.log(`  ${label}：${list.length} 個（女 ${f} / 男 ${list.length - f}），${locales.length} 個地區`)
+    console.log(`    地區：${locales.slice(0, 12).join(' ')}${locales.length > 12 ? ' …' : ''}`)
   }
 
-  console.log('\n  === zh-TW 全部 ===')
-  for (const v of all.filter((v) => v.locale === 'zh-TW')) {
-    console.log(`    ${v.id.padEnd(26)} ${v.gender.padEnd(7)} ${v.label}${v.styles.length ? `  風格：${v.styles.join('、')}` : ''}`)
+  const multi = all.filter((v) => /multilingual/i.test(v.id))
+  console.log(`\n  === 多語言音色（同一把嗓子能講多國語言）：${multi.length} 個 ===`)
+  for (const v of multi.slice(0, 14)) {
+    console.log(`    ${v.id.padEnd(40)} ${v.gender.padEnd(7)} ${v.locale}`)
   }
-
-  const styled = all.filter((v) => v.locale.startsWith('zh-CN') && v.styles.length > 0)
-  console.log(`\n  === zh-CN 有情緒風格的：${styled.length} 個（列前 8）===`)
-  for (const v of styled.slice(0, 8)) {
-    console.log(`    ${v.id.padEnd(26)} ${v.gender.padEnd(7)} 風格 ${v.styles.length} 種：${v.styles.slice(0, 6).join('、')}`)
-  }
+  if (multi.length > 14) console.log(`    …還有 ${multi.length - 14} 個`)
   process.exit(0)
 }
 void main()

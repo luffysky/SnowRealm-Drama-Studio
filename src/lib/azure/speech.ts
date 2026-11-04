@@ -193,6 +193,125 @@ export async function listVoices(locale?: string): Promise<Voice[]> {
     .filter((voice) => voice.id)
 }
 
+/* -------------------------------------------------------------------------- */
+/* 華語音色                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 哪一種華語。
+ *
+ * 這個分類不是講究，是**唸出來真的不一樣**：
+ *
+ * - `mandarin` —— 官話。`zh-CN` / `zh-TW`，以及河南、遼寧、陝西、山東、四川
+ *   那幾個，後面這些是**帶地方口音的普通話**，拿來配角色很有味道。
+ * - `cantonese` —— `zh-HK` 與 `yue-CN`。它們會把同一份中文**唸成粵語**，
+ *   不是帶廣東腔的國語。
+ * - `wu` —— `wuu-CN`，唸成上海話。
+ *
+ * 分出來是為了讓「某個角色開口變成講粵語」是一個**看得到的選擇**，而不是
+ * 自動分配時悄悄發生的意外。
+ */
+export type ChineseVariety = 'mandarin' | 'cantonese' | 'wu'
+
+export const CHINESE_VARIETY_LABEL: Record<ChineseVariety, string> = {
+  mandarin: '官話',
+  cantonese: '粵語',
+  wu: '吳語',
+}
+
+/** Null for anything that is not a Chinese voice. */
+export function chineseVariety(locale: string): ChineseVariety | null {
+  const tag = locale.toLowerCase()
+  if (tag.startsWith('yue')) return 'cantonese'
+  if (tag.startsWith('wuu')) return 'wu'
+  if (!tag.startsWith('zh')) return null
+  // zh-HK is Cantonese; every other zh-* on Azure is Mandarin, including the
+  // five regional accents.
+  return tag.startsWith('zh-hk') ? 'cantonese' : 'mandarin'
+}
+
+/**
+ * 一個音色在這個工作室裡派得上什麼用場。
+ *
+ * 分層的根據只有一件事：**它會把中文唸成什麼。**
+ *
+ * - `mandarin` —— `zh-CN` / `zh-TW` 與五個地方口音。地方的是帶口音的普通話。
+ * - `multilingual` —— 名字裡有 Multilingual 的那 57 個。它們的 locale 是
+ *   `en-US` 之類，但**能把中文唸成標準國語**，而且同一把嗓子還能講英日韓——
+ *   一個會說兩種語言的角色，用這個才不會換人。
+ * - `cantonese` / `wu` —— 會把同一份中文唸成粵語或上海話。不是口音，是另一
+ *   種話。
+ * - `foreign` —— 純英日韓。拿去唸中文會唸成日文漢字音那種，只有在台詞本身
+ *   就是那個語言時才對。
+ */
+export type VoiceTier = 'mandarin' | 'multilingual' | 'cantonese' | 'wu' | 'foreign'
+
+export const VOICE_TIER_LABEL: Record<VoiceTier, string> = {
+  mandarin: '官話',
+  multilingual: '多語言',
+  cantonese: '粵語',
+  wu: '吳語',
+  foreign: '外語',
+}
+
+/** Foreign languages worth offering. English is narrowed to two regions. */
+const FOREIGN_LOCALES = /^(ja-JP|ko-KR|en-US|en-GB)$/i
+
+export type PooledVoice = Voice & {
+  tier: VoiceTier
+  /** Whether it reads Chinese as Mandarin — what the caster actually needs. */
+  speaksChinese: boolean
+}
+
+function tierOf(voice: Voice): VoiceTier | null {
+  if (/multilingual/i.test(voice.id)) return 'multilingual'
+
+  const variety = chineseVariety(voice.locale)
+  if (variety) return variety === 'mandarin' ? 'mandarin' : variety
+
+  return FOREIGN_LOCALES.test(voice.locale) ? 'foreign' : null
+}
+
+const TIER_ORDER: VoiceTier[] = ['mandarin', 'multilingual', 'cantonese', 'wu', 'foreign']
+
+/**
+ * The voices this studio offers, best-for-Chinese first.
+ *
+ * 「所有中文都用上」 plus 「加幾個英文日文韓文」—— so nothing Chinese is
+ * filtered out, and the foreign side is narrowed to ja-JP, ko-KR, en-US and
+ * en-GB rather than all 124 English voices across fourteen regions.
+ *
+ * The order is what keeps a mixed pool safe. A cast of ten draws ten Mandarin
+ * voices; the Cantonese ones only come up once the Mandarin and multilingual
+ * ones run out, or when somebody picks one deliberately. Nothing starts
+ * speaking Cantonese by accident.
+ *
+ * Within 官話, voices carrying emotion styles come first — those are the ones
+ * that can act on the tone `narration.ts` has already worked out.
+ */
+export async function voicePool(): Promise<PooledVoice[]> {
+  const all = await listVoices()
+
+  const pooled = all
+    .map((voice) => ({ voice, tier: tierOf(voice) }))
+    .filter((row): row is { voice: Voice; tier: VoiceTier } => row.tier !== null)
+    .map(({ voice, tier }) => ({
+      ...voice,
+      tier,
+      speaksChinese: tier === 'mandarin' || tier === 'multilingual',
+    }))
+
+  return pooled.sort((a, b) => {
+    const byTier = TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier)
+    if (byTier !== 0) return byTier
+    // Emotion styles first inside 官話; they can act on the tone.
+    if (a.tier === 'mandarin' && a.styles.length !== b.styles.length) {
+      return b.styles.length - a.styles.length
+    }
+    return a.id.localeCompare(b.id)
+  })
+}
+
 /** 24kHz mono MP3 — small enough to store per episode, good enough to listen to. */
 const AUDIO_FORMAT = 'audio-24khz-48kbitrate-mono-mp3'
 

@@ -188,7 +188,36 @@ export function knownNames(
  * `SpeechSynthesisVoice` has no such field. Azure does, and when it is there
  * it decides which pool a character draws from.
  */
-export type VoiceOption = { id: string; lang: string; gender?: string }
+export type VoiceOption = {
+  id: string
+  lang: string
+  gender?: string
+  /**
+   * Reads Chinese as Mandarin, whatever its locale says.
+   *
+   * Needed because Azure's 「多語言」 voices are listed under `en-US` and the
+   * like, yet speak Mandarin properly — filtering on the locale alone threw
+   * away fifty-seven usable voices. Left undefined by browser voices, which
+   * fall back to the locale test below.
+   */
+  speaksChinese?: boolean
+}
+
+/**
+ * 整個華語系，不只 `zh-`.
+ *
+ * 粵語是 `yue-CN`、吳語是 `wuu-CN`，開頭都不是 `zh`。原本寫死
+ * `startsWith('zh')` 會把它們整個丟掉——而使用者要的是「所有中文都用上」。
+ *
+ * 排序（官話優先）是在 `azure/speech.ts` 的 `chineseVoices()` 做的，所以
+ * 這裡只負責「算不算中文」，不負責「用哪一個」。這個檔案沒有網路也沒有
+ * 資料庫，瀏覽器那條路也走同一份。
+ */
+const CHINESE_LOCALE = /^(zh|yue|wuu|nan|hak|gan|hsn|cjy|cdo|czh)[-_]?/i
+
+export function isChineseVoice(locale: string): boolean {
+  return CHINESE_LOCALE.test(locale.trim())
+}
 
 export type VoiceSlot = {
   /** `voiceURI`, or null to use whatever the reader picked for narration. */
@@ -224,7 +253,7 @@ export function assignVoices(
   /** Available voices, Chinese first — `loadVoices()` already sorts that way. */
   voices: VoiceOption[]
 ): Record<string, VoiceSlot> {
-  const chinese = voices.filter((v) => v.lang.toLowerCase().startsWith('zh'))
+  const chinese = voices.filter((v) => v.speaksChinese ?? isChineseVoice(v.lang))
   const pool = chinese.length > 0 ? chinese : voices
 
   /*
