@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { chapters, documents, episodes, scenes, users, versions } from '@/db/schema'
 import { ApiError } from '@/lib/api'
@@ -368,6 +368,117 @@ export async function createChapter(input: {
 }
 
 /**
+ * 刪除一個章節。
+ *
+ * **備份不是選項，是刪除的一部分。** Before the row goes, the whole document
+ * is appended to `versions` labelled with the chapter's name, in the same
+ * transaction — so 版本紀錄 can put it back, and `restoreVersion` already
+ * reinstates chapters with their original ids, which means anything else
+ * pointing at that chapter still resolves afterwards.
+ *
+ * That is the same rule the AI assistant's proposals follow. A person
+ * deleting their own chapter is a likelier source of regret than a model
+ * overwriting one, not a less likely one: there is no diff to look at first.
+ *
+ * Takes `expectedRevision` like a save does. Deleting a chapter out from
+ * under someone who is typing in it is the same class of accident as
+ * overwriting their paragraph, and gets the same 409.
+ */
+export async function deleteChapter(input: {
+  chapterId: string
+  expectedRevision: number
+  user: SessionUser
+}): Promise<{
+  deletedId: string
+  title: string
+  documentCharCount: number
+  lockRevision: number
+  /** The snapshot it can be restored from. */
+  backupVersion: number
+}> {
+  const [chapter] = await db
+    .select({
+      id: chapters.id,
+      documentId: chapters.documentId,
+      title: chapters.title,
+      sortOrder: chapters.sortOrder,
+    })
+    .from(chapters)
+    .where(eq(chapters.id, input.chapterId))
+    .limit(1)
+
+  if (!chapter) throw ApiError.notFound('找不到這個章節')
+
+  return db.transaction(async (tx) => {
+    // Conditional update: matches nothing when the document moved on.
+    const bumped = await tx
+      .update(documents)
+      .set({
+        lockRevision: sql`${documents.lockRevision} + 1`,
+        lastEditorId: input.user.id,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(documents.id, chapter.documentId),
+          eq(documents.lockRevision, input.expectedRevision)
+        )
+      )
+      .returning({ lockRevision: documents.lockRevision })
+
+    if (bumped.length === 0) throw await staleRevisionError(chapter.documentId)
+
+    const title = chapter.title.trim() || '未命名'
+    const { version } = await appendSnapshot(tx, {
+      documentId: chapter.documentId,
+      label: `刪除章節前：${title}`,
+      user: input.user,
+    })
+
+    await tx.delete(chapters).where(eq(chapters.id, input.chapterId))
+
+    /*
+     * Close the gap in the numbering.
+     *
+     * The sidebar shows `sortOrder` as the chapter number, so leaving a hole
+     * means the list reads 01, 02, 04 — and the next 新增章節 takes
+     * `max + 1`, which would then collide with nothing but still look wrong.
+     */
+    await tx
+      .update(chapters)
+      .set({ sortOrder: sql`${chapters.sortOrder} - 1` })
+      .where(
+        and(
+          eq(chapters.documentId, chapter.documentId),
+          gt(chapters.sortOrder, chapter.sortOrder)
+        )
+      )
+
+    // Recomputed, not adjusted by a delta — a drifting total is worse than a
+    // slower query.
+    const [sum] = await tx
+      .select({ total: sql<number>`coalesce(sum(${chapters.charCount}), 0)`.mapWith(Number) })
+      .from(chapters)
+      .where(eq(chapters.documentId, chapter.documentId))
+
+    const documentCharCount = Number(sum?.total ?? 0)
+
+    await tx
+      .update(documents)
+      .set({ charCount: documentCharCount })
+      .where(eq(documents.id, chapter.documentId))
+
+    return {
+      deletedId: chapter.id,
+      title,
+      documentCharCount,
+      lockRevision: bumped[0]!.lockRevision,
+      backupVersion: version,
+    }
+  })
+}
+
+/**
  * Adds a scene. The code (`S01`) comes from its position rather than being
  * typed, so renumbering after a reorder is one update instead of a manual pass.
  */
@@ -650,7 +761,23 @@ export async function snapshotDocument(input: {
   label: string
   user: SessionUser
 }): Promise<{ version: number }> {
-  return db.transaction(async (tx) => {
+  return db.transaction((tx) => appendSnapshot(tx, input))
+}
+
+/**
+ * The body of `snapshotDocument`, taking a transaction.
+ *
+ * Split out so that deleting a chapter can take its backup and do the delete
+ * in **one** transaction. A backup written by a separate transaction can
+ * commit while the delete rolls back — leaving a 版本紀錄 entry labelled
+ * 「刪除章節前」 for a chapter that was never deleted — or the reverse, which
+ * is worse: the chapter gone and no snapshot to get it back from.
+ */
+async function appendSnapshot(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  input: { documentId: string; label: string; user: SessionUser }
+): Promise<{ version: number }> {
+  {
     const [document] = await tx
       .select()
       .from(documents)
@@ -716,7 +843,7 @@ export async function snapshotDocument(input: {
       .where(eq(documents.id, input.documentId))
 
     return { version: nextVersion }
-  })
+  }
 }
 
 /**

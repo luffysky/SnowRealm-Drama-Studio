@@ -1,6 +1,17 @@
 'use client'
 
-import { Check, FileText, History, Plus, Save, Search, Sparkles, Users } from 'lucide-react'
+import {
+  Check,
+  FileText,
+  History,
+  Loader2,
+  Plus,
+  Save,
+  Search,
+  Sparkles,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -121,6 +132,9 @@ export function NovelEditor({
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [creating, setCreating] = useState(false)
+  /** The chapter whose 刪除 is waiting for a second click. */
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   /*
    * What the AI panel should work on. Null means the whole chapter; a
@@ -204,6 +218,58 @@ export function NovelEditor({
       toast.error('新增章節失敗', error instanceof Error ? error.message : undefined)
     } finally {
       setCreating(false)
+    }
+  }
+
+  /**
+   * Deletes a chapter.
+   *
+   * Two clicks rather than a `confirm()` dialog: a browser dialog blocks the
+   * page and reads as a warning from the browser, not a choice in this app.
+   *
+   * It is safe to do without a modal because it is not final — the server
+   * snapshots the whole document into 版本紀錄 first, in the same
+   * transaction, and the toast says so. That matters more than a scarier
+   * dialog would.
+   */
+  async function removeChapter(chapterId: string) {
+    setDeleting(chapterId)
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/chapters/${chapterId}?revision=${revision}`,
+        { method: 'DELETE' }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      const body = (await response.json()) as {
+        deletedId: string
+        title: string
+        lockRevision: number
+        backupVersion: number
+      }
+
+      const remaining = chapters.filter((c) => c.id !== body.deletedId)
+      /*
+       * Renumbered server-side to close the gap, so the rail does not read
+       * 01, 02, 04 until the next reload.
+       */
+      setChapters(
+        remaining.map((c, index) => ({ ...c, sortOrder: index + 1 }))
+      )
+      setRevision(body.lockRevision)
+      setConfirming(null)
+
+      if (activeId === body.deletedId) setActiveId(remaining[0]?.id ?? null)
+
+      toast.success(
+        `已刪除「${body.title}」`,
+        `原本的內容存成版本 v${body.backupVersion}，可以從版本紀錄還原`
+      )
+      router.refresh()
+    } catch (error) {
+      toast.error('刪不掉', error instanceof Error ? error.message : undefined)
+    } finally {
+      setDeleting(null)
     }
   }
 
@@ -481,12 +547,12 @@ export function NovelEditor({
             </li>
           ) : (
             visible.map((chapter) => (
-              <li key={chapter.id}>
+              <li key={chapter.id} className="group relative">
                 <button
                   type="button"
                   onClick={() => setActiveId(chapter.id)}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors',
+                    'flex w-full items-center gap-2 rounded-lg py-2 pr-8 pl-2.5 text-left text-xs transition-colors',
                     chapter.id === activeId
                       ? 'bg-accent-600/20 text-ink-50 ring-1 ring-inset ring-accent-500/40'
                       : 'text-ink-400 hover:bg-stage-800 hover:text-ink-100'
@@ -502,6 +568,48 @@ export function NovelEditor({
                     <Check aria-hidden className="size-3 shrink-0 text-emerald-400" />
                   )}
                 </button>
+
+                {/*
+                  Revealed on hover or keyboard focus rather than always
+                  shown: this is a list you click through all day, and a
+                  delete button permanently parked next to every title is
+                  one slip away from losing a chapter.
+                */}
+                <button
+                  type="button"
+                  onClick={() => setConfirming(chapter.id)}
+                  disabled={deleting !== null}
+                  aria-label={`刪除 ${chapter.title || '未命名'}`}
+                  className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-1 text-ink-700 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-0"
+                >
+                  <Trash2 aria-hidden className="size-3" />
+                </button>
+
+                {confirming === chapter.id && (
+                  <div className="mt-1 mb-1.5 flex items-center gap-1.5 rounded-lg bg-rose-500/10 px-2 py-1.5 ring-1 ring-rose-500/30">
+                    <span className="min-w-0 flex-1 text-[10px] leading-tight text-rose-200">
+                      刪掉這一章？內容會先存進版本紀錄，還原得回來。
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void removeChapter(chapter.id)}
+                      disabled={deleting !== null}
+                      className="inline-flex shrink-0 items-center gap-1 rounded bg-rose-500 px-1.5 py-1 text-[10px] font-medium text-white disabled:opacity-60"
+                    >
+                      {deleting === chapter.id && (
+                        <Loader2 aria-hidden className="size-2.5 animate-spin" />
+                      )}
+                      刪
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(null)}
+                      className="shrink-0 rounded px-1.5 py-1 text-[10px] text-ink-400 hover:text-ink-100"
+                    >
+                      不要
+                    </button>
+                  </div>
+                )}
               </li>
             ))
           )}
