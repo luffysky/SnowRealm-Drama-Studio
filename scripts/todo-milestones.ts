@@ -32,7 +32,15 @@ type Entry = {
 function parseTodo(text: string): Entry[] {
   const out: Entry[] = []
 
-  for (const line of text.split('\n')) {
+  /*
+   * Split on either ending. `core.autocrlf` is on for this repo, so the
+   * working copy of TODO.md can be CRLF — and splitting on '\n' alone leaves
+   * a '\r' that the '$' below will not match past, because '\r' is a line
+   * terminator in JavaScript regular expressions. The result was not an
+   * error: every heading silently stopped matching and the milestone table
+   * was rewritten as 0 / 0.
+   */
+  for (const line of text.split(/\r?\n/)) {
     const match = /^### (~~)?Z(\d+)[　\s]+(.*)$/.exec(line)
     if (!match) continue
 
