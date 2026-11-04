@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, ilike, inArray, isNull, like, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, isNull, like, ne, or, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   activities,
@@ -401,6 +401,8 @@ export type ProjectEdit = {
   targetMinSec?: number
   targetMaxSec?: number
   targetChars?: number
+  /** Carry a changed 片長 down to the episodes still on the old default. */
+  applyTargetToEpisodes?: boolean
   /** An asset id to use as the cover, or null to clear it. */
   coverAssetId?: string | null
   /** The book cover. null clears it, meaning 「沿用作品封面」. */
@@ -423,14 +425,26 @@ export async function updateProject(
   projectId: string,
   userId: string,
   edit: ProjectEdit
-): Promise<{ id: string; title: string; novelTitle: string; dramaTitle: string; coverAssetId: string | null } | null> {
+): Promise<{
+  id: string
+  title: string
+  novelTitle: string
+  dramaTitle: string
+  coverAssetId: string | null
+  /** Episodes whose 目標片長 moved with the project's. */
+  episodesRetargeted: number
+} | null> {
   /*
    * Visibility goes through `visibleProjects()` rather than being spelled out
    * again here, so narrowing who may edit what stays one edit in one file
    * (`docs/ROUTES.md` §5).
    */
   const [existing] = await db
-    .select({ id: projects.id })
+    .select({
+      id: projects.id,
+      targetMinSec: projects.targetMinSec,
+      targetMaxSec: projects.targetMaxSec,
+    })
     .from(projects)
     .where(and(eq(projects.id, projectId), visibleProjects(userId)))
     .limit(1)
@@ -488,7 +502,66 @@ export async function updateProject(
       coverAssetId: projects.coverAssetId,
     })
 
-  return row ?? null
+  if (!row) return null
+
+  /*
+   * 改了片長，集數要跟著走 (Z130).
+   *
+   * `episodes.target_sec` was written **once**, at project creation, as the
+   * midpoint of the range — and nothing updated it ever again. So changing
+   * 單集片長 in 作品設定 moved a number that nothing reads: 體檢 and 劇本進度
+   * both measure against the episode's own `target_sec`, and 120 episodes
+   * quietly kept the old figure. The same shape as the stage board and
+   * `episode_characters` before it: a column that is read and never written.
+   *
+   * **Every episode moves, not just the ones still on the old default.**
+   *
+   * The first version tried to be clever: match episodes whose `target_sec`
+   * equals the midpoint of the project's *current* range, on the theory that
+   * those are the untouched ones and anything else was set deliberately. It
+   * matched nothing, and the test caught it — because episodes drift away
+   * from the project's range precisely *by not being propagated to*, which
+   * is the bug this fixes. Saving without the box ticked, then saving again
+   * with it, found zero rows to move.
+   *
+   * There is also nothing to protect yet: no screen anywhere sets a single
+   * episode's 目標片長. When one exists, it should bring a column that records
+   * that the value was chosen rather than inherited — guessing it from the
+   * number is what failed here, and would fail again the moment somebody
+   * deliberately picked the default.
+   */
+  let episodesRetargeted = 0
+
+  const rangeChanged = edit.targetMinSec !== undefined || edit.targetMaxSec !== undefined
+
+  if (rangeChanged && edit.applyTargetToEpisodes) {
+    const newMid = Math.round(
+      ((edit.targetMinSec ?? existing.targetMinSec) +
+        (edit.targetMaxSec ?? existing.targetMaxSec)) /
+        2
+    )
+
+    /*
+     * Skips the rows already on the new figure, so the count reported back is
+     * what actually changed. 「120 集跟著改了」 when nothing moved is the kind
+     * of confirmation that teaches people to stop reading them.
+     */
+    const moved = await db
+      .update(episodes)
+      .set({ targetSec: newMid, updatedAt: new Date() })
+      .where(
+        and(
+          eq(episodes.projectId, projectId),
+          isNull(episodes.deletedAt),
+          ne(episodes.targetSec, newMid)
+        )
+      )
+      .returning({ id: episodes.id })
+
+    episodesRetargeted = moved.length
+  }
+
+  return { ...row, episodesRetargeted }
 }
 
 /* -------------------------------------------------------------------------- */

@@ -323,6 +323,15 @@ export const projectUpdateSchema = z
     targetChars: z.coerce.number().int().min(100).max(100000).optional(),
     targetMinSec: z.coerce.number().int().min(10).max(3600).optional(),
     targetMaxSec: z.coerce.number().int().min(10).max(3600).optional(),
+    /**
+     * Push a changed 片長 down onto the episodes that never had one set.
+     *
+     * `episodes.target_sec` is written **once**, when the project is created,
+     * as the midpoint of the range — and nothing has ever updated it since.
+     * So changing the range in 作品設定 moved a number that 體檢 and 劇本進度
+     * do not read, and 120 episodes quietly kept the old target.
+     */
+    applyTargetToEpisodes: z.boolean().optional(),
     /** null clears the cover. */
     coverAssetId: uuid.nullable().optional(),
     /** null clears it, which means 「沿用作品封面」. */

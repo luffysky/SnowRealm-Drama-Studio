@@ -113,6 +113,15 @@ function SettingsForm({
   const [targetMinSec, setTargetMinSec] = useState(String(project.targetMinSec))
   const [targetMaxSec, setTargetMaxSec] = useState(String(project.targetMaxSec))
   const [targetChars, setTargetChars] = useState(String(project.targetChars))
+  /*
+   * 改了片長，現有集數要不要跟著走 (Z130).
+   *
+   * Default on, because the surprising outcome is the other one: before this
+   * existed, changing 單集片長 moved a number nothing reads — 體檢 and 劇本
+   * 進度 both measure against each episode's own `target_sec`, which was
+   * written once at creation and never again.
+   */
+  const [applyToEpisodes, setApplyToEpisodes] = useState(true)
   const [coverAssetId, setCoverAssetId] = useState(project.coverAssetId)
   const [novelCoverAssetId, setNovelCoverAssetId] = useState(project.novelCoverAssetId)
 
@@ -163,6 +172,7 @@ function SettingsForm({
           targetMinSec: Number(targetMinSec) || 120,
           targetMaxSec: Number(targetMaxSec) || 180,
           targetChars: Number(targetChars) || 4000,
+          applyTargetToEpisodes: applyToEpisodes,
           coverAssetId,
           novelCoverAssetId,
         }),
@@ -170,7 +180,19 @@ function SettingsForm({
 
       if (!response.ok) throw new Error(await readApiError(response))
 
-      toast.success('作品設定已儲存')
+      const body = (await response.json()) as { episodesRetargeted?: number }
+
+      /*
+       * Says what actually happened to the episodes. 「已儲存」 on its own
+       * cannot tell 120 rows moved from none moved, and this setting's whole
+       * problem was that nobody could see which.
+       */
+      toast.success(
+        '作品設定已儲存',
+        body.episodesRetargeted
+          ? `${body.episodesRetargeted} 集的目標片長跟著改了。`
+          : undefined
+      )
       // The header, the cards and the page titles are all rendered on the
       // server from this row.
       router.refresh()
@@ -370,6 +392,25 @@ function SettingsForm({
             onChange={(event) => setTargetChars(event.target.value)}
           />
         </Field>
+
+        <label className="flex items-start gap-2 rounded-lg bg-stage-900 px-3 py-2.5 ring-1 ring-stage-700/60">
+          <input
+            type="checkbox"
+            checked={applyToEpisodes}
+            onChange={(event) => setApplyToEpisodes(event.target.checked)}
+            className="mt-0.5 size-3.5 accent-accent-600"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[12px] text-ink-100">
+              片長改了，也套用到現有集數
+            </span>
+            <span className="mt-0.5 block text-[10px] leading-relaxed text-ink-500">
+              每一集有自己的目標片長，製作進度與體檢都是拿它在比。勾了的話，
+              <strong className="text-ink-300">所有集數</strong>都會改成新的上下限中間值；
+              不勾的話，上面改的只是之後新增的集數會用到的預設值。
+            </span>
+          </span>
+        </label>
 
         {error && (
           <p role="alert" className="text-[11px] text-rose-400">

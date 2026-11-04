@@ -64,6 +64,12 @@ export const PATCH = handle(
       novelTitleResolved: novelTitleOf(row),
       dramaTitleResolved: dramaTitleOf(row),
       coverAssetId: row.coverAssetId,
+      /*
+       * How many episodes followed the new 片長 (Z130). Reported rather than
+       * assumed: a save that silently moved 120 rows and one that moved none
+       * look identical otherwise.
+       */
+      episodesRetargeted: row.episodesRetargeted,
     })
   }
 )
