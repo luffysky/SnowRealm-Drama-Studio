@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { MESSAGE_KINDS } from '@/lib/chat-view'
 import { EDITOR_SURFACES } from '@/lib/editor/modules'
+import { AI_EFFORTS } from '@/lib/settings-view'
 import { CURRENCIES } from '@/lib/money'
 import { PRODUCTION_STAGE_KEYS, PRODUCTION_STAGE_STATUSES } from '@/lib/production'
 import {
@@ -785,4 +786,60 @@ export const proposalDecisionSchema = z.object({
    * saw whatever was written since.
    */
   force: z.boolean().optional().default(false),
+})
+
+/* -------------------------------------------------------------------------- */
+/* 系統設定 (Z87)                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Shape only. The semantic rules — a rate cannot be negative, a model needs a
+ * price for every field — live in `lib/settings.ts`, because they are the same
+ * rules whether a value arrives from this form, a migration or a script.
+ * Checking shape here is what turns a malformed body into a 400 instead of a
+ * 500 from the layer below.
+ */
+const positive = z.number().finite().nonnegative()
+
+export const fxRatesSchema = z.object({
+  base: z.enum(CURRENCIES),
+  rates: z.record(z.enum(CURRENCIES), z.number().finite().positive()),
+  asOf: z.string().trim().min(1, '要填日期'),
+  source: z.string().trim().max(200).default(''),
+})
+
+export const storageCostSchema = z.object({
+  usdPerGbMonth: positive,
+  freeTierGb: positive,
+  asOf: z.string().trim().min(1, '要填日期'),
+  source: z.string().trim().max(200).default(''),
+})
+
+export const modelPricingSchema = z.object({
+  pricing: z.record(
+    z.string().trim().min(1),
+    z.object({ input: positive, output: positive, cacheRead: positive })
+  ),
+})
+
+export const taskProfilesSchema = z.object({
+  profiles: z.record(
+    z.string().trim().min(1),
+    z.object({
+      effort: z.enum(AI_EFFORTS),
+      model: z.string().trim().max(120).optional(),
+    })
+  ),
+})
+
+export const iceServersSchema = z.object({
+  servers: z
+    .array(
+      z.object({
+        urls: z.array(z.string().trim().min(1)).min(1, '至少要有一個網址'),
+        username: z.string().trim().max(200).optional(),
+        credential: z.string().trim().max(400).optional(),
+      })
+    )
+    .min(1, '至少要有一台伺服器'),
 })

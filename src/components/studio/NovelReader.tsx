@@ -636,7 +636,18 @@ export function NovelReader({
               up from the floor of a full-screen reader reads as something
               that went wrong.
             */
-            className="animate-slide-left fixed inset-y-0 right-0 z-[75] w-[min(20rem,85vw)] overflow-y-auto border-l p-4 shadow-2xl"
+            className={cn(
+              'fixed inset-y-0 z-[75] w-[min(20rem,85vw)] overflow-y-auto p-4 shadow-2xl',
+              /*
+                A drawer comes in from the side its button is on. 目錄 sits at
+                the left of the header next to 退出, so reaching for it and
+                having the panel arrive from the opposite edge reads as the
+                wrong panel opening.
+              */
+              panel === 'toc'
+                ? 'animate-slide-right left-0 border-r'
+                : 'animate-slide-left right-0 border-l'
+            )}
             style={{ background: theme.bg, borderColor: `${theme.faint}44`, color: theme.ink }}
           >
             <div className="mb-3 flex items-center justify-between">

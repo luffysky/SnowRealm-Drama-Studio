@@ -11,6 +11,10 @@
  * 素材管理 — which could not work: clicking one from the dashboard gave the app
  * no project to act on. That is the whole reason the split exists.
  *
+ * 徽章上的里程碑必須跟 `docs/todo/TODO.md` 一致。這裡決定使用者看到什麼，
+ * 待辦表決定做事的順序；兩邊各說各話的時候被騙的是看畫面的人。
+ * `npx tsx scripts/todo-milestones.ts` 會比對這兩份。
+ *
  * `ready` gates whether an entry is a link at all. Spec v2 §4 is explicit —
  * 「圖中按鈕必須真能操作；尚未串接的功能應禁用並顯示原因，不做空按鈕」— so an
  * unbuilt entry renders disabled with its milestone, never as a link to a 404.
@@ -125,7 +129,7 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: 'ListChecks',
     href: '/tasks',
     ready: false,
-    milestone: 'M4',
+    milestone: 'M3',
     design: 18,
   },
   {
@@ -134,7 +138,7 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: 'Receipt',
     href: '/costs',
     ready: false,
-    milestone: 'M4',
+    milestone: 'M3',
     design: 23,
   },
   {
@@ -157,7 +161,7 @@ export const NAV_SECTIONS: NavSection[] = [
     icon: 'Sparkles',
     href: '/ai',
     ready: false,
-    milestone: 'M3',
+    milestone: 'M2',
     design: 80,
   },
   {
@@ -165,8 +169,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: '系統設定',
     icon: 'Settings',
     href: '/settings',
-    ready: false,
-    milestone: 'M4',
+    ready: true,
     design: 21,
   },
 ]

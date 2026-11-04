@@ -1,3 +1,11 @@
+import {
+  AI_EFFORTS,
+  type AiEffort,
+  type IceServer,
+  type ModelPricing,
+  type StorageCost,
+  type TaskProfiles,
+} from '@/lib/settings-view'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { appSettings } from '@/db/schema'
@@ -132,13 +140,6 @@ export async function setEditorModules(
  * change, with nothing on screen to say so — hence `asOf`, which the UI shows
  * so an old quote is visibly old rather than silently wrong.
  */
-export type StorageCost = {
-  usdPerGbMonth: number
-  freeTierGb: number
-  /** ISO date the rate was taken from the provider's page. */
-  asOf: string
-  source: string
-}
 
 export const DEFAULT_STORAGE_COST: StorageCost = {
   usdPerGbMonth: 0.015,
@@ -178,9 +179,6 @@ export async function setStorageCost(cost: StorageCost, userId: string): Promise
 
 /* -------------------------------------------------------------------------- */
 
-/** USD per million tokens, per model. */
-export type ModelPrice = { input: number; output: number; cacheRead: number }
-export type ModelPricing = Record<string, ModelPrice>
 
 function parseModelPricing(value: unknown): ModelPricing | null {
   if (!value || typeof value !== 'object') return null
@@ -225,12 +223,7 @@ export async function setModelPricing(pricing: ModelPricing, userId: string): Pr
 
 /* -------------------------------------------------------------------------- */
 
-export const AI_EFFORTS = ['low', 'medium', 'high'] as const
-export type AiEffort = (typeof AI_EFFORTS)[number]
 
-/** Which model and how much deliberation each task gets. */
-export type TaskProfile = { model?: string; effort: AiEffort }
-export type TaskProfiles = Record<string, TaskProfile>
 
 function parseTaskProfiles(value: unknown): TaskProfiles | null {
   if (!value || typeof value !== 'object') return null
@@ -274,11 +267,6 @@ export async function setTaskProfiles(profiles: TaskProfiles, userId: string): P
 /* 通話的 ICE 伺服器 (Z99)                                                      */
 /* -------------------------------------------------------------------------- */
 
-export type IceServer = {
-  urls: string[]
-  username?: string
-  credential?: string
-}
 
 /**
  * STUN only, from Google's public servers.
@@ -336,3 +324,19 @@ export async function setIceServers(servers: IceServer[], userId: string): Promi
   if (!parsed) throw new Error('至少要有一台有網址的伺服器')
   await writeSetting(SETTING_KEYS.iceServers, parsed, userId)
 }
+
+/*
+ * Re-exported so server code can keep importing everything from one place,
+ * while client code imports the same names from `settings-view` without
+ * dragging the database in.
+ */
+export {
+  AI_EFFORTS,
+  type AiEffort,
+  type IceServer,
+  type ModelPrice,
+  type ModelPricing,
+  type StorageCost,
+  type TaskProfile,
+  type TaskProfiles,
+} from '@/lib/settings-view'

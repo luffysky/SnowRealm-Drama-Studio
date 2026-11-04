@@ -386,6 +386,16 @@
   }
 }
 
+/* The mirror of the above, for a drawer that belongs to a left-hand button. */
+@keyframes srds-slide-right {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 @keyframes srds-toast-in {
   from {
     opacity: 0;
@@ -407,6 +417,10 @@
 
 @utility animate-slide-left {
   animation: srds-slide-left 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@utility animate-slide-right {
+  animation: srds-slide-right 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @utility animate-toast-in {
