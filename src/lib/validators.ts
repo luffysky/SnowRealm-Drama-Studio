@@ -938,3 +938,15 @@ export const updateArcSchema = z.object({
 export const lyricsSchema = z.object({
   lyrics: z.string().max(100_000, '歌詞太長了'),
 })
+
+/**
+ * 用聽的幫歌詞標時間 (Z131).
+ *
+ * The lyrics travel with the request rather than being read from the database:
+ * the editor aligns what is **on screen**, which may be text pasted seconds
+ * ago and not saved yet. Aligning the saved copy would silently time the wrong
+ * words.
+ */
+export const lyricsAlignSchema = z.object({
+  lyrics: z.string().min(1, '先貼上歌詞').max(100_000, '歌詞太長了'),
+})

@@ -2,9 +2,11 @@
 
 import {
   Download,
+  Loader2,
   Pause,
   Play,
   RotateCcw,
+  Sparkles,
   Timer,
   Upload,
   X,
@@ -23,6 +25,7 @@ import {
   toLrc,
   type LyricLine,
 } from '@/lib/lyrics'
+import type { AlignedLine } from '@/lib/lyrics-align'
 import { cn } from '@/lib/utils'
 
 /**
@@ -70,6 +73,11 @@ export function LyricsEditor({
   const [cursor, setCursor] = useState(0)
   const [saving, setSaving] = useState(false)
 
+  /** 用聽的標時間 (Z131): in flight, and what came back. */
+  const [aligning, setAligning] = useState(false)
+  const [aligned, setAligned] = useState<AlignedLine[] | null>(null)
+  const [coverage, setCoverage] = useState<number | null>(null)
+
   /** Is the global player on this very track? Tapping needs it to be. */
   const live = player.track?.assetId === assetId
 
@@ -101,6 +109,62 @@ export function LyricsEditor({
       toast.success(`讀進 ${file.name}`, parseLyrics(content).timed ? '帶時間碼，可以直接跟著走。' : '沒有時間碼，到「打時間」那一頁點上去。')
     } catch {
       toast.error('讀不到這個檔案')
+    }
+  }
+
+  /**
+   * 讓它聽一遍，把時間標上去.
+   *
+   * Aligns what is **on screen**, not what is saved — text pasted a moment
+   * ago has not been written yet, and timing the saved copy would stamp the
+   * wrong words.
+   *
+   * The proposal lands in the list as ordinary stamps, so every one of them
+   * can be re-tapped or cleared exactly like a hand-made one. Nothing is
+   * saved until 儲存.
+   */
+  async function alignByEar() {
+    const source = tab === 'sync' ? toLrc({ lines, meta: {}, timed: true }) : text
+    if (!source.trim()) {
+      toast.error('先貼上歌詞')
+      return
+    }
+
+    setAligning(true)
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/assets/music/${assetId}/lyrics/align`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ lyrics: source }),
+        }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      const body = (await response.json()) as {
+        lines: AlignedLine[]
+        coverage: number
+        wordCount: number
+      }
+
+      setAligned(body.lines)
+      setCoverage(body.coverage)
+      setLines(body.lines.map((row) => ({ timeMs: row.timeMs, text: row.text })))
+      setCursor(0)
+      setTab('sync')
+
+      const stamped = body.lines.filter((row) => row.timeMs !== null).length
+      toast.success(
+        `標上 ${stamped} / ${body.lines.length} 句`,
+        body.coverage < 0.4
+          ? '對上的字不多——唱歌比講話難辨識，請把每一句聽過再存。'
+          : '這是建議值，聽過確認再存。'
+      )
+    } catch (cause) {
+      toast.error('標時間失敗', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setAligning(false)
     }
   }
 
@@ -265,11 +329,20 @@ export function LyricsEditor({
             lines={lines}
             cursor={cursor}
             live={live}
+            aligned={aligned}
+            coverage={coverage}
+            aligning={aligning}
+            onAlign={() => void alignByEar()}
             onPick={setCursor}
             onTap={tap}
-            onClear={(index) => setLines((previous) => clearStamp(previous, index))}
+            onClear={(index) => {
+              setLines((previous) => clearStamp(previous, index))
+              setAligned(null)
+            }}
             onReset={() => {
               setLines((previous) => previous.map((line) => ({ ...line, timeMs: null })))
+              setAligned(null)
+              setCoverage(null)
               setCursor(0)
             }}
           />
@@ -285,6 +358,10 @@ function SyncTab({
   lines,
   cursor,
   live,
+  aligned,
+  coverage,
+  aligning,
+  onAlign,
   onPick,
   onTap,
   onClear,
@@ -293,6 +370,11 @@ function SyncTab({
   lines: LyricLine[]
   cursor: number
   live: boolean
+  /** The last proposal, so low-confidence lines can be flagged (Z131). */
+  aligned: AlignedLine[] | null
+  coverage: number | null
+  aligning: boolean
+  onAlign: () => void
   onPick: (index: number) => void
   onTap: () => void
   onClear: (index: number) => void
@@ -310,6 +392,47 @@ function SyncTab({
 
   return (
     <div className="flex flex-col gap-2">
+      {/*
+        讓它先聽一遍 (Z131).
+
+        Framed as a first pass, not an answer. Singing over a backing track is
+        much harder to recognise than speech, so what this buys is 「大致都標
+        好了，剩下微調」 rather than 「不用聽了」 —— and the wording says so
+        rather than letting the button imply otherwise.
+      */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg bg-stage-900 px-3 py-2 ring-1 ring-stage-700/60">
+        <button
+          type="button"
+          onClick={onAlign}
+          disabled={aligning}
+          className="bg-brand-gradient tap inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-60"
+        >
+          {aligning ? (
+            <Loader2 aria-hidden className="size-3.5 animate-spin" />
+          ) : (
+            <Sparkles aria-hidden className="size-3.5" />
+          )}
+          {aligning ? '正在聽…' : '讓 AI 聽一遍，先標好時間'}
+        </button>
+
+        {coverage !== null ? (
+          <span
+            className={cn(
+              'text-[10px]',
+              coverage >= 0.6 ? 'text-emerald-300' : coverage >= 0.3 ? 'text-amber-300' : 'text-rose-300'
+            )}
+          >
+            對上 {Math.round(coverage * 100)}% 的字
+            {coverage < 0.6 && '——每一句都聽過再存'}
+          </span>
+        ) : (
+          <span className="text-[10px] leading-relaxed text-ink-600">
+            它會轉錄整首歌，再把聽到的跟你的歌詞對齊。唱歌比講話難辨識，所以這是
+            初稿，不是答案。
+          </span>
+        )}
+      </div>
+
       {!live ? (
         <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200 ring-1 ring-amber-500/20">
           要先播放這一首才能打時間——時間碼是從正在播的位置取的。
@@ -386,6 +509,31 @@ function SyncTab({
               >
                 {line.text || '（間奏）'}
               </button>
+
+              {/*
+                How the time got there, when it came from a proposal.
+                「猜的」 is interpolated between neighbours; 「?」 matched too
+                little to trust. Both are still shown — a flagged guess you
+                can check beats a gap you have to find.
+              */}
+              {aligned?.[index] && line.timeMs !== null && (
+                <span
+                  className="shrink-0 text-[9px]"
+                  title={
+                    aligned[index]!.source === 'interpolated'
+                      ? '這一句沒聽出來，時間是從前後兩句推的'
+                      : `對上這一句 ${Math.round(aligned[index]!.confidence * 100)}% 的字`
+                  }
+                >
+                  {aligned[index]!.source === 'interpolated' ? (
+                    <span className="text-amber-400">猜</span>
+                  ) : aligned[index]!.confidence < 0.5 ? (
+                    <span className="text-amber-400">?</span>
+                  ) : (
+                    <span className="text-emerald-400">✓</span>
+                  )}
+                </span>
+              )}
 
               <span
                 className={cn(

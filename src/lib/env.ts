@@ -39,6 +39,21 @@ const schema = z.object({
 
   ANTHROPIC_API_KEY: z.string().optional(),
 
+  /**
+   * Azure Speech — one key, two jobs (Z129 / Z131).
+   *
+   * 文字轉語音 for the audiobook export, and 語音轉文字 for the lyric timing
+   * assistant. Both are the same resource and the same key, which is the
+   * reason this is Azure rather than two providers: a second signup is a
+   * second bill, a second console and a second thing to rotate.
+   *
+   * Server-side only, like every other credential here — nothing in this file
+   * may ever gain a `NEXT_PUBLIC_` twin.
+   */
+  AZURE_SPEECH_KEY: z.string().optional(),
+  /** e.g. `eastasia`. Both endpoints are built from it. */
+  AZURE_SPEECH_REGION: z.string().optional(),
+
   /** Bearer token Vercel Cron presents to /api/ai/worker. Worker is disabled without it. */
   CRON_SECRET: z.string().optional(),
 
