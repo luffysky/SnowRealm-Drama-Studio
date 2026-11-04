@@ -855,3 +855,16 @@ export const iceServersSchema = z.object({
     )
     .min(1, '至少要有一台伺服器'),
 })
+
+/**
+ * 用 AI 產出覆蓋一整章 (Z122)。
+ *
+ * `expectedRevision` 不是選填：覆蓋別人正在打的那一章，跟覆蓋他的段落
+ * 是同一類意外，所以跟存檔走同一套樂觀鎖。
+ */
+export const replaceChapterSchema = z.object({
+  content: z.string().max(200_000, '內容太長'),
+  expectedRevision: z.coerce.number().int().min(0),
+  label: z.string().trim().min(1).max(120),
+  aiJobId: uuid.nullish(),
+})

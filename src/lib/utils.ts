@@ -39,6 +39,53 @@ export function countChars(text: string): number {
   return text.replace(/\s/g, '').length
 }
 
+export type TextCounts = {
+  /** 全部字元，含標點也含空白。檔案裡真正有幾個字元。 */
+  all: number
+  /** 不含空白，含標點。**目前所有進度與目標用的就是這個。** */
+  withPunctuation: number
+  /** 不含空白也不含標點——真正寫出來的字。 */
+  letters: number
+  /** 空白字元（含換行）。 */
+  spaces: number
+  /** 標點與符號。 */
+  punctuation: number
+}
+
+/**
+ * 一段文字的幾種算法 (Z123).
+ *
+ * 「字數」 is not one number and pretending it is hides which one a target
+ * was set against. A 4,000 字 episode means something different if the
+ * 「」。，！？ are in it — and in Chinese dialogue they are a large share:
+ * a line like 「不夠。」 is five characters of which two are punctuation.
+ *
+ * So all of them are counted and the UI says which one it is using, rather
+ * than printing a bare number and leaving everyone to guess.
+ */
+export function countText(html: string): TextCounts {
+  const text = stripHtmlToText(html)
+
+  const all = [...text].length
+  const spaces = [...text].filter((c) => /\s/u.test(c)).length
+  const withoutSpaces = text.replace(/\s/gu, '')
+
+  /*
+   * `\p{P}` is punctuation and `\p{S}` symbols; both are needed because
+   * 「～」 and 「＋」 are symbols rather than punctuation in Unicode's
+   * terms, and neither is a word anybody wrote.
+   */
+  const letters = [...withoutSpaces].filter((c) => !/[\p{P}\p{S}]/u.test(c)).length
+
+  return {
+    all,
+    spaces,
+    withPunctuation: [...withoutSpaces].length,
+    letters,
+    punctuation: [...withoutSpaces].length - letters,
+  }
+}
+
 /**
  * Characters a human would count, from rich-text HTML.
  *

@@ -21,12 +21,12 @@ import type { AiSelectionAction } from '@/components/editor/AiSelectionMenu'
 import { RichTextEditor } from '@/components/editor/RichTextEditor'
 import { AiAssistant } from '@/components/studio/AiAssistant'
 import { NovelExportMenu } from '@/components/studio/NovelExportMenu'
-import { countHtmlChars } from '@/components/editor/extensions'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import type { AiJobKindValue } from '@/lib/constants'
 import type { EditorModuleId } from '@/lib/editor/modules'
 import type { CurrencyValue, FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
+import { countText } from '@/lib/utils'
 
 /**
  * 小說編輯器 (design 06).
@@ -133,6 +133,14 @@ export function NovelEditor({
   const [filter, setFilter] = useState('')
   const [creating, setCreating] = useState(false)
   /** The chapter whose 刪除 is waiting for a second click. */
+  /** The live editor, for inserting at the cursor (Z122). */
+  const editorRef = useRef<import('@tiptap/react').Editor | null>(null)
+
+  // Stable, so the editor does not re-publish itself on every render.
+  const holdEditor = useCallback((editor: import('@tiptap/react').Editor | null) => {
+    editorRef.current = editor
+  }, [])
+
   const [confirming, setConfirming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 
@@ -635,6 +643,7 @@ export function NovelEditor({
           enabledModules={enabledModules}
           onToggleModule={toggleModule}
           onDirty={() => setState('dirty')}
+          onEditorReady={holdEditor}
           onSave={(content, title) => save(active.id, content, title)}
           onKeepVersion={keepVersion}
           onAiAction={(task, text) => {
@@ -686,6 +695,53 @@ export function NovelEditor({
                 setAiScope(null)
                 setAiRequest(null)
                 router.refresh()
+              }}
+              /*
+               * 插入或覆蓋，由人決定 (Z122)。
+               *
+               * Insertion goes through the live editor so the cursor, the
+               * selection and the undo stack all survive. Replacing goes to
+               * the server, which snapshots the document before writing —
+               * destroying a chapter is not something undo should be the
+               * only way back from.
+               */
+              onAdopt={async (content, mode) => {
+                if (!active) return
+
+                if (mode === 'insert') {
+                  const editor = editorRef.current
+                  if (!editor) throw new Error('編輯器還沒準備好')
+                  editor.chain().focus().insertContent(content).run()
+                  setState('dirty')
+                  return
+                }
+
+                const response = await apiFetch(
+                  `/api/projects/${projectId}/chapters/${active.id}/replace`,
+                  {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                      content,
+                      expectedRevision: revision,
+                      label: 'AI 產出覆蓋',
+                    }),
+                  }
+                )
+                if (!response.ok) throw new Error(await readApiError(response))
+
+                const body = (await response.json()) as {
+                  backupVersion: number
+                  lockRevision: number
+                }
+                setRevision(body.lockRevision)
+                setChapters((prev) =>
+                  prev.map((c) => (c.id === active.id ? { ...c, content } : c))
+                )
+                toast.success(
+                  '已覆蓋這一章',
+                  `原本的內容已存成版本 v${body.backupVersion}，可以從版本紀錄還原`
+                )
               }}
               tasks={[
                 {
@@ -773,6 +829,7 @@ function ChapterPane({
   enabledModules,
   onToggleModule,
   onDirty,
+  onEditorReady,
   onSave,
   onKeepVersion,
   onAiAction,
@@ -785,6 +842,8 @@ function ChapterPane({
   enabledModules: EditorModuleId[]
   onToggleModule: (id: EditorModuleId, next: boolean) => void
   onDirty: () => void
+  /** The live editor, so the AI panel can insert at the cursor (Z122). */
+  onEditorReady?: (editor: import('@tiptap/react').Editor | null) => void
   onSave: (content: string, title: string) => void | Promise<void>
   onKeepVersion: () => void | Promise<void>
   onAiAction: (task: AiSelectionAction, selectedText: string) => void
@@ -792,7 +851,13 @@ function ChapterPane({
   const [content, setContent] = useState(chapter.content)
   const [title, setTitle] = useState(chapter.title)
 
-  const charCount = countHtmlChars(content)
+  /*
+   * 「字數」不是一個數字 (Z123)。
+   *
+   * 標點在這部戲的對白裡佔了兩成——「不夠。」五個字元裡有兩個是標點。
+   * 只印一個數字，等於讓每個人自己猜目標是用哪一種算的。
+   */
+  const counts = countText(content)
 
   // Autosave: the timer restarts on every keystroke and fires once typing
   // pauses. Unmounting (a chapter switch) clears it.
@@ -862,13 +927,29 @@ function ChapterPane({
         }}
         onToggleModule={onToggleModule}
         onAiAction={onAiAction}
+        onReady={onEditorReady}
       />
 
       <footer className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stage-700/60 px-4 py-2.5 text-[11px] text-ink-500">
-        <span className="tabular-nums">
-          字數：<span className="text-ink-200">{charCount.toLocaleString('en-US')}</span>
+        <span className="tabular-nums" title="不含空白，含標點——目標與進度用的就是這個">
+          字數：<span className="text-ink-200">{counts.withPunctuation.toLocaleString('en-US')}</span>
+          <span className="text-ink-700">／目標 {targetChars.toLocaleString('en-US')}</span>
         </span>
-        <span className="tabular-nums">目標：{targetChars.toLocaleString('en-US')} 字</span>
+
+        {/* 其餘三種並列，免得「字數」這個詞各自表述。 */}
+        <span className="tabular-nums text-ink-600" title="不含標點也不含空白：真正寫出來的字">
+          純文字 {counts.letters.toLocaleString('en-US')}
+        </span>
+        <span className="tabular-nums text-ink-600" title="標點與符號">
+          標點 {counts.punctuation.toLocaleString('en-US')}
+        </span>
+        <span
+          className="tabular-nums text-ink-600"
+          title="全部字元，含標點也含空白與換行"
+        >
+          全部 {counts.all.toLocaleString('en-US')}
+          <span className="text-ink-700">（空白 {counts.spaces.toLocaleString('en-US')}）</span>
+        </span>
         <span className="tabular-nums">
           本集合計：{documentChars.toLocaleString('en-US')} 字
         </span>

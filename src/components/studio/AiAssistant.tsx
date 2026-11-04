@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, Loader2, Sparkles, X } from 'lucide-react'
+import { Check, CornerDownLeft, Loader2, Sparkles, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DiffViewer } from '@/components/ui/DiffViewer'
 import { EmptyState } from '@/components/ui/StateViews'
@@ -64,6 +64,14 @@ export type AiAssistantProps = {
   fx: FxRates
   /** Called when a candidate is adopted, so the editor can reload. */
   onAdopted?: () => void
+  /**
+   * Where the text should go, when the surface owns a document (Z122).
+   *
+   * Present: the panel offers 插在游標處 / 覆蓋整章 and hands the content
+   * over. Absent: it falls back to the server-side apply, which is right for
+   * surfaces whose output is not a document.
+   */
+  onAdopt?: (content: string, mode: 'insert' | 'replace') => Promise<void> | void
   /** Null when no provider is configured; the panel then explains instead. */
   providerReady: boolean
   providerDetail?: string
@@ -118,6 +126,7 @@ export function AiAssistant({
   currency,
   fx,
   onAdopted,
+  onAdopt,
   providerReady,
   providerDetail,
   initialTask,
@@ -185,6 +194,31 @@ export function AiAssistant({
    * is still QUEUED is almost always a nudge that did not land, and the one
    * thing that fixes it is another nudge.
    */
+  /**
+   * Hands the chosen candidate to the surface that owns the text (Z122).
+   *
+   * The panel does not know whether it is beside a novel chapter or a scene,
+   * so it does not try to write: it passes the content and the choice up, and
+   * the editor does what its own document needs.
+   */
+  async function adoptInto(mode: 'insert' | 'replace') {
+    const content = candidates[chosen]?.content
+    if (!content || !onAdopt || applying) return
+
+    setApplying(true)
+    try {
+      await onAdopt(content, mode)
+      setPhase('idle')
+      setJob(null)
+      setEstimate(null)
+      onAdopted?.()
+    } catch (error) {
+      toast.error('採用失敗', error instanceof Error ? error.message : undefined)
+    } finally {
+      setApplying(false)
+    }
+  }
+
   async function nudge(): Promise<boolean> {
     try {
       const response = await apiFetch('/api/ai/worker', { method: 'POST' })
@@ -654,16 +688,57 @@ export function AiAssistant({
             </p>
           )}
 
+          {/*
+            兩種採用法，各自說清楚會發生什麼 (Z122).
+
+            They are not the same action wearing different labels: one adds
+            text and the other destroys text. A single 「採用」 button has to
+            guess which was meant, and the cost of guessing wrong is a
+            chapter.
+          */}
+          <div className="flex flex-col gap-2">
+            {onAdopt ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => void adoptInto('insert')}
+                  disabled={applying}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-stage-800 px-3 py-2 text-xs text-ink-100 ring-1 ring-inset ring-stage-700 transition-colors hover:bg-stage-700 disabled:opacity-60"
+                >
+                  <CornerDownLeft aria-hidden className="size-3.5" />
+                  插在游標處
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void adoptInto('replace')}
+                  disabled={applying}
+                  className="bg-brand-gradient glow-accent-sm inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                >
+                  <Check aria-hidden className="size-3.5" />
+                  {applying ? '處理中…' : '覆蓋整章'}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void adopt()}
+                disabled={applying}
+                className="bg-brand-gradient glow-accent-sm inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                <Check aria-hidden className="size-3.5" />
+                {applying ? '採用中…' : '採用這份'}
+              </button>
+            )}
+
+            {onAdopt && (
+              <p className="text-[10px] leading-relaxed text-ink-600">
+                插入不會動到原有的字，編輯器的復原鍵救得回來。
+                覆蓋會先把整份文件存成版本再寫，可以從版本紀錄還原。
+              </p>
+            )}
+          </div>
+
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => void adopt()}
-              disabled={applying}
-              className="bg-brand-gradient glow-accent-sm inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-            >
-              <Check aria-hidden className="size-3.5" />
-              {applying ? '採用中…' : '採用這份'}
-            </button>
             <button
               type="button"
               onClick={() => {

@@ -72,6 +72,16 @@ export type RichTextEditorProps = {
    * can run the usual estimate → run → diff → adopt. See `AiSelectionMenu`.
    */
   onAiAction?: (action: AiSelectionAction, selectedText: string) => void
+  /**
+   * Hands the live editor out, so a panel beside it can insert at the cursor.
+   *
+   * Called with null on teardown. Insertion has to go through the editor
+   * instance rather than through the HTML string — rebuilding the document
+   * from a string loses the cursor, the selection and the undo history, and
+   * undo is exactly what somebody wants right after an AI paragraph lands in
+   * the wrong place.
+   */
+  onReady?: (editor: Editor | null) => void
 }
 
 export function RichTextEditor({
@@ -83,6 +93,7 @@ export function RichTextEditor({
   toolbarExtra,
   onToggleModule,
   onAiAction,
+  onReady,
 }: RichTextEditorProps) {
   const [findOpen, setFindOpen] = useState(false)
   const [tocOpen, setTocOpen] = useState(true)
@@ -92,6 +103,7 @@ export function RichTextEditor({
     () => buildExtensions({ enabled, placeholder }),
     [enabled, placeholder]
   )
+
 
   const editor = useEditor({
     extensions,
@@ -106,6 +118,19 @@ export function RichTextEditor({
     },
     onUpdate: ({ editor: instance }) => onChange(instance.getHTML()),
   })
+
+  /*
+   * Publish the instance after mount.
+   *
+   * `onReady` is in the dependency list rather than hidden behind a ref, so
+   * callers have to pass a stable callback — which is the honest contract.
+   * A ref updated during render reads as a way round the rule rather than an
+   * answer to it.
+   */
+  useEffect(() => {
+    onReady?.(editor ?? null)
+    return () => onReady?.(null)
+  }, [editor, onReady])
 
   if (!editor) {
     return (

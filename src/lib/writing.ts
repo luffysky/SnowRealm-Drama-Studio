@@ -487,6 +487,92 @@ export async function deleteChapter(input: {
 }
 
 /**
+ * 把 AI 的產出覆蓋到一個章節上 (Z122).
+ *
+ * **備份先於覆寫**，在同一個 transaction 裡，like `deleteChapter`. The old
+ * route for this wrote the *new* text into the version row and called it a
+ * backup; restoring it handed the AI's output back and the original was
+ * nowhere. Here the snapshot is taken before anything is replaced, so
+ * 「還原」 means what it says.
+ *
+ * Inserting at the cursor does not come through here. That one adds text
+ * without destroying any, the editor's own undo covers it, and routing it
+ * through the server would cost a round trip and the cursor position.
+ */
+export async function replaceChapterContent(input: {
+  chapterId: string
+  content: string
+  expectedRevision: number
+  user: SessionUser
+  /** Shown in 版本紀錄, so it is clear which run produced this. */
+  label: string
+  aiJobId?: string | null
+}): Promise<{ backupVersion: number; lockRevision: number; charCount: number }> {
+  const [chapter] = await db
+    .select({
+      id: chapters.id,
+      documentId: chapters.documentId,
+      episodeId: documents.episodeId,
+      title: chapters.title,
+    })
+    .from(chapters)
+    .innerJoin(documents, eq(documents.id, chapters.documentId))
+    .where(eq(chapters.id, input.chapterId))
+    .limit(1)
+
+  if (!chapter) throw ApiError.notFound('找不到這個章節')
+
+  const charCount = countRichTextChars(input.content)
+
+  const result = await db.transaction(async (tx) => {
+    const bumped = await tx
+      .update(documents)
+      .set({
+        lockRevision: sql`${documents.lockRevision} + 1`,
+        lastEditorId: input.user.id,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(documents.id, chapter.documentId),
+          eq(documents.lockRevision, input.expectedRevision)
+        )
+      )
+      .returning({ lockRevision: documents.lockRevision })
+
+    if (bumped.length === 0) throw await staleRevisionError(chapter.documentId)
+
+    // The whole document as it stands, before a word of it is replaced.
+    const { version } = await appendSnapshot(tx, {
+      documentId: chapter.documentId,
+      label: `${input.label}（覆蓋前：${chapter.title.trim() || '未命名'}）`,
+      user: input.user,
+    })
+
+    await tx
+      .update(chapters)
+      .set({ content: input.content, charCount, updatedAt: new Date() })
+      .where(eq(chapters.id, input.chapterId))
+
+    const [sum] = await tx
+      .select({ total: sql<number>`coalesce(sum(${chapters.charCount}), 0)`.mapWith(Number) })
+      .from(chapters)
+      .where(eq(chapters.documentId, chapter.documentId))
+
+    await tx
+      .update(documents)
+      .set({ charCount: Number(sum?.total ?? 0) })
+      .where(eq(documents.id, chapter.documentId))
+
+    return { backupVersion: version, lockRevision: bumped[0]!.lockRevision, charCount }
+  })
+
+  if (chapter.episodeId) await resyncEpisodeStages(chapter.episodeId)
+
+  return result
+}
+
+/**
  * Adds a scene. The code (`S01`) comes from its position rather than being
  * typed, so renumbering after a reorder is one update instead of a manual pass.
  */

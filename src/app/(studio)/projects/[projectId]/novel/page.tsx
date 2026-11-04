@@ -125,7 +125,15 @@ export default async function NovelWorkbenchPage({ params }: Params) {
             <ResumeCard projectId={project.id} resume={resume} />
 
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-4">
-              <Stat label="總字數" value={totalChars.toLocaleString('en-US')} unit="字" />
+              {/*
+                標清楚是哪一種算法 (Z123)。四種細項在編輯器頁尾——那裡才是
+                寫的時候會盯著看的地方，而這裡重算四種要讀 120 集全文。
+              */}
+              <Stat
+                label="總字數"
+                value={totalChars.toLocaleString('en-US')}
+                unit="字（含標點，不含空白）"
+              />
               <Stat label="已動筆" value={`${written.length}`} unit={`/ ${rows.length} 集`} />
               <Stat
                 label="已寫大綱"
