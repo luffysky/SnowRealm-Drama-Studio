@@ -191,7 +191,16 @@ export function NovelReader({
       if (next < 0 || next >= chapters.length) return
       setIndex(next)
       setPage(0)
-      window.scrollTo({ top: 0, behavior: 'auto' })
+
+      /*
+       * 回到新一章的開頭 (Z134).
+       *
+       * 回報：「跳下一章還是直接跳中間」。捲動模式的正文在 `pageRef` 這個
+       * 容器裡，而這裡只重設了 `pagerRef`（橫向翻頁用的）跟 `window`——
+       * 閱讀器是 `fixed inset-0`，window 根本不會捲，所以那一行從來沒有做
+       * 過任何事。上一章捲到哪，新一章就從哪裡開始。
+       */
+      pageRef.current?.scrollTo({ top: 0, behavior: 'auto' })
       pagerRef.current?.scrollTo({ left: 0, behavior: 'auto' })
     },
     [chapters.length]
@@ -297,6 +306,15 @@ export function NovelReader({
       // The paragraph, not the chunk — a long paragraph is several chunks.
       onBoundary: (paragraph) => setSpokenAt(paragraph),
       onEnd: () => {
+        /*
+         * 唸完的 handle 要丟掉 (Z134).
+         *
+         * 回報：「朗讀完一章跳下一章就沒聲音了」。接力的 effect 第一件事是
+         * `if (speechRef.current) return`，而這裡只設了 `reading`，沒有把
+         * 已經唸完的 handle 清掉——所以它每次都在那一行掉頭走人，下一章永遠
+         * 不會開口。狀態說停了，ref 說還在，中間那個 effect 信了 ref。
+         */
+        speechRef.current = null
         setReading('off')
         setSpokenAt(-1)
         /*
@@ -312,6 +330,7 @@ export function NovelReader({
         }
       },
       onError: () => {
+        speechRef.current = null
         setReading('off')
         setSpokenAt(-1)
       },
