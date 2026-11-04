@@ -160,8 +160,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: 'AI 製片中心',
     icon: 'Sparkles',
     href: '/ai',
-    ready: false,
-    milestone: 'M2',
+    ready: true,
     design: 80,
   },
   {

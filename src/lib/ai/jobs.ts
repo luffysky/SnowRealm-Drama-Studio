@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, count, desc, eq, isNull } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   aiJobAttempts,
@@ -326,6 +326,77 @@ export async function listJobs(input: {
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(aiJobs.createdAt))
     .limit(Math.min(input.limit ?? 50, 200))
+}
+
+export type QueueRow = {
+  id: string
+  kind: AiJobRow['kind']
+  status: AiJobRow['status']
+  model: string
+  projectId: string | null
+  projectTitle: string
+  episodeNumber: number | null
+  attemptCount: number
+  maxAttempts: number
+  errorMessage: string
+  estimatedCost: string | null
+  actualCost: string | null
+  createdAt: Date
+  startedAt: Date | null
+  finishedAt: Date | null
+}
+
+/**
+ * The queue, as 「AI 製片中心」 shows it (Z88).
+ *
+ * Joined rather than N+1: the page lists which work and which episode each job
+ * belongs to, and a job id on its own answers neither. The request and result
+ * payloads are deliberately left out — they are large, often the whole
+ * chapter, and nothing on a list view reads them.
+ */
+export async function listQueue(input: {
+  status?: AiJobRow['status']
+  limit?: number
+}): Promise<QueueRow[]> {
+  const rows = await db
+    .select({
+      id: aiJobs.id,
+      kind: aiJobs.kind,
+      status: aiJobs.status,
+      model: aiJobs.model,
+      projectId: aiJobs.projectId,
+      projectTitle: projects.title,
+      episodeNumber: episodes.number,
+      attemptCount: aiJobs.attemptCount,
+      maxAttempts: aiJobs.maxAttempts,
+      errorMessage: aiJobs.errorMessage,
+      estimatedCost: aiJobs.estimatedCost,
+      actualCost: aiJobs.actualCost,
+      createdAt: aiJobs.createdAt,
+      startedAt: aiJobs.startedAt,
+      finishedAt: aiJobs.finishedAt,
+    })
+    .from(aiJobs)
+    .leftJoin(projects, eq(projects.id, aiJobs.projectId))
+    .leftJoin(episodes, eq(episodes.id, aiJobs.episodeId))
+    .where(input.status ? eq(aiJobs.status, input.status) : undefined)
+    .orderBy(desc(aiJobs.createdAt))
+    .limit(Math.min(input.limit ?? 60, 200))
+
+  return rows.map((row) => ({
+    ...row,
+    projectTitle: row.projectTitle ?? '',
+  }))
+}
+
+/** How many jobs sit in each state, for the queue's summary strip. */
+export async function queueCounts(): Promise<Record<string, number>> {
+  const rows = await db
+    .select({ status: aiJobs.status, n: count() })
+    .from(aiJobs)
+    .groupBy(aiJobs.status)
+
+  return Object.fromEntries(rows.map((row) => [row.status, Number(row.n)]))
 }
 
 /** One job with its attempt history, for the queue dialog's detail view. */
