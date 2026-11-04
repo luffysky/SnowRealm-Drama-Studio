@@ -307,6 +307,8 @@ export type WorkerReport = {
   failed: number
   retrying: number
   cancelled: number
+  /** Jobs that made progress and go back in the queue (Z129). */
+  continuing: number
 }
 
 /**
@@ -326,6 +328,7 @@ export async function runDueJobs(options: { limit?: number } = {}): Promise<Work
     failed: 0,
     retrying: 0,
     cancelled: swept,
+    continuing: 0,
   }
 
   for (const job of jobs) {
@@ -388,7 +391,14 @@ async function sweepAbandoned(): Promise<number> {
   return finished.length
 }
 
-type Outcome = 'succeeded' | 'failed' | 'retrying' | 'cancelled'
+/**
+ * `continuing` 是「做了一部分，待會繼續」(Z129).
+ *
+ * 有聲書一集要分好幾次才做得完（三十分鐘音檔 vs 60 秒函式上限），而做了六段
+ * 停下來是**成功的一半**，不是失敗。算成 `retrying` 會去吃重試次數，跑幾輪
+ * 之後就被當成壞掉的任務放棄掉——而它其實一直在前進。
+ */
+type Outcome = 'succeeded' | 'failed' | 'retrying' | 'cancelled' | 'continuing'
 
 /* -------------------------------------------------------------------------- */
 /* 媒體任務的狀態機                                                              */
@@ -452,6 +462,31 @@ async function parkUntilNextPoll(
 
 
 async function executeJob(job: AiJobRow): Promise<Outcome> {
+  /*
+   * 有聲書走自己的路 (Z129).
+   *
+   * It calls Azure TTS, not a language model, so `resolveAdapter` has nothing
+   * to give it. It is also the only job that can legitimately finish a run
+   * without finishing the work — checked first so neither of those facts has
+   * to be special-cased further down.
+   */
+  if (job.kind === 'NOVEL_TO_AUDIO') {
+    const { advanceAudiobook } = await import('@/lib/tts/job')
+    try {
+      return await advanceAudiobook(job.id)
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '語音合成失敗'
+      return finishFailed(job, undefined, {
+        code: 'tts_failed',
+        message,
+        // Azure rate limits and 5xx are worth another pass; a bad voice name
+        // or missing prose will fail again exactly the same way.
+        retryable: /429|500|502|503|504|逾時|timeout/i.test(message),
+        durationMs: 0,
+      })
+    }
+  }
+
   /*
    * A media job is driven by submit/poll rather than a single call. The text
    * path never sets an external handle, so this branch only catches media —

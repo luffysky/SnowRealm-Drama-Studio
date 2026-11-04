@@ -81,6 +81,36 @@ export const GET = handle(async (request: Request) => {
   const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 1, 1), 5)
 
   const report = await runDueJobs({ limit })
+
+  /*
+   * 還沒做完就自己再叫一次 (Z129).
+   *
+   * 有聲書一集要分十幾次才做得完，而排程在這個方案上一天只跑一次。沒有這段，
+   * 就得有人一直按「執行佇列」——而一關掉頁面就停住了。
+   *
+   * 會停下來，因為每一輪都真的前進：每一段合成完就落地，所以 `continuing`
+   * 只在「還有沒做的段」時才會是 true，而沒做的段每輪都在變少。失敗的那一輪
+   * 走的是 `failed`，不會走到這裡。
+   *
+   * Fire-and-forget 而且 `keepalive`：這次的回應不等它，但瀏覽器或執行環境
+   * 也不會因為本次請求結束就把它掐掉（Z126 就是栽在這一點）。
+   */
+  if (report.continuing > 0) {
+    const next = new URL(request.url)
+    void fetch(next.toString(), {
+      method: 'POST',
+      headers: {
+        ...(request.headers.get('authorization')
+          ? { authorization: request.headers.get('authorization')! }
+          : {}),
+        ...(request.headers.get('cookie') ? { cookie: request.headers.get('cookie')! } : {}),
+      },
+      keepalive: true,
+    }).catch(() => {
+      /* The next nudge or the nightly cron picks it up. */
+    })
+  }
+
   return jsonOk(report)
 })
 

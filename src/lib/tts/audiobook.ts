@@ -2,7 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { db } from '@/db'
 import { characters, episodes } from '@/db/schema'
 import { ApiError } from '@/lib/api'
-import { castChunks, type CastMember } from '@/lib/narration'
+import { castChunks, castFromSpeakers, type CastMember } from '@/lib/narration'
 import { novelForReading } from '@/lib/novel-export'
 import { splitForSpeech } from '@/lib/speech-split'
 import { batchChunks, billableChars, estimatedSeconds, ssmlFor, type SsmlBatch } from './ssml'
@@ -67,6 +67,14 @@ export async function planEpisodeAudio(input: {
   narratorVoice: string
   locale?: string
   ratePerMillionUsd?: number | null
+  /**
+   * 段號 → 說話的人，從正文判斷出來的 (Z132).
+   *
+   * With it, dialogue gets a voice even for people the cast table has never
+   * heard of — which is the whole point of 「從文本建音檔，音色又分開」.
+   * Without it the rules decide, and on this novel the rules find nobody.
+   */
+  speakers?: ReadonlyMap<number, string>
 }): Promise<AudiobookPlan> {
   const [episode] = await db
     .select({ id: episodes.id, number: episodes.number, title: episodes.title })
@@ -121,7 +129,23 @@ export async function planEpisodeAudio(input: {
    */
   const paragraphs = chapters.flatMap((chapter) => chapter.paragraphs)
   const plain = splitForSpeech(paragraphs)
-  const casted = castChunks(plain, paragraphs, members, input.voices)
+
+  /*
+   * Everyone the prose actually gives a line to, whether or not the cast
+   * table knows them. Falls back to the table alone when there is no
+   * attribution, which is the behaviour this had before.
+   */
+  const castForVoices = input.speakers
+    ? castFromSpeakers([...input.speakers.values()], members)
+    : members
+
+  const casted = castChunks(
+    plain,
+    paragraphs,
+    castForVoices,
+    input.voices,
+    ...(input.speakers ? ([input.speakers] as const) : ([] as const))
+  )
 
   const batches = batchChunks(casted)
   const locale = input.locale ?? 'zh-TW'

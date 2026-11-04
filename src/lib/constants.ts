@@ -391,6 +391,7 @@ export const AI_JOB_KINDS = [
   'ASSET_GENERATE',
   'TASK_SUGGEST',
   'DIALOGUE_ATTRIBUTE',
+  'NOVEL_TO_AUDIO',
 ] as const
 export type AiJobKindValue = (typeof AI_JOB_KINDS)[number]
 
@@ -411,6 +412,7 @@ export const AI_JOB_KIND_LABEL: Record<AiJobKindValue, string> = {
   ASSET_GENERATE: '素材生成',
   TASK_SUGGEST: '任務建議',
   DIALOGUE_ATTRIBUTE: '對白歸屬',
+  NOVEL_TO_AUDIO: '小說轉語音',
 }
 
 export const AI_JOB_STATUSES = [

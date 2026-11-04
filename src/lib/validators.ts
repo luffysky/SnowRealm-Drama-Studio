@@ -950,3 +950,15 @@ export const lyricsSchema = z.object({
 export const lyricsAlignSchema = z.object({
   lyrics: z.string().min(1, '先貼上歌詞').max(100_000, '歌詞太長了'),
 })
+
+/**
+ * 有聲書 (Z129).
+ *
+ * The voice is validated against the live list in the route rather than here:
+ * which voices exist is Azure's answer and it differs by region, so a list
+ * written down in this file would be wrong the day it changed.
+ */
+export const audiobookSchema = z.object({
+  narratorVoice: z.string().trim().max(120).optional(),
+  locale: z.string().trim().max(20).optional(),
+})
