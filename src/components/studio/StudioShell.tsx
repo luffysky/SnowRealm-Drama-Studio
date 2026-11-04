@@ -79,12 +79,26 @@ export function StudioShell({ user, children }: { user: SessionUser; children: R
   const [railOpen, setRailOpen] = useState(false)
 
   return (
-    <div className="flex min-h-dvh bg-stage-950">
+    /*
+     * 側邊欄與內容分開捲 (Z133).
+     *
+     * 回報：「我在內容捲動側邊欄跟著跑」。因為桌機版的 `<aside>` 是
+     * `lg:static`，而這一層是 `min-h-dvh`——所以捲的是**整份文件**，側邊欄
+     * 當然跟著走。
+     *
+     * 改成鎖住視窗高度、讓 `<main>` 自己捲，側邊欄就留在原地（它的 `<nav>`
+     * 本來就有自己的 `overflow-y-auto`）。
+     *
+     * **只在 `lg` 以上這樣做。** 手機版的側邊欄是浮在上面的 `fixed` 抽屜，
+     * 本來就不會跟著捲；而把整頁改成不可捲會連帶關掉瀏覽器自己收起網址列的
+     * 行為，在小螢幕上那等於白白少一截可視高度。
+     */
+    <div className="flex min-h-dvh bg-stage-950 lg:h-dvh lg:min-h-0 lg:overflow-hidden">
       <Rail user={user} open={railOpen} onClose={() => setRailOpen(false)} />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
         <TopBar user={user} onOpenRail={() => setRailOpen(true)} />
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 flex-1 lg:min-h-0 lg:overflow-y-auto">{children}</main>
       </div>
     </div>
   )
