@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ImagePicker } from '@/components/studio/ImagePicker'
+import { VoicePicker } from '@/components/studio/VoicePicker'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
@@ -626,13 +627,27 @@ function CharacterFields({
           ]
         : [
             { key: 'voiceProvider', label: '配音供應商' },
-            { key: 'voiceId', label: '音色 ID', hint: '鎖定後整季沿用同一組' },
-            { key: 'voiceStyle', label: '語氣風格' },
             { key: 'voiceNote', label: '配音備註', rows: 3 },
           ]
 
   return (
     <div className="flex flex-col gap-3">
+      {/*
+       * 音色跟風格不是純文字欄位 (Z140).
+       *
+       * 它們本來是。要填對得憑記憶打出 `zh-CN-XiaoxiaoNeural`（556 個音色裡
+       * 的一個）跟 `disgruntled`（而且沒有任何地方說得出哪些音色收這個字）。
+       * 結果是一個都沒有被填過——一個填不出來的欄位跟一個不存在的欄位，在
+       * 資料庫裡是同一件事。
+       */}
+      {tab === 'voice' && (
+        <VoicePicker
+          voiceId={character.voiceId}
+          voiceStyle={character.voiceStyle}
+          onSave={save}
+        />
+      )}
+
       {fields.map((field) => (
         <label key={field.key} className="flex flex-col gap-1">
           <span className="flex items-baseline gap-2 text-[11px] text-ink-400">

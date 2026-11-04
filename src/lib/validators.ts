@@ -969,6 +969,28 @@ export const audiobookSchema = z.object({
  * Names rather than ids, because these people have no row yet — the name as
  * the prose wrote it is the only handle they have.
  */
+/**
+ * 試聽一個音色 (Z140).
+ *
+ * 字數卡得很緊，而且卡在**伺服器端**：試聽是唯一一個「使用者按一下就讓
+ * Azure 收一次錢」的地方，而送多少字是前端決定的。六十個字約四秒，夠聽出
+ * 這把嗓子是誰，也不夠拿這個端點去合成整章。
+ */
+export const voicePreviewSchema = z.object({
+  voiceId: z.string().trim().min(1).max(120),
+  /** Azure 的情緒風格名。音色不支援的話合成端會忽略。 */
+  style: z.string().trim().max(60).optional(),
+  text: z.string().trim().min(1).max(60).optional(),
+})
+
 export const promoteSpeakersSchema = z.object({
   names: z.array(z.string().trim().min(1).max(60)).min(1, '至少要選一個').max(50),
+  /**
+   * 建成哪一級的角色 (Z140).
+   *
+   * 本來寫死 SUPPORTING，但那讓「周圍的百姓」跟「陸承安」變成同一級——而
+   * 分級決定體檢會不會抱怨某個角色沒有成長弧線、沒有定妝照。抱怨「路人」
+   * 沒有成長弧線是噪音，抱怨主角沒有才是提醒。
+   */
+  tier: z.enum(CHARACTER_TIERS).optional().default('SUPPORTING'),
 })

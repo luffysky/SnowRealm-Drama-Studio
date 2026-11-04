@@ -9,7 +9,7 @@ import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { cn } from '@/lib/utils'
 import { AudiobookPanel } from '@/components/studio/AudiobookPanel'
-import { CHARACTER_TIER_LABEL, type CharacterTierValue } from '@/lib/constants'
+import { CHARACTER_TIER_LABEL, CHARACTER_TIERS, type CharacterTierValue } from '@/lib/constants'
 
 /**
  * 一本書的三個分頁 (Z136).
@@ -393,6 +393,15 @@ function Unlisted({
   const toast = useToast()
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [saving, setSaving] = useState(false)
+  /**
+   * 建成哪一級 (Z140).
+   *
+   * 本來寫死配角，於是「周圍的百姓」跟「陸承安」變成同一級。分級決定體檢
+   * 會不會抱怨這個角色沒有成長弧線——抱怨「路人」沒有是噪音。
+   *
+   * 可以分批：先挑真的角色加成配角，再挑群眾加成臨時。
+   */
+  const [tier, setTier] = useState<CharacterTierValue>('SUPPORTING')
 
   async function add() {
     if (picked.size === 0) return
@@ -401,7 +410,7 @@ function Unlisted({
       const response = await apiFetch(`/api/projects/${projectId}/speakers`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ names: [...picked] }),
+        body: JSON.stringify({ names: [...picked], tier }),
       })
       if (!response.ok) throw new Error(await readApiError(response))
 
@@ -470,15 +479,32 @@ function Unlisted({
       </ul>
 
       {canEdit && (
-        <button
-          type="button"
-          onClick={() => void add()}
-          disabled={picked.size === 0 || saving}
-          className="tap inline-flex w-fit items-center gap-1.5 rounded-lg bg-accent-600 px-3 py-1.5 text-[11px] text-white transition-colors hover:bg-accent-500 disabled:opacity-40"
-        >
-          <UserPlus aria-hidden className="size-3.5" />
-          {saving ? '加入中…' : `把這 ${picked.size} 個加進角色表`}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[10px] text-ink-500">
+            建成
+            <select
+              value={tier}
+              onChange={(event) => setTier(event.target.value as CharacterTierValue)}
+              className="h-7 rounded-lg bg-stage-850 px-2 text-[11px] text-ink-100 ring-1 ring-inset ring-stage-700 focus:ring-2 focus:ring-accent-500 focus:outline-none"
+            >
+              {CHARACTER_TIERS.map((value) => (
+                <option key={value} value={value}>
+                  {CHARACTER_TIER_LABEL[value] ?? value}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            onClick={() => void add()}
+            disabled={picked.size === 0 || saving}
+            className="tap inline-flex w-fit items-center gap-1.5 rounded-lg bg-accent-600 px-3 py-1.5 text-[11px] text-white transition-colors hover:bg-accent-500 disabled:opacity-40"
+          >
+            <UserPlus aria-hidden className="size-3.5" />
+            {saving ? '加入中…' : `把這 ${picked.size} 個加進角色表`}
+          </button>
+        </div>
       )}
     </div>
   )

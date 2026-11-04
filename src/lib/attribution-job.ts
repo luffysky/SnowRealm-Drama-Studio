@@ -6,6 +6,7 @@ import { ApiError, logActivity } from '@/lib/api'
 import { buildContext, estimateJob } from '@/lib/ai/jobs'
 import { enqueueJob } from '@/lib/ai/queue'
 import type { SessionUser } from '@/lib/auth/session'
+import type { CharacterTierValue } from '@/lib/constants'
 import {
   attributionCoverage,
   gendersFrom,
@@ -436,6 +437,14 @@ export async function unlistedSpeakers(projectId: string): Promise<UnlistedSpeak
 export async function promoteSpeakers(input: {
   projectId: string
   names: string[]
+  /**
+   * 建成哪一級 (Z140). 預設配角，就是本來寫死的那一級。
+   *
+   * 分級決定體檢會不會抱怨這個角色沒有成長弧線、沒有定妝照。抱怨「路人」
+   * 沒有成長弧線是噪音，抱怨主角沒有才是提醒——所以「周圍的百姓」跟
+   * 「陸承安」不該建成同一級。
+   */
+  tier?: CharacterTierValue
   user: SessionUser
 }): Promise<{ created: string[]; linked: number; skipped: string[] }> {
   if (input.names.length === 0) return { created: [], linked: 0, skipped: [] }
@@ -470,11 +479,13 @@ export async function promoteSpeakers(input: {
         name,
         gender: found?.gender ?? '',
         /*
-         * 配角, not 主角. Somebody promoted from a line of dialogue is a
-         * supporting character until a person says otherwise — and the tier
+         * 預設配角, never 主角. Somebody promoted from a line of dialogue is
+         * a supporting character until a person says otherwise — and the tier
          * decides whether 體檢 complains about them never appearing.
+         *
+         * 可以指定，因為「周圍的百姓」跟「陸承安」不是同一種東西 (Z140)。
          */
-        tier: 'SUPPORTING',
+        tier: input.tier ?? 'SUPPORTING',
         personality: found
           ? `從正文的對白認出來的：在 ${found.episodes.length} 集裡說了 ${found.lines} 句。`
           : '',

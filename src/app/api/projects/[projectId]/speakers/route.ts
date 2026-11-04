@@ -31,7 +31,12 @@ export const POST = handle(async (request: Request, context: Context) => {
   await requireProjectApi(projectId, user.id)
 
   const input = await parseJson(request, promoteSpeakersSchema)
-  const result = await promoteSpeakers({ projectId, names: input.names, user })
+  const result = await promoteSpeakers({
+    projectId,
+    names: input.names,
+    tier: input.tier,
+    user,
+  })
 
   return jsonOk(result, { status: 201 })
 })
