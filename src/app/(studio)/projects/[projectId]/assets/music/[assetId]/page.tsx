@@ -8,6 +8,7 @@ import { getSessionUser } from '@/lib/auth/session'
 import { getMusic } from '@/lib/music'
 import { LICENSE_LABEL, LICENSE_STYLE, MUSIC_CATEGORY_LABEL } from '@/lib/music-view'
 import { requireProjectPage } from '@/lib/project-access'
+import { parseLyrics } from '@/lib/lyrics'
 import { cn, formatDurationZh } from '@/lib/utils'
 
 export const metadata: Metadata = { title: '音樂播放與波形' }
@@ -87,6 +88,41 @@ export default async function MusicDetailPage({ params }: Params) {
             mimeType={track.mimeType}
           />
 
+          {/*
+            歌詞 (Z125) — 靜態顯示而已。
+
+            跟著播放走的那一份在音樂播放頁：這一頁的 `WaveformPlayer` 自己
+            持有一個 `<audio>`，跟全域播放器（Z124）是兩套時間。把同步面板
+            放在這裡，會變成「有一個播放器在響、另一個播放器的歌詞在動」。
+            打時間也一樣要跟著真的在播的那一首。
+          */}
+          {track.lyrics.trim() && (
+            <section className="panel rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700">
+              <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2">
+                <h3 className="text-xs font-medium text-ink-200">歌詞</h3>
+                <span className="text-[10px] text-ink-600">
+                  {parseLyrics(track.lyrics).timed ? '有時間碼' : '沒有時間碼'}
+                </span>
+                <Link
+                  href="/listen"
+                  className="tap ml-auto text-[10px] text-accent-300 hover:text-accent-200"
+                >
+                  到音樂播放頁跟著唱／打時間
+                </Link>
+              </div>
+              <ol className="flex flex-col gap-0.5">
+                {parseLyrics(track.lyrics).lines.map((line, index) => (
+                  <li
+                    key={index}
+                    className="text-[11px] leading-relaxed text-ink-400"
+                  >
+                    {line.text || <span className="text-ink-700">（間奏）</span>}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
           {track.description && (
             <section className="panel rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700">
               <h3 className="mb-1.5 text-xs font-medium text-ink-200">說明</h3>
@@ -119,6 +155,16 @@ export default async function MusicDetailPage({ params }: Params) {
             <Row label="風格標籤" value={track.genreTags.join('、') || '—'} />
             <Row label="情緒標籤" value={track.moodTags.join('、') || '—'} />
             <Row label="創作來源" value={track.sourcePlatform || '—'} />
+            <Row
+              label="歌詞"
+              value={
+                !track.lyrics.trim()
+                  ? '無'
+                  : parseLyrics(track.lyrics).timed
+                    ? `${parseLyrics(track.lyrics).lines.length} 句・有時間碼`
+                    : `${parseLyrics(track.lyrics).lines.length} 句・沒有時間碼`
+              }
+            />
             <Row label="原始檔名" value={track.name} />
             <Row
               label="波形資料"

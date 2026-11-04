@@ -74,6 +74,26 @@ export const audioMetadata = pgTable(
     /** 來源平台: Suno AI / 自製錄音 / 商用音效庫 / 授權音樂… */
     sourcePlatform: text('source_platform').notNull().default(''),
     description: text('description').notNull().default(''),
+    /**
+     * 歌詞，存成 LRC 或純文字 (Z125).
+     *
+     * One text column rather than a table of timed lines, for three reasons:
+     *
+     *  - **LRC is already the interchange format.** `[mm:ss.xx]` per line has
+     *    been what karaoke and every music player speak for twenty years, so
+     *    a file exported here opens elsewhere and vice versa.
+     *  - **It is plain text.** When a timing is wrong it is readable and
+     *    fixable by hand; a bespoke JSON structure is only legible to this app.
+     *  - **Rows would buy nothing.** Nothing queries an individual line —
+     *    the whole sheet is loaded, parsed once, and followed in the browser.
+     *
+     * Untimed lyrics live here too, as plain lines; `parseLyrics` tells them
+     * apart and the player shows them without following along, which is the
+     * truthful behaviour rather than a missing feature.
+     */
+    lyrics: text('lyrics').notNull().default(''),
+    /** Set when the lyrics were last written, for 「誰先打的時間碼」. */
+    lyricsUpdatedAt: timestamp('lyrics_updated_at', { withTimezone: true }),
     /** 是否為 AI 生成，連同生成當時的方案與條款證據。 */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -924,3 +924,17 @@ export const updateArcSchema = z.object({
   plannedEpisodes: z.coerce.number().int().min(0).max(9999).optional(),
   episodeIds: z.array(uuid).max(500, '一次最多搬 500 集').optional(),
 })
+
+/**
+ * 歌詞 (Z125).
+ *
+ * Stored as written — LRC or plain text, decided by `parseLyrics` on the way
+ * out rather than by a format field here. A field would let the two disagree,
+ * and the text itself is unambiguous: a line beginning `[mm:ss.xx]` is LRC.
+ *
+ * The cap is generous because a timed sheet carries a tag on every line, so
+ * the markup is a real fraction of the file.
+ */
+export const lyricsSchema = z.object({
+  lyrics: z.string().max(100_000, '歌詞太長了'),
+})

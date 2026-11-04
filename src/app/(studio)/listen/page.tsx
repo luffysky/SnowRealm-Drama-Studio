@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { MusicPlayer } from '@/components/studio/MusicPlayer'
 import { EmptyState } from '@/components/ui/StateViews'
+import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { listTracks } from '@/lib/library'
 
@@ -43,6 +44,7 @@ export default async function ListenPage() {
         />
       ) : (
         <MusicPlayer
+          canEditLyrics={can(user, 'asset.write')}
           tracks={tracks.map((track) => ({
             assetId: track.assetId,
             projectId: track.projectId,

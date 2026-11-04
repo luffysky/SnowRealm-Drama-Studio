@@ -7,7 +7,7 @@ import {
   audioMetadata,
   audioRevisions,
 } from '@/db/schema'
-import { ApiError } from '@/lib/api'
+import { ApiError, logActivity } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 
 /**
@@ -57,6 +57,9 @@ export type MusicTrack = MusicInput & {
   version: number
   hasWaveform: boolean
   licenseStatus: string
+  /** LRC or plain text; `parseLyrics` tells them apart (Z125). */
+  lyrics: string
+  lyricsUpdatedAt: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -268,6 +271,8 @@ export async function getMusic(
       musicalKey: audioMetadata.musicalKey,
       sourcePlatform: audioMetadata.sourcePlatform,
       description: audioMetadata.description,
+      lyrics: audioMetadata.lyrics,
+      lyricsUpdatedAt: audioMetadata.lyricsUpdatedAt,
       licenseStatus: assetLicenses.status,
     })
     .from(assets)
@@ -320,5 +325,71 @@ export async function getMusic(
     description: row.description ?? '',
     hasWaveform: Boolean(waveform),
     licenseStatus: row.licenseStatus ?? 'PENDING_REVIEW',
+    lyrics: row.lyrics ?? '',
+    lyricsUpdatedAt: row.lyricsUpdatedAt,
   }
+}
+
+/**
+ * 存歌詞 (Z125).
+ *
+ * Its own function rather than a field on `updateMusic`, because it is its
+ * own action with its own screen: somebody tapping timings down a song is not
+ * editing the BPM, and sending the whole metadata form on every save of a
+ * timing pass would make a save able to clobber a field nobody touched.
+ *
+ * The text is stored exactly as given. Normalising it here — sorting lines,
+ * rewriting timestamps — would mean the file somebody pasted is not the file
+ * they get back, and LRC is a format people hand-edit.
+ */
+export async function saveLyrics(input: {
+  projectId: string
+  assetId: string
+  lyrics: string
+  user: SessionUser
+}): Promise<{ lyricsUpdatedAt: Date }> {
+  const [asset] = await db
+    .select({ id: assets.id, kind: assets.kind })
+    .from(assets)
+    .where(
+      and(
+        eq(assets.id, input.assetId),
+        eq(assets.projectId, input.projectId),
+        isNull(assets.deletedAt)
+      )
+    )
+    .limit(1)
+
+  if (!asset) throw ApiError.notFound('找不到這首曲子')
+  // MUSIC only. 配音 and 音效 have no lyrics, and offering the panel on them
+  // would be a field that can be filled in and never read.
+  if (asset.kind !== 'MUSIC') throw ApiError.badRequest('只有音樂可以有歌詞')
+
+  const now = new Date()
+
+  /*
+   * Upsert: a track uploaded before the metadata form existed has no
+   * `audio_metadata` row, and refusing to take its lyrics because of that
+   * would be an error about our own schema history.
+   */
+  await db
+    .insert(audioMetadata)
+    .values({ assetId: input.assetId, lyrics: input.lyrics, lyricsUpdatedAt: now })
+    .onConflictDoUpdate({
+      target: audioMetadata.assetId,
+      set: { lyrics: input.lyrics, lyricsUpdatedAt: now, updatedAt: now },
+    })
+
+  await logActivity({
+    user: input.user,
+    action: 'update',
+    entityType: 'asset',
+    entityId: input.assetId,
+    projectId: input.projectId,
+    summary: input.lyrics.trim()
+      ? `${input.user.name} 更新了歌詞`
+      : `${input.user.name} 清空了歌詞`,
+  })
+
+  return { lyricsUpdatedAt: now }
 }

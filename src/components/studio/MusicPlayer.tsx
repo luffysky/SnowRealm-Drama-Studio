@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MUSIC_CATEGORY_LABEL } from '@/lib/music-view'
 import { cn, formatDurationZh } from '@/lib/utils'
 import { usePlayer, type PlayerTrack } from '@/components/studio/PlayerProvider'
+import { TrackLyrics } from '@/components/studio/TrackLyrics'
 
 /**
  * 音樂播放器 — every track in the studio, with a queue.
@@ -39,7 +40,14 @@ import { usePlayer, type PlayerTrack } from '@/components/studio/PlayerProvider'
  */
 export type { PlayerTrack }
 
-export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
+export function MusicPlayer({
+  tracks,
+  canEditLyrics = false,
+}: {
+  tracks: PlayerTrack[]
+  /** Whether this member may write lyrics (Z125). */
+  canEditLyrics?: boolean
+}) {
   /*
    * 播放狀態不在這裡 (Z124)。
    *
@@ -117,8 +125,18 @@ export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
       {/* The audio element is in `PlayerProvider`, above every page (Z124). */}
 
-      {/* ---- now playing ------------------------------------------------ */}
-      <section className="panel flex flex-col gap-4 rounded-xl bg-stage-900 p-5 ring-1 ring-stage-700">
+      {/*
+        ---- now playing ----
+
+        `min-w-0` is load-bearing. Below `xl` the grid has no explicit columns,
+        so its single auto column is sized to the content's **max-content**
+        width — and 「大明不妙曲--此去半生戴上耳機聽歌」 is wider than a phone.
+        The `truncate` on the title cannot help: a flex child only shrinks
+        below its content when every grid and flex ancestor allows it to, and
+        the grid item itself was not. Measured 10px of horizontal page scroll
+        at 390px before this.
+      */}
+      <section className="panel flex min-w-0 flex-col gap-4 rounded-xl bg-stage-900 p-5 ring-1 ring-stage-700">
         <div className="flex items-center gap-4">
           <span className="bg-brand-gradient glow-accent-sm grid size-20 shrink-0 place-items-center rounded-xl">
             <Music aria-hidden className="size-8 text-white/90" />
@@ -254,10 +272,18 @@ export function MusicPlayer({ tracks }: { tracks: PlayerTrack[] }) {
             {error}
           </p>
         )}
+
+        {/*
+          歌詞 (Z125). Under the transport on purpose: it is the thing you
+          read while the controls are the thing you reach for, and putting it
+          in the right-hand column would have it fighting the queue for the
+          one place a phone has.
+        */}
+        <TrackLyrics canEdit={canEditLyrics} />
       </section>
 
       {/* ---- queue ------------------------------------------------------ */}
-      <section className="panel flex max-h-[32rem] flex-col rounded-xl bg-stage-900 ring-1 ring-stage-700">
+      <section className="panel flex max-h-[32rem] min-w-0 flex-col rounded-xl bg-stage-900 ring-1 ring-stage-700">
         <header className="flex flex-col gap-2 border-b border-stage-700/60 p-3">
           <div className="flex items-center gap-1.5">
             <ListMusic aria-hidden className="size-3.5 text-accent-400" />
