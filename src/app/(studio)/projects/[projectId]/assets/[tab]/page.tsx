@@ -4,6 +4,7 @@ import { AssetBrowser, type AssetItem } from '@/components/assets/AssetBrowser'
 import { AssetCenterNav } from '@/components/assets/AssetCenterNav'
 import { listAssets } from '@/lib/asset-browser'
 import { ASSET_SORTS, type AssetSort } from '@/lib/asset-browser-view'
+import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import type { AssetKindValue } from '@/lib/constants'
 import { requireProjectPage } from '@/lib/project-access'
@@ -102,6 +103,11 @@ export default async function AssetTabPage({ params, searchParams }: Params) {
         kindCounts={result.kindCounts}
         totalBytes={result.totalBytes}
         episodeOptions={result.episodeOptions}
+        /*
+         * 刪除是擁有者才有的權限 (Z138)。它也是這個素材庫裡唯一真正不可逆
+         * 的動作：R2 的物件沒有版本。
+         */
+        canDelete={can(user, 'asset.delete')}
       />
     </div>
   )

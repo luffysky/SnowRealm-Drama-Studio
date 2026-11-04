@@ -450,5 +450,21 @@ function hrefFor(kind: string, projectId: string | null, episodeId: string | nul
     return `${base}/script`
   }
   if (kind.startsWith('NOVEL_')) return `${base}/novel`
-  return base
+
+  /*
+   * 對白歸屬在看小說那邊處理 (Z138).
+   *
+   * 它的成果是「哪一句是誰說的」，而那件事唯一看得到效果的地方是有聲書的
+   * 配音——不是編輯器。
+   */
+  if (kind === 'DIALOGUE_ATTRIBUTE') return `/read/${projectId}`
+
+  /*
+   * 退路是集數清單，不是 `${base}` (Z138).
+   *
+   * `/projects/<作品>/episodes/<集數>` **沒有這一頁**——那個目錄底下只有
+   * novel / script / assets。所以舊的退路對任何沒有明確對應的種類都是 404，
+   * 而使用者第一個踩到的是對白歸屬。清單頁吃 `?ep=`，會把那一集選起來。
+   */
+  return `/projects/${projectId}/episodes?ep=${episodeId}`
 }

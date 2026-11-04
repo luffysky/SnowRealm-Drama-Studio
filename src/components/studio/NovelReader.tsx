@@ -1,4 +1,4 @@
-'use client'
+"use client";
 
 import {
   ChevronLeft,
@@ -9,9 +9,9 @@ import {
   Settings2,
   Square,
   X,
-} from 'lucide-react'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -19,7 +19,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-} from 'react'
+} from "react";
 import {
   SPEECH_PITCH_MAX,
   SPEECH_PITCH_MIN,
@@ -44,9 +44,9 @@ import {
   READING_MODES,
   saveReaderSettings,
   type ReaderSettings,
-} from '@/lib/novel-reader-view'
-import { ReadingRail } from '@/components/studio/ReadingRail'
-import { castChunks, type CastMember } from '@/lib/narration'
+} from "@/lib/novel-reader-view";
+import { ReadingRail } from "@/components/studio/ReadingRail";
+import { castChunks, type CastMember } from "@/lib/narration";
 import {
   loadVoices,
   speak,
@@ -54,9 +54,9 @@ import {
   splitForSpeech,
   type SpeechHandle,
   type Voice,
-} from '@/lib/speech'
-import { useScriptConversion } from '@/lib/use-script-conversion'
-import { cn } from '@/lib/utils'
+} from "@/lib/speech";
+import { useScriptConversion } from "@/lib/use-script-conversion";
+import { cn } from "@/lib/utils";
 
 /**
  * 小說閱讀器.
@@ -75,15 +75,15 @@ import { cn } from '@/lib/utils'
  */
 
 export type ReaderChapter = {
-  id: string
-  episodeId: string
-  episodeNumber: number
-  episodeTitle: string
-  chapterTitle: string
+  id: string;
+  episodeId: string;
+  episodeNumber: number;
+  episodeTitle: string;
+  chapterTitle: string;
   /** Paragraphs, already converted from the editor's HTML on the server. */
-  paragraphs: string[]
-  charCount: number
-}
+  paragraphs: string[];
+  charCount: number;
+};
 
 export function NovelReader({
   bookTitle,
@@ -92,13 +92,13 @@ export function NovelReader({
   initialChapterId,
   exitHref,
 }: {
-  bookTitle: string
-  chapters: ReaderChapter[]
+  bookTitle: string;
+  chapters: ReaderChapter[];
   /** 分角色朗讀用的角色名單 (Z111)。空陣列＝全部用旁白聲。 */
-  cast?: CastMember[]
-  initialChapterId?: string | undefined
+  cast?: CastMember[];
+  initialChapterId?: string | undefined;
   /** Where 退出 goes — the shelf, or the editor it was opened from. */
-  exitHref: string
+  exitHref: string;
 }) {
   /*
    * `localStorage` does not exist during the server render.
@@ -109,43 +109,43 @@ export function NovelReader({
   const ready = useSyncExternalStore(
     subscribeNever,
     () => true,
-    () => false
-  )
+    () => false,
+  );
 
-  const [stored, setStored] = useState<ReaderSettings | null>(null)
-  const settings = stored ?? (ready ? loadReaderSettings() : READER_DEFAULTS)
-  const router = useRouter()
-  const [panel, setPanel] = useState<'none' | 'toc' | 'settings'>('none')
+  const [stored, setStored] = useState<ReaderSettings | null>(null);
+  const settings = stored ?? (ready ? loadReaderSettings() : READER_DEFAULTS);
+  const router = useRouter();
+  const [panel, setPanel] = useState<"none" | "toc" | "settings">("none");
 
   /* ---------------------------------------------------------------- 朗讀 */
 
-  const [voices, setVoices] = useState<Voice[]>([])
-  const [reading, setReading] = useState<'off' | 'playing' | 'paused'>('off')
+  const [voices, setVoices] = useState<Voice[]>([]);
+  const [reading, setReading] = useState<"off" | "playing" | "paused">("off");
   /** Which chunk is being spoken, for the highlight. */
-  const [spokenAt, setSpokenAt] = useState(-1)
-  const speechRef = useRef<SpeechHandle | null>(null)
-  const spokenRef = useRef<HTMLParagraphElement | null>(null)
+  const [spokenAt, setSpokenAt] = useState(-1);
+  const speechRef = useRef<SpeechHandle | null>(null);
+  const spokenRef = useRef<HTMLParagraphElement | null>(null);
   const [index, setIndex] = useState(() => {
-    const found = chapters.findIndex((c) => c.id === initialChapterId)
-    return found >= 0 ? found : 0
-  })
-  const [page, setPage] = useState(0)
-  const [pageCount, setPageCount] = useState(1)
-  const [turning, setTurning] = useState<'none' | 'next' | 'prev'>('none')
+    const found = chapters.findIndex((c) => c.id === initialChapterId);
+    return found >= 0 ? found : 0;
+  });
+  const [page, setPage] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
+  const [turning, setTurning] = useState<"none" | "next" | "prev">("none");
 
-  const pagerRef = useRef<HTMLDivElement | null>(null)
+  const pagerRef = useRef<HTMLDivElement | null>(null);
 
   const update = useCallback((changes: Partial<ReaderSettings>) => {
     setStored((current) => {
-      const next = { ...(current ?? loadReaderSettings()), ...changes }
-      saveReaderSettings(next)
-      return next
-    })
-  }, [])
+      const next = { ...(current ?? loadReaderSettings()), ...changes };
+      saveReaderSettings(next);
+      return next;
+    });
+  }, []);
 
-  const chapter = chapters[index]
-  const theme = READER_THEME_COLORS[settings.theme]
-  const paged = settings.mode !== 'scroll'
+  const chapter = chapters[index];
+  const theme = READER_THEME_COLORS[settings.theme];
+  const paged = settings.mode !== "scroll";
 
   /* --------------------------------------------------------------- paging */
 
@@ -157,41 +157,49 @@ export function NovelReader({
    * would disagree with them and leave a page that cannot be reached.
    */
   const measure = useCallback(() => {
-    const node = pagerRef.current
-    if (!node || !paged) return
+    const node = pagerRef.current;
+    if (!node || !paged) return;
 
-    const width = node.clientWidth
-    if (width <= 0) return
+    const width = node.clientWidth;
+    if (width <= 0) return;
 
-    const total = Math.max(1, Math.round(node.scrollWidth / width))
-    setPageCount(total)
-    setPage((current) => Math.min(current, total - 1))
-  }, [paged])
-
-  useEffect(() => {
-    measure()
-  }, [measure, index, settings.fontSize, settings.lineHeight, settings.font, ready])
+    const total = Math.max(1, Math.round(node.scrollWidth / width));
+    setPageCount(total);
+    setPage((current) => Math.min(current, total - 1));
+  }, [paged]);
 
   useEffect(() => {
-    if (!paged) return
-    const node = pagerRef.current
-    if (!node || typeof ResizeObserver === 'undefined') return
-
-    const observer = new ResizeObserver(() => measure())
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [measure, paged])
+    measure();
+  }, [
+    measure,
+    index,
+    settings.fontSize,
+    settings.lineHeight,
+    settings.font,
+    ready,
+  ]);
 
   useEffect(() => {
-    const node = pagerRef.current
-    if (node && paged) node.scrollTo({ left: page * node.clientWidth, behavior: 'auto' })
-  }, [page, paged])
+    if (!paged) return;
+    const node = pagerRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [measure, paged]);
+
+  useEffect(() => {
+    const node = pagerRef.current;
+    if (node && paged)
+      node.scrollTo({ left: page * node.clientWidth, behavior: "auto" });
+  }, [page, paged]);
 
   const goChapter = useCallback(
     (next: number) => {
-      if (next < 0 || next >= chapters.length) return
-      setIndex(next)
-      setPage(0)
+      if (next < 0 || next >= chapters.length) return;
+      setIndex(next);
+      setPage(0);
 
       /*
        * 回到新一章的開頭 (Z134).
@@ -201,81 +209,81 @@ export function NovelReader({
        * 閱讀器是 `fixed inset-0`，window 根本不會捲，所以那一行從來沒有做
        * 過任何事。上一章捲到哪，新一章就從哪裡開始。
        */
-      pageRef.current?.scrollTo({ top: 0, behavior: 'auto' })
-      pagerRef.current?.scrollTo({ left: 0, behavior: 'auto' })
+      pageRef.current?.scrollTo({ top: 0, behavior: "auto" });
+      pagerRef.current?.scrollTo({ left: 0, behavior: "auto" });
     },
-    [chapters.length]
-  )
+    [chapters.length],
+  );
 
   const flip = useCallback(
-    (direction: 'next' | 'prev') => {
+    (direction: "next" | "prev") => {
       if (!paged) {
-        goChapter(index + (direction === 'next' ? 1 : -1))
-        return
+        goChapter(index + (direction === "next" ? 1 : -1));
+        return;
       }
 
-      const target = page + (direction === 'next' ? 1 : -1)
+      const target = page + (direction === "next" ? 1 : -1);
 
       // Past either end of the chapter, carry on into the next one rather
       // than stopping — a book does not stop at a chapter boundary.
       if (target < 0) {
-        if (index > 0) goChapter(index - 1)
-        return
+        if (index > 0) goChapter(index - 1);
+        return;
       }
       if (target >= pageCount) {
-        if (index < chapters.length - 1) goChapter(index + 1)
-        return
+        if (index < chapters.length - 1) goChapter(index + 1);
+        return;
       }
 
-      if (settings.mode === 'flip' && !prefersReducedMotion()) {
-        setTurning(direction)
+      if (settings.mode === "flip" && !prefersReducedMotion()) {
+        setTurning(direction);
         window.setTimeout(() => {
-          setPage(target)
-          setTurning('none')
-        }, 180)
+          setPage(target);
+          setTurning("none");
+        }, 180);
       } else {
-        setPage(target)
+        setPage(target);
       }
     },
-    [paged, page, pageCount, index, chapters.length, goChapter, settings.mode]
-  )
+    [paged, page, pageCount, index, chapters.length, goChapter, settings.mode],
+  );
 
   const chunks = useMemo(() => {
-    if (!chapter) return []
-    const plain = splitForSpeech(chapter.paragraphs)
+    if (!chapter) return [];
+    const plain = splitForSpeech(chapter.paragraphs);
 
     /*
      * 分角色朗讀 (Z111). Off unless asked for, and a no-op without a cast —
      * `castChunks` then returns the chunks untouched, so the narrator reads
      * everything exactly as before.
      */
-    if (!settings.castVoices || cast.length === 0) return plain
+    if (!settings.castVoices || cast.length === 0) return plain;
 
     return castChunks(
       plain,
       chapter.paragraphs,
       cast,
-      voices.map((voice) => ({ id: voice.id, lang: voice.lang }))
-    )
-  }, [chapter, cast, settings.castVoices, voices])
+      voices.map((voice) => ({ id: voice.id, lang: voice.lang })),
+    );
+  }, [chapter, cast, settings.castVoices, voices]);
 
   useEffect(() => {
-    if (!speechSupported()) return
-    let cancelled = false
+    if (!speechSupported()) return;
+    let cancelled = false;
     void loadVoices().then((list) => {
-      if (!cancelled) setVoices(list)
-    })
+      if (!cancelled) setVoices(list);
+    });
     return () => {
-      cancelled = true
-    }
-  }, [])
+      cancelled = true;
+    };
+  }, []);
 
   const stopReading = useCallback(() => {
-    speechRef.current?.stop()
-    speechRef.current = null
-    setReading('off')
-    setSpokenAt(-1)
-  }, [])
+    speechRef.current?.stop();
+    speechRef.current = null;
+    setReading("off");
+    setSpokenAt(-1);
+  }, []);
 
   /*
    * Hands the scrollbar gutter back while the reader is open.
@@ -285,19 +293,19 @@ export function NovelReader({
    * the studio's near-black shows through beside the page.
    */
   useEffect(() => {
-    document.documentElement.classList.add('is-reading')
-    return () => document.documentElement.classList.remove('is-reading')
-  }, [])
+    document.documentElement.classList.add("is-reading");
+    return () => document.documentElement.classList.remove("is-reading");
+  }, []);
 
   // Leaving the page must silence it. Speech is a global queue that outlives
   // the component, so an unmounted reader would keep talking.
-  useEffect(() => () => stopReading(), [stopReading])
+  useEffect(() => () => stopReading(), [stopReading]);
 
   const startReading = useCallback(() => {
-    if (chunks.length === 0) return
+    if (chunks.length === 0) return;
 
-    speechRef.current?.stop()
-    setReading('playing')
+    speechRef.current?.stop();
+    setReading("playing");
 
     speechRef.current = speak(chunks, {
       voiceId: settings.voiceId || undefined,
@@ -315,56 +323,64 @@ export function NovelReader({
          * 已經唸完的 handle 清掉——所以它每次都在那一行掉頭走人，下一章永遠
          * 不會開口。狀態說停了，ref 說還在，中間那個 effect 信了 ref。
          */
-        speechRef.current = null
-        setReading('off')
-        setSpokenAt(-1)
+        speechRef.current = null;
+        setReading("off");
+        setSpokenAt(-1);
         /*
          * Roll into the next chapter. Reading a novel aloud and stopping dead
          * at every chapter break is the one thing this feature exists to
          * avoid.
          */
         if (index < chapters.length - 1) {
-          goChapter(index + 1)
+          goChapter(index + 1);
           // The new chapter's chunks are not computed yet; let the render
           // settle before speaking them.
-          window.setTimeout(() => setReading('playing'), 50)
+          window.setTimeout(() => setReading("playing"), 50);
         }
       },
       onError: () => {
-        speechRef.current = null
-        setReading('off')
-        setSpokenAt(-1)
+        speechRef.current = null;
+        setReading("off");
+        setSpokenAt(-1);
       },
-    })
-  }, [chunks, settings.voiceId, settings.speechRate, settings.speechPitch, index, chapters.length, goChapter])
+    });
+  }, [
+    chunks,
+    settings.voiceId,
+    settings.speechRate,
+    settings.speechPitch,
+    index,
+    chapters.length,
+    goChapter,
+  ]);
 
   /*
    * Picks the reading back up after an automatic chapter change. Keyed on the
    * chunks rather than the index, so it runs once the new text is ready.
    */
-  const autoplay = useRef(false)
+  const autoplay = useRef(false);
 
   useEffect(() => {
-    if (reading !== 'playing') return
-    if (speechRef.current) return
+    if (reading !== "playing") return;
+    if (speechRef.current) return;
     if (!autoplay.current) {
-      autoplay.current = true
-      return
+      autoplay.current = true;
+      return;
     }
-    startReading()
-  }, [chunks, reading, startReading])
+    startReading();
+  }, [chunks, reading, startReading]);
 
   /** Follows the voice down the page, so reading along needs no scrolling. */
   useEffect(() => {
-    if (reading !== 'playing' || spokenAt < 0) return
-    spokenRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [spokenAt, reading])
+    if (reading !== "playing" || spokenAt < 0) return;
+    spokenRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [spokenAt, reading]);
 
   /* ------------------------------------------------------------- gestures */
 
-  const touch = useRef<{ x: number; y: number } | null>(null)
+  const touch = useRef<{ x: number; y: number } | null>(null);
   /** The scrolling prose column, for the reading rail. */
-  const pageRef = useRef<HTMLDivElement | null>(null)
+  const pageRef = useRef<HTMLDivElement | null>(null);
 
   /*
    * 正文自己的繁簡轉換 (Z135)。
@@ -373,24 +389,24 @@ export function NovelReader({
    * 「介面轉了正文沒轉」那種讀起來像壞掉的狀態。範圍限在這一欄，而這一欄
    * 標了 `data-script-own`，所以介面那份會跳過它。
    */
-  const proseRoot = useCallback(() => pageRef.current, [])
-  useScriptConversion(proseRoot, settings.script === 'simplified')
+  const proseRoot = useCallback(() => pageRef.current, []);
+  useScriptConversion(proseRoot, settings.script === "simplified");
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.target instanceof HTMLInputElement) return
-      if (event.key === 'ArrowRight' || event.key === 'PageDown') flip('next')
-      if (event.key === 'ArrowLeft' || event.key === 'PageUp') flip('prev')
-      if (event.key === 'Escape') {
+      if (event.target instanceof HTMLInputElement) return;
+      if (event.key === "ArrowRight" || event.key === "PageDown") flip("next");
+      if (event.key === "ArrowLeft" || event.key === "PageUp") flip("prev");
+      if (event.key === "Escape") {
         // Closes the drawer first; a second press leaves the reader.
-        if (panel !== 'none') setPanel('none')
-        else router.push(exitHref)
+        if (panel !== "none") setPanel("none");
+        else router.push(exitHref);
       }
     }
 
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [flip, panel, router, exitHref])
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [flip, panel, router, exitHref]);
 
   /* --------------------------------------------------------------- render */
 
@@ -399,10 +415,12 @@ export function NovelReader({
       <div className="grid min-h-[60vh] place-items-center p-6 text-center">
         <div className="flex flex-col gap-1">
           <p className="text-sm text-ink-200">還沒有可以讀的內容</p>
-          <p className="text-[11px] text-ink-600">在小說編輯器寫下第一章之後，這裡就會有東西。</p>
+          <p className="text-[11px] text-ink-600">
+            在小說編輯器寫下第一章之後，這裡就會有東西。
+          </p>
         </div>
       </div>
-    )
+    );
   }
 
   const body = (
@@ -416,12 +434,15 @@ export function NovelReader({
       }}
     >
       <header className="mb-6">
-        <p className="mb-1 text-center" style={{ fontSize: '0.7em', color: theme.faint }}>
-          EP{String(chapter.episodeNumber).padStart(3, '0')}
+        <p
+          className="mb-1 text-center"
+          style={{ fontSize: "0.7em", color: theme.faint }}
+        >
+          EP{String(chapter.episodeNumber).padStart(3, "0")}
           {chapter.episodeTitle && `・${chapter.episodeTitle}`}
         </p>
-        <h2 className="text-center font-medium" style={{ fontSize: '1.15em' }}>
-          {chapter.chapterTitle || chapter.episodeTitle || '未命名'}
+        <h2 className="text-center font-medium" style={{ fontSize: "1.15em" }}>
+          {chapter.chapterTitle || chapter.episodeTitle || "未命名"}
         </h2>
       </header>
 
@@ -444,11 +465,11 @@ export function NovelReader({
           key={i}
           ref={i === spokenAt ? spokenRef : undefined}
           style={{
-            textIndent: '2em',
-            margin: '0 0 0.9em',
-            transition: 'background-color 160ms',
-            ...(reading !== 'off' && i === spokenAt
-              ? { backgroundColor: `${theme.faint}33`, borderRadius: '0.25em' }
+            textIndent: "2em",
+            margin: "0 0 0.9em",
+            transition: "background-color 160ms",
+            ...(reading !== "off" && i === spokenAt
+              ? { backgroundColor: `${theme.faint}33`, borderRadius: "0.25em" }
               : {}),
           }}
         >
@@ -456,7 +477,7 @@ export function NovelReader({
         </p>
       ))}
     </article>
-  )
+  );
 
   return (
     <div
@@ -478,7 +499,11 @@ export function NovelReader({
         Replaces the browser's scrollbar, which `.reader-surface` hides. See
         `ReadingRail` for why it is not simply hidden and left at that.
       */}
-      <ReadingRail containerRef={pageRef} color={theme.faint} enabled={!paged} />
+      <ReadingRail
+        containerRef={pageRef}
+        color={theme.faint}
+        enabled={!paged}
+      />
 
       {/*
         Dimming is an overlay rather than a CSS `filter` on the content: a
@@ -519,14 +544,17 @@ export function NovelReader({
 
         <button
           type="button"
-          onClick={() => setPanel(panel === 'toc' ? 'none' : 'toc')}
+          onClick={() => setPanel(panel === "toc" ? "none" : "toc")}
           className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
         >
           <List aria-hidden className="size-3.5" />
           目錄
         </button>
 
-        <span className="min-w-0 flex-1 truncate text-center text-[11px]" style={{ color: theme.faint }}>
+        <span
+          className="min-w-0 flex-1 truncate text-center text-[11px]"
+          style={{ color: theme.faint }}
+        >
           {bookTitle}
         </span>
 
@@ -540,29 +568,33 @@ export function NovelReader({
             <button
               type="button"
               onClick={() => {
-                if (reading === 'playing') {
-                  speechRef.current?.pause()
-                  setReading('paused')
-                } else if (reading === 'paused') {
-                  speechRef.current?.resume()
-                  setReading('playing')
+                if (reading === "playing") {
+                  speechRef.current?.pause();
+                  setReading("paused");
+                } else if (reading === "paused") {
+                  speechRef.current?.resume();
+                  setReading("playing");
                 } else {
-                  startReading()
+                  startReading();
                 }
               }}
-              aria-label={reading === 'playing' ? '暫停朗讀' : '朗讀'}
-              title={reading === 'playing' ? '暫停朗讀' : '朗讀這一章'}
+              aria-label={reading === "playing" ? "暫停朗讀" : "朗讀"}
+              title={reading === "playing" ? "暫停朗讀" : "朗讀這一章"}
               className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
             >
-              {reading === 'playing' ? (
+              {reading === "playing" ? (
                 <Pause aria-hidden className="size-3.5" />
               ) : (
                 <Play aria-hidden className="size-3.5" />
               )}
-              {reading === 'off' ? '朗讀' : reading === 'paused' ? '繼續' : '暫停'}
+              {reading === "off"
+                ? "朗讀"
+                : reading === "paused"
+                  ? "繼續"
+                  : "暫停"}
             </button>
 
-            {reading !== 'off' && (
+            {reading !== "off" && (
               <button
                 type="button"
                 onClick={stopReading}
@@ -578,7 +610,7 @@ export function NovelReader({
 
         <button
           type="button"
-          onClick={() => setPanel(panel === 'settings' ? 'none' : 'settings')}
+          onClick={() => setPanel(panel === "settings" ? "none" : "settings")}
           className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
         >
           <Settings2 aria-hidden className="size-3.5" />
@@ -599,41 +631,47 @@ export function NovelReader({
         data-script-own
         className="relative mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-5 py-8 sm:px-8"
         onTouchStart={(event) => {
-          const point = event.touches[0]
-          if (point) touch.current = { x: point.clientX, y: point.clientY }
+          const point = event.touches[0];
+          if (point) touch.current = { x: point.clientX, y: point.clientY };
         }}
         onTouchEnd={(event) => {
-          const start = touch.current
-          const point = event.changedTouches[0]
-          touch.current = null
-          if (!start || !point || !paged) return
+          const start = touch.current;
+          const point = event.changedTouches[0];
+          touch.current = null;
+          if (!start || !point || !paged) return;
 
-          const dx = point.clientX - start.x
-          const dy = point.clientY - start.y
+          const dx = point.clientX - start.x;
+          const dy = point.clientY - start.y;
           // Only a mostly-horizontal swipe turns a page; otherwise a diagonal
           // scroll flips pages while someone is trying to scroll.
-          if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return
+          if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
 
-          flip(dx < 0 ? 'next' : 'prev')
+          flip(dx < 0 ? "next" : "prev");
         }}
       >
         {paged ? (
           <div
             className={cn(
-              'origin-left transition-transform duration-150',
-              settings.mode === 'flip' && turning === 'next' && 'scale-x-[0.97] opacity-80',
-              settings.mode === 'flip' && turning === 'prev' && 'scale-x-[1.03] opacity-80'
+              "origin-left transition-transform duration-150",
+              settings.mode === "flip" &&
+                turning === "next" &&
+                "scale-x-[0.97] opacity-80",
+              settings.mode === "flip" &&
+                turning === "prev" &&
+                "scale-x-[1.03] opacity-80",
             )}
-            style={{ perspective: settings.mode === 'flip' ? '1600px' : undefined }}
+            style={{
+              perspective: settings.mode === "flip" ? "1600px" : undefined,
+            }}
           >
             <div
               ref={pagerRef}
               className="overflow-hidden"
               style={{
-                height: 'calc(100dvh - 15rem)',
-                columnWidth: '100vw',
+                height: "calc(100dvh - 15rem)",
+                columnWidth: "100vw",
                 columnGap: 0,
-                columnFill: 'auto',
+                columnFill: "auto",
               }}
             >
               {body}
@@ -650,38 +688,40 @@ export function NovelReader({
         >
           <button
             type="button"
-            onClick={() => flip('prev')}
+            onClick={() => flip("prev")}
             disabled={index === 0 && page === 0}
             className="tap inline-flex items-center gap-1 rounded-md px-2 py-1 transition-opacity hover:opacity-70 disabled:opacity-30"
           >
             <ChevronLeft aria-hidden className="size-3.5" />
-            {paged ? '上一頁' : '上一章'}
+            {paged ? "上一頁" : "上一章"}
           </button>
 
           <span className="tabular-nums">
-            {paged && `${page + 1} / ${pageCount}　`}
-            第 {index + 1} / {chapters.length} 章
+            {paged && `${page + 1} / ${pageCount}　`}第 {index + 1} /{" "}
+            {chapters.length} 章
           </span>
 
           <button
             type="button"
-            onClick={() => flip('next')}
-            disabled={index === chapters.length - 1 && (!paged || page >= pageCount - 1)}
+            onClick={() => flip("next")}
+            disabled={
+              index === chapters.length - 1 && (!paged || page >= pageCount - 1)
+            }
             className="tap inline-flex items-center gap-1 rounded-md px-2 py-1 transition-opacity hover:opacity-70 disabled:opacity-30"
           >
-            {paged ? '下一頁' : '下一章'}
+            {paged ? "下一頁" : "下一章"}
             <ChevronRight aria-hidden className="size-3.5" />
           </button>
         </nav>
       </div>
 
       {/* ---- panels ----------------------------------------------------- */}
-      {panel !== 'none' && (
+      {panel !== "none" && (
         <>
           <button
             type="button"
             aria-label="關閉面板"
-            onClick={() => setPanel('none')}
+            onClick={() => setPanel("none")}
             className="fixed inset-0 z-[70] cursor-default bg-black/40"
           />
           <div
@@ -693,26 +733,30 @@ export function NovelReader({
               that went wrong.
             */
             className={cn(
-              'fixed inset-y-0 z-[75] w-[min(20rem,85vw)] overflow-y-auto p-4 shadow-2xl',
+              "fixed inset-y-0 z-[75] w-[min(20rem,85vw)] overflow-y-auto p-4 shadow-2xl",
               /*
                 A drawer comes in from the side its button is on. 目錄 sits at
                 the left of the header next to 退出, so reaching for it and
                 having the panel arrive from the opposite edge reads as the
                 wrong panel opening.
               */
-              panel === 'toc'
-                ? 'animate-slide-right left-0 border-r'
-                : 'animate-slide-left right-0 border-l'
+              panel === "toc"
+                ? "animate-slide-right left-0 border-r"
+                : "animate-slide-left right-0 border-l",
             )}
-            style={{ background: theme.bg, borderColor: `${theme.faint}44`, color: theme.ink }}
+            style={{
+              background: theme.bg,
+              borderColor: `${theme.faint}44`,
+              color: theme.ink,
+            }}
           >
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-xs font-semibold">
-                {panel === 'toc' ? '目錄' : '閱讀設定'}
+                {panel === "toc" ? "目錄" : "閱讀設定"}
               </h3>
               <button
                 type="button"
-                onClick={() => setPanel('none')}
+                onClick={() => setPanel("none")}
                 aria-label="關閉"
                 className="rounded p-1 transition-opacity hover:opacity-70"
               >
@@ -720,31 +764,46 @@ export function NovelReader({
               </button>
             </div>
 
-            {panel === 'toc' ? (
+            {panel === "toc" ? (
               <ol className="flex flex-col gap-0.5">
                 {chapters.map((item, i) => (
                   <li key={item.id}>
                     <button
                       type="button"
                       onClick={() => {
-                        goChapter(i)
-                        setPanel('none')
+                        goChapter(i);
+                        setPanel("none");
                       }}
-                      className="flex w-full items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors"
+                      /*
+                       * 目錄的字要能讀 (Z138).
+                       *
+                       * 原本是 `text-[11px]`——那是介面標籤的尺寸，而這是一份
+                       * 要翻一百二十集的清單，是閱讀的一部分，不是 chrome。
+                       * 列高也一起加大：在手機上用拇指點 11px 高的一行，點到
+                       * 隔壁的機率比點到自己高。
+                       */
+                      className="flex w-full items-baseline gap-2 rounded-md px-2 py-2.5 text-left text-[14px] transition-colors"
                       style={
                         i === index
                           ? { background: `${theme.faint}2a`, fontWeight: 600 }
                           : undefined
                       }
                     >
-                      <span className="shrink-0 tabular-nums" style={{ color: theme.faint }}>
-                        {String(item.episodeNumber).padStart(3, '0')}
+                      {/* 集號與字數留在小一級：要讀的是篇名，那兩個是定位用的。 */}
+                      <span
+                        className="shrink-0 text-[11px] tabular-nums"
+                        style={{ color: theme.faint }}
+                      >
+                        {String(item.episodeNumber).padStart(3, "0")}
                       </span>
                       <span className="min-w-0 flex-1 truncate">
-                        {item.chapterTitle || item.episodeTitle || '未命名'}
+                        {item.chapterTitle || item.episodeTitle || "未命名"}
                       </span>
-                      <span className="shrink-0 tabular-nums" style={{ color: theme.faint }}>
-                        {item.charCount.toLocaleString('en-US')}
+                      <span
+                        className="shrink-0 text-[11px] tabular-nums"
+                        style={{ color: theme.faint }}
+                      >
+                        {item.charCount.toLocaleString("en-US")}
                       </span>
                     </button>
                   </li>
@@ -760,8 +819,8 @@ export function NovelReader({
                         active={settings.mode === mode}
                         theme={theme}
                         onClick={() => {
-                          update({ mode })
-                          setPage(0)
+                          update({ mode });
+                          setPage(0);
                         }}
                       >
                         {READING_MODE_LABEL[mode]}
@@ -773,7 +832,7 @@ export function NovelReader({
                 <Field label="背景">
                   <div className="grid grid-cols-5 gap-1">
                     {READER_THEMES.map((key) => {
-                      const colors = READER_THEME_COLORS[key]
+                      const colors = READER_THEME_COLORS[key];
                       return (
                         <button
                           key={key}
@@ -783,21 +842,25 @@ export function NovelReader({
                           aria-pressed={settings.theme === key}
                           title={READER_THEME_LABEL[key]}
                           className={cn(
-                            'flex h-10 flex-col items-center justify-center rounded-md border text-[9px] transition-all',
-                            settings.theme === key ? 'ring-2' : 'opacity-80 hover:opacity-100'
+                            "flex h-10 flex-col items-center justify-center rounded-md border text-[9px] transition-all",
+                            settings.theme === key
+                              ? "ring-2"
+                              : "opacity-80 hover:opacity-100",
                           )}
                           style={{
                             background: colors.bg,
                             color: colors.ink,
                             borderColor: `${colors.faint}66`,
                             ...(settings.theme === key
-                              ? ({ '--tw-ring-color': theme.ink } as React.CSSProperties)
+                              ? ({
+                                  "--tw-ring-color": theme.ink,
+                                } as React.CSSProperties)
                               : {}),
                           }}
                         >
                           {READER_THEME_LABEL[key]}
                         </button>
-                      )
+                      );
                     })}
                   </div>
                 </Field>
@@ -858,25 +921,25 @@ export function NovelReader({
                       label="朗讀音色"
                       hint={
                         voices.length === 0
-                          ? '這台裝置沒有裝語音引擎'
-                          : '音色來自作業系統，換一台電腦清單會不一樣。'
+                          ? "這台裝置沒有裝語音引擎"
+                          : "音色來自作業系統，換一台電腦清單會不一樣。"
                       }
                     >
                       <select
                         value={settings.voiceId}
                         onChange={(event) => {
-                          update({ voiceId: event.target.value })
+                          update({ voiceId: event.target.value });
                           // Restart so the change is audible immediately
                           // rather than at the next chapter.
-                          if (reading !== 'off') {
-                            stopReading()
-                            window.setTimeout(startReading, 60)
+                          if (reading !== "off") {
+                            stopReading();
+                            window.setTimeout(startReading, 60);
                           }
                         }}
                         disabled={voices.length === 0}
                         className="w-full rounded-md border px-2 py-1.5 text-[11px]"
                         style={{
-                          background: 'transparent',
+                          background: "transparent",
                           borderColor: `${theme.faint}55`,
                           color: theme.ink,
                         }}
@@ -909,8 +972,8 @@ export function NovelReader({
                       >
                         {(
                           [
-                            ['simplified', '简体'],
-                            ['original', '繁體（原文）'],
+                            ["simplified", "简体"],
+                            ["original", "繁體（原文）"],
                           ] as const
                         ).map(([value, label]) => (
                           <button
@@ -922,7 +985,10 @@ export function NovelReader({
                             className="tap flex-1 rounded px-1.5 py-1 text-[11px] transition-opacity"
                             style={
                               settings.script === value
-                                ? { background: `${theme.faint}33`, color: theme.ink }
+                                ? {
+                                    background: `${theme.faint}33`,
+                                    color: theme.ink,
+                                  }
                                 : { color: theme.faint }
                             }
                           >
@@ -949,28 +1015,39 @@ export function NovelReader({
                           role="switch"
                           aria-checked={settings.castVoices}
                           onClick={() => {
-                            update({ castVoices: !settings.castVoices })
-                            if (reading !== 'off') {
-                              stopReading()
-                              window.setTimeout(startReading, 60)
+                            update({ castVoices: !settings.castVoices });
+                            if (reading !== "off") {
+                              stopReading();
+                              window.setTimeout(startReading, 60);
                             }
                           }}
                           className="tap flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-[11px]"
-                          style={{ borderColor: `${theme.faint}55`, color: theme.ink }}
+                          style={{
+                            borderColor: `${theme.faint}55`,
+                            color: theme.ink,
+                          }}
                         >
-                          <span>{settings.castVoices ? '開著' : '關著（全部旁白聲）'}</span>
+                          <span>
+                            {settings.castVoices
+                              ? "開著"
+                              : "關著（全部旁白聲）"}
+                          </span>
                           <span
                             aria-hidden
                             className="relative inline-block h-4 w-7 rounded-full transition-colors"
                             style={{
-                              background: settings.castVoices ? theme.ink : `${theme.faint}55`,
+                              background: settings.castVoices
+                                ? theme.ink
+                                : `${theme.faint}55`,
                             }}
                           >
                             <span
                               className="absolute top-0.5 size-3 rounded-full transition-all"
                               style={{
                                 background: theme.bg,
-                                left: settings.castVoices ? '0.875rem' : '0.125rem',
+                                left: settings.castVoices
+                                  ? "0.875rem"
+                                  : "0.125rem",
                               }}
                             />
                           </span>
@@ -1002,7 +1079,10 @@ export function NovelReader({
                   </>
                 )}
 
-                <p className="text-[10px] leading-relaxed" style={{ color: theme.faint }}>
+                <p
+                  className="text-[10px] leading-relaxed"
+                  style={{ color: theme.faint }}
+                >
                   這些設定只存在這台裝置的瀏覽器裡，不會同步給另一位成員。
                   <br />
                   朗讀用瀏覽器內建的語音合成，不計費也不用聯網。
@@ -1013,7 +1093,7 @@ export function NovelReader({
         </>
       )}
     </div>
-  )
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1023,9 +1103,9 @@ function Field({
   hint,
   children,
 }: {
-  label: string
-  hint?: string
-  children: React.ReactNode
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -1033,7 +1113,7 @@ function Field({
       {children}
       {hint && <span className="text-[10px] opacity-60">{hint}</span>}
     </div>
-  )
+  );
 }
 
 function Choice({
@@ -1042,10 +1122,10 @@ function Choice({
   onClick,
   children,
 }: {
-  active: boolean
-  theme: { ink: string; faint: string }
-  onClick: () => void
-  children: React.ReactNode
+  active: boolean;
+  theme: { ink: string; faint: string };
+  onClick: () => void;
+  children: React.ReactNode;
 }) {
   return (
     <button
@@ -1061,7 +1141,7 @@ function Choice({
     >
       {children}
     </button>
-  )
+  );
 }
 
 function Slider({
@@ -1074,20 +1154,23 @@ function Slider({
   theme,
   onChange,
 }: {
-  label: string
-  value: number
-  min: number
-  max: number
-  step: number
-  display: string
-  theme: { ink: string; faint: string }
-  onChange: (value: number) => void
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  display: string;
+  theme: { ink: string; faint: string };
+  onChange: (value: number) => void;
 }) {
-  const id = `reader-${label}`
+  const id = `reader-${label}`;
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="flex items-baseline justify-between text-[11px] font-medium">
+      <label
+        htmlFor={id}
+        className="flex items-baseline justify-between text-[11px] font-medium"
+      >
         {label}
         <span className="tabular-nums" style={{ color: theme.faint }}>
           {display}
@@ -1105,17 +1188,17 @@ function Slider({
         style={{ background: `${theme.faint}55`, accentColor: theme.ink }}
       />
     </div>
-  )
+  );
 }
 
 function prefersReducedMotion(): boolean {
   return (
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
 }
 
 /** Never changes, so `useSyncExternalStore` only needs the two snapshots. */
 function subscribeNever(): () => void {
-  return () => {}
+  return () => {};
 }

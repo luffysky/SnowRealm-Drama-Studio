@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { aiJobs, assets, episodes } from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
+import { durationFromBytes } from '@/lib/azure/speech'
 import { buildObjectKey, putObject } from '@/lib/r2'
 import { planEpisodeAudio, type AudiobookCast, type AudiobookVoice } from './audiobook'
 import { discardParts, joinParts, nextPartIndex, renderParts, renderSummary, type RenderedPart } from './render'
@@ -242,7 +243,14 @@ export async function advanceAudiobook(jobId: string): Promise<AudiobookStep> {
       objectKey,
       mimeType: 'audio/mpeg',
       sizeBytes: audio.length,
-      durationSec: Math.round(summary.sec),
+      /*
+       * 從實際位元組算，不是從預估 (Z138).
+       *
+       * `summary.sec` 是合成**前**用「字數 ÷ 每秒 3.9 字」估的，那是用來
+       * 切批次的預算。拿它當長度短了 9%——播放器說 15:01，素材庫寫 13 分
+       * 42 秒，而使用者兩個都看得到。
+       */
+      durationSec: Math.round(durationFromBytes(audio.length)),
       uploadStatus: 'COMPLETED',
       ...(job.requestedById ? { uploadedById: job.requestedById } : {}),
     })

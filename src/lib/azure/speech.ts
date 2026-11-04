@@ -316,6 +316,25 @@ export async function voicePool(): Promise<PooledVoice[]> {
 const AUDIO_FORMAT = 'audio-24khz-48kbitrate-mono-mp3'
 
 /**
+ * 位元率，從上面那個格式名字來的 (Z138).
+ *
+ * 匯出的用途只有一個：**算出音檔真正多長**。MP3 是定位元率，所以
+ * 秒數 = 位元組 × 8 ÷ 位元率，而且算出來跟播放器一致。
+ *
+ * 之前存的是合成**前**用「字數 ÷ 每秒 3.9 字」估的數字——那是用來切批次的
+ * 預算，拿來當長度就短了 9%：播放器說 15:01，我們寫 13 分 42 秒。
+ *
+ * 兩個常數綁在一起，不要各寫一份：改了格式卻忘了改位元率，算出來的長度會
+ * 安靜地錯。
+ */
+export const AUDIO_BITRATE = 48_000
+
+/** 位元組 → 秒，照上面的位元率。 */
+export function durationFromBytes(bytes: number): number {
+  return (bytes * 8) / AUDIO_BITRATE
+}
+
+/**
  * Renders one SSML document to audio.
  *
  * Returns the bytes. Chunking a whole episode into documents that each stay

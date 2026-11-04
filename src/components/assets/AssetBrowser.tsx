@@ -15,8 +15,12 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useState } from 'react'
 import { AssetUploadButton } from '@/components/assets/AssetUploadButton'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/StateViews'
+import { useToast } from '@/components/ui/Toast'
+import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { assetDownloadUrl, assetPreviewUrl, assetUrl } from '@/lib/asset-url'
 import { ASSET_SORT_LABEL, ASSET_SORTS, formatBytes, type AssetSort } from '@/lib/asset-browser-view'
 import { ASSET_KIND_LABEL, type AssetKindValue } from '@/lib/constants'
@@ -76,6 +80,7 @@ export function AssetBrowser({
   kindCounts,
   totalBytes,
   episodeOptions,
+  canDelete = false,
 }: {
   projectId: string
   heading: string
@@ -90,6 +95,8 @@ export function AssetBrowser({
   kindCounts: Record<string, number>
   totalBytes: number
   episodeOptions: { id: string; number: number; title: string }[]
+  /** `asset.delete` — owner only. Deleting an asset is not reversible. */
+  canDelete?: boolean
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -231,7 +238,7 @@ export function AssetBrowser({
         <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {rows.map((row) => (
             <li key={row.id}>
-              <Card projectId={projectId} row={row} />
+              <Card projectId={projectId} row={row} canDelete={canDelete} />
             </li>
           ))}
         </ul>
@@ -239,7 +246,7 @@ export function AssetBrowser({
         <ul className="panel flex flex-col divide-y divide-stage-700/40 rounded-xl bg-stage-900 ring-1 ring-stage-700">
           {rows.map((row) => (
             <li key={row.id}>
-              <Row projectId={projectId} row={row} />
+              <Row projectId={projectId} row={row} canDelete={canDelete} />
             </li>
           ))}
         </ul>
@@ -268,7 +275,15 @@ export function AssetBrowser({
 
 /* -------------------------------------------------------------------------- */
 
-function Card({ projectId, row }: { projectId: string; row: AssetItem }) {
+function Card({
+  projectId,
+  row,
+  canDelete,
+}: {
+  projectId: string
+  row: AssetItem
+  canDelete: boolean
+}) {
   const Icon = KIND_ICON[row.kind] ?? Package
 
   return (
@@ -316,12 +331,83 @@ function Card({ projectId, row }: { projectId: string; row: AssetItem }) {
         >
           下載
         </a>
+        {canDelete && <DeleteAsset projectId={projectId} row={row} />}
       </div>
     </article>
   )
 }
 
-function Row({ projectId, row }: { projectId: string; row: AssetItem }) {
+/**
+ * 刪除一個素材 (Z138).
+ *
+ * `deleteAsset` 在 `lib/assets.ts` 裡早就寫好了——會擋住仍被引用的素材、
+ * 先刪列再刪 R2 物件——但**沒有任何地方呼叫它**，所以素材庫從來沒有刪除鍵。
+ *
+ * 用要打字確認的對話框，而不是章節刪除那種就地兩段式。差別在**救不救得
+ * 回來**：章節刪除前會把整份文件存成版本，而 R2 的物件沒有版本，刪了就是
+ * 刪了。不可逆的動作值得被擋一下。
+ */
+function DeleteAsset({ projectId, row }: { projectId: string; row: AssetItem }) {
+  const router = useRouter()
+  const toast = useToast()
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const name = row.title || row.name
+
+  async function remove() {
+    setBusy(true)
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/assets/${row.id}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      toast.success('已刪除', `「${name}」與它的檔案都移除了。`)
+      setAsking(false)
+      router.refresh()
+    } catch (cause) {
+      // The commonest failure is 「仍被引用」, and that message names where.
+      toast.error('刪不掉', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setAsking(true)}
+        className="tap text-ink-700 underline underline-offset-2 transition-colors hover:text-rose-300"
+      >
+        刪除
+      </button>
+
+      <ConfirmDialog
+        open={asking}
+        onCancel={() => setAsking(false)}
+        onConfirm={remove}
+        busy={busy}
+        title="刪除素材"
+        message={`「${name}」會連同檔案一起刪掉。`}
+        impact="這個動作救不回來——素材庫的檔案沒有版本紀錄。仍被引用的素材刪不掉，會告訴你被用在哪裡。"
+        confirmLabel="刪除"
+        confirmName={name}
+      />
+    </>
+  )
+}
+
+function Row({
+  projectId,
+  row,
+  canDelete,
+}: {
+  projectId: string
+  row: AssetItem
+  canDelete: boolean
+}) {
   const Icon = KIND_ICON[row.kind] ?? Package
 
   return (
@@ -374,6 +460,12 @@ function Row({ projectId, row }: { projectId: string; row: AssetItem }) {
       >
         下載
       </a>
+
+      {canDelete && (
+        <span className="shrink-0 text-[10px] text-ink-700">
+          <DeleteAsset projectId={projectId} row={row} />
+        </span>
+      )}
     </article>
   )
 }
