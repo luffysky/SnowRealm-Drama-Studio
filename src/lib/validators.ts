@@ -822,12 +822,35 @@ export const proposalDecisionSchema = z.object({
  */
 const positive = z.number().finite().nonnegative()
 
-export const fxRatesSchema = z.object({
-  base: z.enum(CURRENCIES),
-  rates: z.record(z.enum(CURRENCIES), z.number().finite().positive()),
-  asOf: z.string().trim().min(1, '要填日期'),
-  source: z.string().trim().max(200).default(''),
-})
+export const fxRatesSchema = z
+  .object({
+    base: z.enum(CURRENCIES),
+    rates: z.record(z.enum(CURRENCIES), z.number().finite().positive()),
+    asOf: z.string().trim().min(1, '要填日期'),
+    source: z.string().trim().max(200).default(''),
+  })
+  /*
+   * 基準幣別對自己一定是 1 (Z90).
+   *
+   * `rates` 的定義是「1 單位基準幣別等於多少該幣別」，所以基準對自己只能是
+   * 1。少了這條檢查，存進去的是 `base: 'CNY'` 配上 `{CNY: 0.22, TWD: 1}`
+   * ——一張以台幣為基準的表貼上人民幣的標籤。
+   *
+   * 結果是 1 美金換成 1.47 人民幣（實際約 7.1），而且**每一個數字看起來都
+   * 像錢**：成本中心照樣顯示、照樣加總、照樣畫預算條，只是全部錯了。
+   */
+  .refine((v) => v.rates[v.base] === 1, {
+    message: '基準幣別對自己的匯率必須是 1',
+    path: ['rates'],
+  })
+  /*
+   * 三種幣別都要有。缺一個的話 `convert()` 會丟例外，而那個例外會在某個
+   * 使用者把顯示幣別切過去的時候才爆——離設定的人按下儲存已經很遠了。
+   */
+  .refine((v) => CURRENCIES.every((code) => typeof v.rates[code] === 'number'), {
+    message: `三種幣別的匯率都要填：${CURRENCIES.join('、')}`,
+    path: ['rates'],
+  })
 
 export const storageCostSchema = z.object({
   usdPerGbMonth: positive,

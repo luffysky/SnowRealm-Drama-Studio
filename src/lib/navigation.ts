@@ -137,8 +137,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: '成本中心',
     icon: 'Receipt',
     href: '/costs',
-    ready: false,
-    milestone: 'M3',
+    ready: true,
     design: 23,
   },
   {
