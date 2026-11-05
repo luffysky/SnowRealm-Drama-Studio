@@ -32,6 +32,10 @@ import {
 import { ArcBar } from '@/components/studio/ArcBar'
 import { EpisodeBatchCreate } from '@/components/studio/EpisodeBatchCreate'
 import { EpisodeBulkEdit } from '@/components/studio/EpisodeBulkEdit'
+import {
+  EpisodeEditDialog,
+  type EditableEpisode,
+} from '@/components/studio/EpisodeEditDialog'
 import type { ArcRow } from '@/lib/arcs-view'
 import { cn } from '@/lib/utils'
 import { FinalCutPanel } from '@/components/studio/FinalCutPanel'
@@ -79,6 +83,13 @@ export type EpisodeManagerProps = {
   existingNumbers?: number[]
   /** 批次建立時預填的目標片長，取自作品設定。 */
   defaultTargetSec?: number
+  /**
+   * 被選中那一集的完整欄位 (Z35/Z36)。
+   *
+   * 跟列表的 `EpisodeRow` 分開查：`synopsis` 一集可以到五千字，而列表一頁
+   * 二十筆、一個字都不顯示它。
+   */
+  editable?: EditableEpisode | null
 }
 
 /** Dates cross into a Client Component, so they travel as ISO strings. */
@@ -104,6 +115,7 @@ export function EpisodeManager({
   canWrite = false,
   existingNumbers = [],
   defaultTargetSec = 150,
+  editable = null,
 }: EpisodeManagerProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -146,6 +158,18 @@ export function EpisodeManager({
       else next.set(key, String(value))
     }
     if (!keepPage && !('page' in changes)) next.delete('page')
+
+    /*
+     * 換頁或換篩選就把選取清掉 (Z164).
+     *
+     * `go()` 是 `router.push` 到同一個路由段，所以這個元件不會 unmount，
+     * `picked` 整組留著。而批次列只印「選了 5 集」、不印是哪幾集——於是
+     * 「篩 DRAFT 選三集 → 改篩 RELEASED → 按套用」會改到畫面上一集都看不到
+     * 的那三集，而批次修改**沒有預覽也沒有復原**。
+     *
+     * 只有「選哪一集看詳情」（`keepPage`）不清：那不會換掉畫面上的清單。
+     */
+    if (!keepPage) setPicked(new Set())
 
     router.push(`${pathname}?${next.toString()}`, { scroll: false })
   }
@@ -342,7 +366,13 @@ export function EpisodeManager({
           )}
         </div>
 
-        <DetailRail episode={selected} projectId={projectId} canWrite={canWrite} />
+        <DetailRail
+          episode={selected}
+          editable={editable}
+          arcs={arcs}
+          projectId={projectId}
+          canWrite={canWrite}
+        />
       </div>
     </div>
   )
@@ -779,13 +809,20 @@ function PageButton({
 
 function DetailRail({
   episode,
+  editable,
+  arcs,
   projectId,
   canWrite,
 }: {
   episode: SerialisedEpisode | null
+  /** 選中那一集的完整欄位；只有它需要（synopsis 一集可以到五千字）。 */
+  editable: EditableEpisode | null
+  arcs: ArcRow[]
   projectId: string
   canWrite: boolean
 }) {
+  const [editing, setEditing] = useState(false)
+
   if (!episode) {
     return (
       <aside className="panel rounded-xl bg-stage-900 ring-1 ring-stage-700">
@@ -807,14 +844,32 @@ function DetailRail({
           EP{String(episode.number).padStart(3, '0')}
         </span>
         <EpisodeStatusChip status={episode.status} />
-        <span
-          aria-disabled="true"
-          title="集數編輯尚未實作，預計於 M1 階段交付"
-          className="ml-auto cursor-default text-ink-700"
-        >
-          <Pencil aria-hidden className="size-3.5" />
-        </span>
+
+        {/*
+          這支鉛筆以前是個禁用的 `<span>`，標題寫著「尚未實作，預計於 M1 階段
+          交付」——而 M1 是很久以前的事 (Z35)。
+        */}
+        {canWrite && editable && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            aria-label={`編輯第 ${episode.number} 集`}
+            title="編輯這一集"
+            className="tap ml-auto rounded p-1 text-ink-500 transition-colors hover:bg-stage-800 hover:text-ink-100"
+          >
+            <Pencil aria-hidden className="size-3.5" />
+          </button>
+        )}
       </div>
+
+      {editing && editable && (
+        <EpisodeEditDialog
+          projectId={projectId}
+          episode={editable}
+          arcs={arcs.map((arc) => ({ id: arc.id, title: arc.title }))}
+          onClose={() => setEditing(false)}
+        />
+      )}
 
       <h3 className="truncate text-sm font-semibold text-ink-50">
         {episode.title || <span className="text-ink-600">未命名</span>}
@@ -834,12 +889,49 @@ function DetailRail({
         )}
       </div>
 
+      {/*
+        詳情要把「這一集是什麼」講完 (Z36)。
+        本來只有一句 logline——而大綱、目標片長、期限這三樣都是每天會看的。
+      */}
+      <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[10px] text-ink-600">
+        <div className="flex gap-1">
+          <dt>目標片長</dt>
+          <dd className="text-ink-300 tabular-nums">
+            {editable ? `${editable.targetSec} 秒` : '—'}
+          </dd>
+        </div>
+        <div className="flex gap-1">
+          <dt>期限</dt>
+          <dd className={cn(episode.dueDate ? 'text-ink-300' : 'text-ink-700')}>
+            {episode.dueDate ? formatDate(episode.dueDate) : '沒有設定'}
+          </dd>
+        </div>
+      </dl>
+
       <div className="flex flex-col gap-1">
-        <h4 className="text-[11px] font-medium text-ink-400">劇情簡述</h4>
+        <h4 className="text-[11px] font-medium text-ink-400">劇情重點</h4>
         <p className="text-xs leading-relaxed text-ink-300">
           {episode.logline || <span className="text-ink-600">尚未撰寫。</span>}
         </p>
       </div>
+
+      {editable?.synopsis && (
+        <div className="flex flex-col gap-1">
+          <h4 className="text-[11px] font-medium text-ink-400">分集大綱</h4>
+          <p className="max-h-40 overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap text-ink-300">
+            {editable.synopsis}
+          </p>
+        </div>
+      )}
+
+      {editable?.notes && (
+        <div className="flex flex-col gap-1">
+          <h4 className="text-[11px] font-medium text-ink-400">備註</h4>
+          <p className="text-[11px] leading-relaxed whitespace-pre-wrap text-ink-500">
+            {editable.notes}
+          </p>
+        </div>
+      )}
 
       <FinalCutPanel projectId={projectId} episodeId={episode.id} canWrite={canWrite} />
 

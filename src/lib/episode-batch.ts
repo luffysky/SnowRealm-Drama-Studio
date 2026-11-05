@@ -148,7 +148,7 @@ export async function existingEpisodeNumbers(projectId: string): Promise<number[
 export type EpisodeBulkPatch = {
   status?: EpisodeStatusValue
   targetSec?: number
-  assigneeId?: string | null
+  /** 這裡**沒有** assigneeId：`episodes` 沒有那個欄位，見 validators 的註解。 */
   stage?: ProductionStageKey
   stageState?: ProductionStageStatus
 }
@@ -230,5 +230,11 @@ export async function bulkUpdateEpisodes(input: {
     summary: `${input.user.name} 批次更新了 ${ids.length} 集`,
   })
 
-  return { updated: updated || ids.length, stagesUpdated }
+  /*
+   * 回報真正改了幾列，不要用 `|| ids.length` 補 (Z164).
+   *
+   * 只改階段的時候 `updated` 是 0——那是對的，一集都沒改到 `episodes`。補成
+   * `ids.length` 會讓回應說「更新了 20 集」而實際上改的是 20 筆階段紀錄。
+   */
+  return { updated, stagesUpdated }
 }

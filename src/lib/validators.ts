@@ -112,16 +112,33 @@ export const arcSchema = z.object({
   plannedEpisodes: z.coerce.number().int().min(1).max(999).optional().default(120),
 })
 
-export const episodeSchema = z.object({
-  arcId: uuid,
-  number: z.coerce.number().int().min(1).max(999),
-  title: z.string().trim().max(120).optional().default(''),
-  logline: z.string().trim().max(300).optional().default(''),
-  synopsis: z.string().trim().max(5000).optional().default(''),
-  targetSec: z.coerce.number().int().min(10).max(3600).optional().default(150),
-  status: z.enum(EPISODE_STATUSES).optional().default('PLANNED'),
-  notes: z.string().trim().max(2000).optional().default(''),
-})
+/**
+ * 改一集 (Z35).
+ *
+ * 取代了原本的 `episodeSchema`——那一支是給「建立單集」用的，而集數從來不是
+ * 一集一集建的（作品建立時一次長出來，或走批次建立），所以它零個呼叫端，是
+ * `check:dead` 掃出來的其中一條。
+ *
+ * 每一欄都可選，但**至少要有一欄**：空的 PATCH 會把 `updated_at` 推進、寫一
+ * 筆動態紀錄，然後什麼都沒改。
+ *
+ * **沒有 `number`。** 集號是小說、劇本、分鏡、有聲書與正文裡每一句「第 007
+ * 集」共用的編號，改它等於把那些全部指向別處，而沒有任何一個會跟著動。
+ */
+export const episodeEditSchema = z
+  .object({
+    title: z.string().trim().max(120).optional(),
+    logline: z.string().trim().max(300).optional(),
+    synopsis: z.string().trim().max(5000).optional(),
+    notes: z.string().trim().max(2000).optional(),
+    targetSec: z.coerce.number().int().min(10).max(3600).optional(),
+    status: z.enum(EPISODE_STATUSES).optional(),
+    arcId: uuid.optional(),
+    dueDate: z.string().trim().nullable().optional(),
+  })
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+    message: '沒有任何要修改的欄位',
+  })
 
 /**
  * 分集大綱.
@@ -201,14 +218,39 @@ export const episodeBatchSchema = z
   .refine((v) => v.from <= v.to, { message: '起始集數不可大於結束集數', path: ['from'] })
   .refine((v) => v.to - v.from < 500, { message: '單次最多建立 500 集', path: ['to'] })
 
-export const episodeBulkUpdateSchema = z.object({
-  episodeIds: z.array(uuid).min(1, '請至少選擇一集').max(500),
-  status: z.enum(EPISODE_STATUSES).optional(),
-  targetSec: z.coerce.number().int().min(10).max(3600).optional(),
-  assigneeId: uuid.nullable().optional(),
-  stage: z.enum(PRODUCTION_STAGE_KEYS).optional(),
-  stageState: z.enum(PRODUCTION_STAGE_STATUSES).optional(),
-})
+export const episodeBulkUpdateSchema = z
+  .object({
+    episodeIds: z.array(uuid).min(1, '請至少選擇一集').max(500),
+    status: z.enum(EPISODE_STATUSES).optional(),
+    targetSec: z.coerce.number().int().min(10).max(3600).optional(),
+    /*
+     * **沒有 `assigneeId`** (Z164).
+     *
+     * 本來有，而 `episodes` 這張表根本沒有 assignee 欄位（負責人在
+     * `episode_production_stages` 上）。Drizzle 的 `buildUpdateSet` 會把認不
+     * 得的 key 直接濾掉——所以送 `assigneeId` 會得到 200、回報「更新了 N
+     * 集」、寫一筆動態紀錄，然後**什麼都沒改**。
+     *
+     * 那是這個專案最討厭的形狀：說它做了而它沒做。要做指派就得寫到階段那張
+     * 表，而那需要同時指定是哪一個階段——不是這支的事。
+     */
+    stage: z.enum(PRODUCTION_STAGE_KEYS).optional(),
+    stageState: z.enum(PRODUCTION_STAGE_STATUSES).optional(),
+  })
+  .refine(
+    (input) =>
+      input.status !== undefined ||
+      input.targetSec !== undefined ||
+      (input.stage !== undefined && input.stageState !== undefined),
+    {
+      /*
+       * 至少要改一件事。沒有這條的話，只送 `episodeIds` 會：什麼都不改 →
+       * 寫一筆「批次更新了 N 集」的動態紀錄 → 回 `updated: N`。動態紀錄在這
+       * 個專案裡是證據，不該有這種假列。
+       */
+      message: '沒有任何要修改的欄位',
+    }
+  )
 
 export const documentSaveSchema = z.object({
   episodeId: uuid,

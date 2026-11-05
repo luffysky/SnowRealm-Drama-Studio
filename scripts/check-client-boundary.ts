@@ -40,8 +40,28 @@ const SERVER_ONLY = ['@/db', 'next/headers', 'server-only']
  *
  * `@/lib/api` 要 `next/headers`（session 與 CSRF），`@/lib/settings` 要 `@/db`。
  * 列出來是為了讓錯誤訊息直接指出是哪一支，而不是印一條走到 `@/db` 的長路徑。
+ *
+ * `@/lib/env` 的檔頭自己寫著「Importing this from a Client Component is a
+ * build error by design」，但它只 import `zod`、沒有 `server-only`——所以
+ * `next build` **不會**擋它，被拉進瀏覽器是 runtime 才爆（「DATABASE_URL is
+ * required」）。比 build error 更晚發現，所以列在這裡。
  */
-const SERVER_MODULES = ['@/lib/api', '@/lib/auth/session', '@/lib/auth/csrf']
+const SERVER_MODULES = [
+  '@/lib/api',
+  '@/lib/auth/session',
+  '@/lib/auth/csrf',
+  '@/lib/env',
+]
+
+/** `node:fs` 這種內建模組進了瀏覽器 bundle 一樣是建置失敗。 */
+function isServerSpec(spec: string): boolean {
+  return SERVER_ONLY.includes(spec) || SERVER_MODULES.includes(spec) || spec.startsWith('node:')
+}
+
+/** 去掉註解之後才看有沒有 `'use client'`。 */
+function isClientModule(file: FileText): boolean {
+  return stripComments(file.text).includes("'use client'")
+}
 
 type FileText = { path: string; text: string }
 
@@ -109,9 +129,37 @@ function importsOf(text: string): string[] {
 }
 
 /** `@/lib/x` → 實際的檔案路徑。 */
-function resolve(spec: string, files: Map<string, FileText>): FileText | null {
-  if (!spec.startsWith('@/')) return null
-  const base = `src/${spec.slice(2)}`
+function resolve(
+  spec: string,
+  files: Map<string, FileText>,
+  fromPath: string
+): FileText | null {
+  let base: string
+
+  if (spec.startsWith('@/')) {
+    base = `src/${spec.slice(2)}`
+  } else if (spec.startsWith('.')) {
+    /*
+     * 相對路徑也要追 (Z164).
+     *
+     * 第一版第一行就 `if (!spec.startsWith('@/')) return null`，而 src 裡有
+     * 九十幾處相對 import。現成的洞：`src/lib/ai/provider-status.ts` 只
+     * import `./jobs` 與 `./types`，而 `jobs.ts` 第一行是 `@/db`。任何用戶端
+     * 元件 import 它，這支工具會說綠的、`next build` 會倒——也就是這支工具
+     * 存在的全部理由失效。
+     */
+    const dir = fromPath.split('/').slice(0, -1)
+    const parts = spec.split('/')
+    for (const part of parts) {
+      if (part === '.' || part === '') continue
+      if (part === '..') dir.pop()
+      else dir.push(part)
+    }
+    base = dir.join('/')
+  } else {
+    // 套件名：不追進 node_modules，那會讓這支從兩秒變兩分鐘。
+    return null
+  }
 
   for (const candidate of [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`]) {
     const file = files.get(candidate)
@@ -134,16 +182,16 @@ function main() {
     seen.add(file.path)
 
     for (const spec of importsOf(file.text)) {
-      if (SERVER_ONLY.includes(spec) || SERVER_MODULES.includes(spec)) {
+      if (isServerSpec(spec)) {
         const hit = [file.path, spec]
         cache.set(file.path, hit)
         return hit
       }
 
-      const next = resolve(spec, byPath)
+      const next = resolve(spec, byPath, file.path)
       if (!next) continue
       // 用戶端元件不會把伺服器端拉進來——它自己也是用戶端。
-      if (next.text.includes("'use client'")) continue
+      if (isClientModule(next)) continue
 
       const deeper = serverPathFrom(next, seen)
       if (deeper) {
@@ -153,21 +201,28 @@ function main() {
       }
     }
 
-    cache.set(file.path, null)
+    /*
+     * 走到環的時候回 null，但**不要寫進快取**。
+     *
+     * 那個 null 是「在這次的 seen 限制下沒找到」，不是「這支乾淨」。寫進共用
+     * 快取的話，某個模組通往伺服器端的唯一路徑若剛好經過當時在堆疊上的模
+     * 組，它就會被永久記成乾淨——而且永遠不會有人發現。
+     */
+    if (seen.size === 1) cache.set(file.path, null)
     return null
   }
 
-  const clients = all.filter((file) => stripComments(file.text).includes("'use client'"))
+  const clients = all.filter(isClientModule)
   const bad: string[][] = []
 
   for (const client of clients) {
     for (const spec of importsOf(client.text)) {
-      if (SERVER_ONLY.includes(spec) || SERVER_MODULES.includes(spec)) {
+      if (isServerSpec(spec)) {
         bad.push([client.path, spec])
         continue
       }
-      const target = resolve(spec, byPath)
-      if (!target || target.text.includes("'use client'")) continue
+      const target = resolve(spec, byPath, client.path)
+      if (!target || isClientModule(target)) continue
 
       const path = serverPathFrom(target, new Set())
       if (path) bad.push([client.path, ...path])
@@ -191,8 +246,24 @@ function main() {
   if (importsOf("import { type A, B } from '@/db'").length !== 1) {
     problems.push('混用型別與值的 import 被整句略過了')
   }
-  if (resolve('@/lib/api', byPath)?.path !== 'src/lib/api.ts') {
+  if (resolve('@/lib/api', byPath, 'src/x.ts')?.path !== 'src/lib/api.ts') {
     problems.push('模組路徑解析壞了')
+  }
+  /*
+   * 相對路徑一定要追得到。這一條是反面自我檢查：第一版完全不追，而那讓
+   * `provider-status.ts → ./jobs → @/db` 這種鏈整條隱形。
+   */
+  if (resolve('./jobs', byPath, 'src/lib/ai/provider-status.ts')?.path !== 'src/lib/ai/jobs.ts') {
+    problems.push('相對路徑解析壞了')
+  }
+  if (resolve('../utils', byPath, 'src/lib/ai/x.ts')?.path !== 'src/lib/utils.ts') {
+    problems.push('上層相對路徑解析壞了')
+  }
+  // node: 內建模組進瀏覽器一樣是建置失敗。
+  if (!isServerSpec('node:crypto')) problems.push('node: 內建模組沒有被當成伺服器端')
+  // 註解裡提到 use client 的伺服器端檔案不可以被當成用戶端而整條跳過。
+  if (isClientModule({ path: 'x', text: "// 這個檔案沒有 'use client'" })) {
+    problems.push('註解裡的 use client 被當真了')
   }
 
   if (problems.length > 0) {

@@ -127,8 +127,14 @@ export function EpisodeBatchCreate({
           busy={busy}
           footer={
             <div className="flex w-full items-center justify-between gap-3">
-              <span className="text-[11px] text-ink-600">
-                建立之後只能一集一集刪，沒有「取消批次」
+              {/*
+                文案要是事實 (Z164).
+                本來寫「只能一集一集刪」——而**整個系統沒有刪除集數的功能**：
+                `/api/projects/[id]/episodes/` 底下沒有 DELETE，全 src 也沒有
+                任何地方對 `episodes` 設 `deletedAt`。一句比沒寫更危險的話。
+              */}
+              <span className="text-[11px] text-amber-300">
+                目前沒有刪除集數的功能——建錯了只能改標題，範圍要想清楚
               </span>
               <div className="flex gap-2">
                 <Button size="sm" variant="ghost" onClick={() => setOpen(false)} disabled={busy}>

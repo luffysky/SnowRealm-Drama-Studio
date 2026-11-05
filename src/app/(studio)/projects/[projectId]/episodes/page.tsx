@@ -5,6 +5,7 @@ import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { EPISODE_STATUSES, type EpisodeStatusValue } from '@/lib/constants'
 import {
+  episodeEditable,
   getEpisodeDetail,
   listEpisodes,
   parsePerPage,
@@ -89,6 +90,9 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
     ? await getEpisodeDetail(project.id, selectedId)
     : (result.rows[0] ?? null)
 
+  // 只有被選中那一集需要完整欄位（synopsis 五千字，列表不顯示）。
+  const editable = selected ? await episodeEditable(project.id, selected.id) : null
+
   return (
     <EpisodeManager
       canWrite={can(user, 'episode.write')}
@@ -103,6 +107,11 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
       arcs={arcs}
       arcId={arcId}
       existingNumbers={existingNumbers}
+      editable={
+        editable
+          ? { ...editable, dueDate: editable.dueDate ? editable.dueDate.toISOString() : null }
+          : null
+      }
       defaultTargetSec={Math.round((project.targetMinSec + project.targetMaxSec) / 2)}
     />
   )

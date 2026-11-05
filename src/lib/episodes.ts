@@ -1,7 +1,9 @@
 import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm'
 import { db } from '@/db'
-import { assets, episodeProductionStages, episodes } from '@/db/schema'
-import { ApiError } from '@/lib/api'
+import { arcs, assets, episodeProductionStages, episodes } from '@/db/schema'
+import { ApiError, logActivity } from '@/lib/api'
+import type { SessionUser } from '@/lib/auth/session'
+import type { EpisodeStatusValue } from '@/lib/constants'
 import {
   DEFAULT_PER_PAGE,
   type EpisodeListResult,
@@ -239,6 +241,130 @@ export async function episodeStats(projectId: string): Promise<EpisodeStats> {
     pending: Math.max(total - done - inProgress, 0),
     overallProgress: aggregateProgress(Number(stageSum?.done ?? 0), total * STAGES_PER_EPISODE),
   }
+}
+
+export type EpisodeEditable = {
+  id: string
+  number: number
+  arcId: string
+  title: string
+  logline: string
+  synopsis: string
+  notes: string
+  targetSec: number
+  status: EpisodeStatusValue
+  dueDate: Date | null
+}
+
+/**
+ * 一集可編輯的全部欄位 (Z35/Z36).
+ *
+ * 跟 `EpisodeRow` 分開查，因為 `synopsis` 一集可以到五千字——列表一頁二十
+ * 筆就是十萬字，而列表一個字都不顯示它。只有被選中的那一集需要。
+ */
+export async function episodeEditable(
+  projectId: string,
+  episodeId: string
+): Promise<EpisodeEditable | null> {
+  const [row] = await db
+    .select({
+      id: episodes.id,
+      number: episodes.number,
+      arcId: episodes.arcId,
+      title: episodes.title,
+      logline: episodes.logline,
+      synopsis: episodes.synopsis,
+      notes: episodes.notes,
+      targetSec: episodes.targetSec,
+      status: episodes.status,
+      dueDate: episodes.dueDate,
+    })
+    .from(episodes)
+    .where(
+      and(
+        eq(episodes.id, episodeId),
+        eq(episodes.projectId, projectId),
+        isNull(episodes.deletedAt)
+      )
+    )
+    .limit(1)
+
+  return row ? { ...row, status: row.status as EpisodeStatusValue } : null
+}
+
+/**
+ * 改一集 (Z35).
+ *
+ * 集號**不給改**：`episodes.number` 是小說、劇本、分鏡、有聲書與正文裡每一句
+ * 「第 007 集」共用的編號，改它等於把那些全部指向別處，而沒有任何一個會跟著
+ * 動。要調順序是「搬卷」或重新規劃，不是改這個欄位（Z128 也是這個結論）。
+ */
+export async function updateEpisode(input: {
+  projectId: string
+  episodeId: string
+  patch: {
+    title?: string
+    logline?: string
+    synopsis?: string
+    notes?: string
+    targetSec?: number
+    status?: EpisodeStatusValue
+    arcId?: string
+    dueDate?: string | null
+  }
+  user: SessionUser
+}): Promise<{ id: string }> {
+  const existing = await episodeEditable(input.projectId, input.episodeId)
+  if (!existing) throw ApiError.notFound('找不到這一集')
+
+  // 搬到別卷的時候，那一卷也要屬於這部作品。
+  if (input.patch.arcId && input.patch.arcId !== existing.arcId) {
+    const [arc] = await db
+      .select({ id: arcs.id })
+      .from(arcs)
+      .where(
+        and(
+          eq(arcs.id, input.patch.arcId),
+          eq(arcs.projectId, input.projectId),
+          isNull(arcs.deletedAt)
+        )
+      )
+      .limit(1)
+    if (!arc) throw ApiError.notFound('找不到這個卷')
+  }
+
+  const due =
+    input.patch.dueDate === null
+      ? null
+      : input.patch.dueDate
+        ? new Date(input.patch.dueDate)
+        : undefined
+
+  await db
+    .update(episodes)
+    .set({
+      ...(input.patch.title !== undefined ? { title: input.patch.title } : {}),
+      ...(input.patch.logline !== undefined ? { logline: input.patch.logline } : {}),
+      ...(input.patch.synopsis !== undefined ? { synopsis: input.patch.synopsis } : {}),
+      ...(input.patch.notes !== undefined ? { notes: input.patch.notes } : {}),
+      ...(input.patch.targetSec !== undefined ? { targetSec: input.patch.targetSec } : {}),
+      ...(input.patch.status !== undefined ? { status: input.patch.status } : {}),
+      ...(input.patch.arcId !== undefined ? { arcId: input.patch.arcId } : {}),
+      ...(due !== undefined ? { dueDate: due && !Number.isNaN(due.getTime()) ? due : null } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(episodes.id, input.episodeId))
+
+  await logActivity({
+    user: input.user,
+    action: 'update',
+    entityType: 'episode',
+    entityId: input.episodeId,
+    projectId: input.projectId,
+    summary: `${input.user.name} 編輯了第 ${existing.number} 集`,
+  })
+
+  return { id: input.episodeId }
 }
 
 /** One episode with its stages, for the detail rail. */
