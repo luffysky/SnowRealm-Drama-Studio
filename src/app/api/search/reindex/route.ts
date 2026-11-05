@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { handle, jsonOk, newRequestId } from '@/lib/api'
 import { getSessionUser } from '@/lib/auth/session'
 import { safeEqual } from '@/lib/crypto'
+import { refreshFxRates } from '@/lib/fx-fetch'
 import { reindexDirtyProjects } from '@/lib/search'
 
 /**
@@ -63,7 +64,26 @@ export const POST = handle(async (request: Request) => {
   const requested = Number(new URL(request.url).searchParams.get('limit') ?? 3)
   const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 3, 1), 5)
 
-  return jsonOk(await reindexDirtyProjects(limit))
+  const reindexed = await reindexDirtyProjects(limit)
+
+  /*
+   * 順手把匯率抓回來 (Z150).
+   *
+   * 這裡本來不該管匯率。會放進來是因為 **Vercel Hobby 一個專案只有兩個
+   * 排程**，而這個專案的兩個已經用掉了（AI worker 與這支）。匯率一天要更新
+   * 一次，而這支就是那個每天跑一次的。
+   *
+   * 抓失敗不影響重建結果：匯率舊一天不會壞掉任何東西，而重建是這支的本業。
+   * 升級方案之後，`vercel.json` 加一條指向 `/api/cron/fx` 就可以把這段拿掉。
+   */
+  let fx: Awaited<ReturnType<typeof refreshFxRates>> | { updated: false; reason: string }
+  try {
+    fx = await refreshFxRates(null)
+  } catch (cause) {
+    fx = { updated: false, reason: cause instanceof Error ? cause.message : '匯率更新失敗' }
+  }
+
+  return jsonOk({ ...reindexed, fx })
 })
 
 export const GET = POST

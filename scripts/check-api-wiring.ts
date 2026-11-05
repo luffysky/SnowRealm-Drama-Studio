@@ -30,6 +30,19 @@ import { join, relative, sep } from 'node:path'
  */
 
 const API = join('src', 'app', 'api')
+
+/**
+ * 註解裡的程式碼不是程式碼。
+ *
+ * 這支工具自己踩到了：一支路由的註解裡寫著「刻意沒有 `export const GET =
+ * POST`」來說明為什麼拿掉，而偵測處理函式的比對照樣把它算成一個真的 GET
+ * ——於是它回報「GET 沒有人呼叫」，而那個 GET 根本不存在。
+ *
+ * 一個把註解當程式碼的掃描器，會逼人為了安撫工具而改寫註解，那是本末倒置。
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/gm, '$1')
+}
 const METHODS = ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] as const
 type Method = (typeof METHODS)[number]
 
@@ -63,7 +76,7 @@ function routesUnder(dir: string, prefix: string[]): Route[] {
 
     if (entry !== 'route.ts' && entry !== 'route.tsx') continue
 
-    const text = readFileSync(full, 'utf8')
+    const text = stripComments(readFileSync(full, 'utf8'))
     const methods = METHODS.filter((method) =>
       new RegExp(`export\\s+(const|async\\s+function|function)\\s+${method}\\b`).test(text)
     )

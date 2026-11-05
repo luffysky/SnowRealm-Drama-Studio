@@ -44,7 +44,13 @@ async function readSetting(key: string): Promise<unknown> {
   return row?.value ?? null
 }
 
-async function writeSetting(key: string, value: unknown, userId: string): Promise<void> {
+/**
+ * `userId` 可以是 null——排程改的設定沒有「誰改的」(Z150).
+ *
+ * 資料庫欄位本來就允許 null，是這裡的型別比現實窄。硬塞一個使用者進去會讓
+ * 稽核紀錄說謊：匯率是每天自動抓回來的，不是誰去按的。
+ */
+async function writeSetting(key: string, value: unknown, userId: string | null): Promise<void> {
   await db
     .insert(appSettings)
     .values({ key, value, updatedById: userId })
@@ -88,7 +94,7 @@ export async function getFxRates(): Promise<FxRates> {
   return parseFxRates(await readSetting(SETTING_KEYS.fxRates)) ?? DEFAULT_FX
 }
 
-export async function setFxRates(rates: FxRates, userId: string): Promise<void> {
+export async function setFxRates(rates: FxRates, userId: string | null): Promise<void> {
   await writeSetting(SETTING_KEYS.fxRates, rates, userId)
 }
 

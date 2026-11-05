@@ -1,6 +1,7 @@
 'use client'
 
-import { Check, Loader2, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, Loader2, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
@@ -254,7 +255,72 @@ function FxSection({ rates, canEdit }: { rates: FxRates; canEdit: boolean }) {
           className={inputClass}
         />
       </Field>
+
+      {canEdit && <FetchRatesButton />}
     </Section>
+  )
+}
+
+/**
+ * 立刻去抓一次匯率 (Z150).
+ *
+ * 每天一次是搭既有的排程跑的（Vercel Hobby 一個專案只有兩個排程，都用掉
+ * 了）。但一天一次代表「現在就想看到正確數字」沒有辦法——所以這顆鈕。
+ *
+ * 抓壞了不會寫進去。驗證在 `fx-fetch.ts`：三種幣別齊全、基準對自己是 1、
+ * 數字在合理範圍。匯率錯了比匯率舊了糟糕得多。
+ */
+function FetchRatesButton() {
+  const router = useRouter()
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+
+  async function fetchNow() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const response = await apiFetch('/api/cron/fx', { method: 'POST' })
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      const body = (await response.json()) as {
+        data?: { updated?: boolean; reason?: string; rates?: { asOf?: string } }
+      } & { updated?: boolean; reason?: string; rates?: { asOf?: string } }
+      const result = body.data ?? body
+
+      if (result.updated) {
+        toast.success('匯率更新了', `取得日期 ${result.rates?.asOf ?? ''}`)
+        router.refresh()
+      } else {
+        // 「沒更新」不是失敗，但理由要講出來。
+        toast.info('沒有更新', result.reason ?? '跟現有的一樣')
+      }
+    } catch (cause) {
+      toast.error('抓不到匯率', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1 border-t border-stage-800 pt-3">
+      <button
+        type="button"
+        onClick={() => void fetchNow()}
+        disabled={busy}
+        className="tap inline-flex w-fit items-center gap-1.5 rounded-lg bg-stage-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-ink-50 disabled:opacity-40"
+      >
+        {busy ? (
+          <Loader2 aria-hidden className="size-3.5 animate-spin" />
+        ) : (
+          <RefreshCw aria-hidden className="size-3.5" />
+        )}
+        {busy ? '抓取中…' : '立刻抓一次最新匯率'}
+      </button>
+      <p className="text-[10px] leading-relaxed text-ink-700">
+        來源 open.er-api.com（免費、不需金鑰、有台幣）。每天會自動抓一次；
+        抓回來的數字不合理就不會寫進去。
+      </p>
+    </div>
   )
 }
 
