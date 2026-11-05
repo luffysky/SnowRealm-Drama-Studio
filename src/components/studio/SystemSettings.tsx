@@ -6,6 +6,7 @@ import { useState, type ReactNode } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { TASK_EFFORT } from '@/lib/ai/prompts'
+import { HealthPanel } from '@/components/studio/HealthPanel'
 import { CURRENCIES, CURRENCY_LABEL, type CurrencyValue, type FxRates } from '@/lib/money'
 import { AI_EFFORTS, type AiEffort, type IceServer, type ModelPricing, type StorageCost, type TaskProfiles } from '@/lib/settings-view'
 import { cn } from '@/lib/utils'
@@ -67,6 +68,21 @@ export function SystemSettings(props: Props) {
         canEdit={props.canEdit}
       />
       <IceSection servers={props.ice} canEdit={props.canEdit} />
+
+      {/*
+        沒有用 `Section` 包：那個元件的骨架是「改東西 → 儲存」，而這一塊什麼
+        都不存。硬套會多出一顆永遠按不下去的儲存鈕——這個專案最不該出現的東西。
+      */}
+      <section className="panel flex flex-col gap-3 rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700/60">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-sm font-medium text-ink-100">系統健康</h2>
+          <p className="text-[10px] leading-relaxed text-ink-500">
+            失敗與卡死的任務、匯率有沒有在更新、鎖住沒解的內容、本月花費。
+            每天早上的排程打的是同一支 API，所以這裡看到的就是它會回報的。
+          </p>
+        </div>
+        <HealthPanel />
+      </section>
     </div>
   )
 }
