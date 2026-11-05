@@ -170,6 +170,35 @@ async function syncStages(scope: ReturnType<typeof sql>): Promise<number> {
         ) then 0.0 else null end
       from episodes e
       where ${scope} and e.deleted_at is null
+    ),
+    /*
+     * 封頂與目標百分比，只算一次 (Z166).
+     *
+     * progress_percent 本來是 greatest(s.progress_percent, 量測值)——只升
+     * 不降。問題是 script 的 fraction 會真的到 1.0（場次秒數加總 >= 目標片
+     * 長），於是它會被推到 100 而 status 留在 in_progress：「進行中 100%」。
+     * 而 STAGE_FRACTION 對 in_progress 算的是 progress_percent / 100，所以
+     * 那一格被當成整整一格算進完成度。
+     *
+     * 更糟的是它會把人工的修正吃掉：使用者把某階段從已完成退回進行中，
+     * updateEpisodeStage 正確地把百分比夾到 99，下一次有人存檔跑 resync，
+     * 這裡又把它推回 100。
+     *
+     * 所以沒有變成「已完成」的階段，百分比最多 99。finishes 與
+     * target_percent 在這裡一起算，下面的 set 與 where 都讀它——不是兩邊各
+     * 寫一份一樣的 case 然後指望以後有人記得一起改。
+     */
+    capped as (
+      select
+        m.episode_id,
+        m.stage_key,
+        m.fraction,
+        (m.stage_key = 'novel' and m.fraction >= 1) as finishes,
+        least(
+          round(coalesce(m.fraction, 0) * 100)::int,
+          case when m.stage_key = 'novel' and m.fraction >= 1 then 100 else 99 end
+        ) as target_percent
+      from measured m
     )
     update episode_production_stages s
        set status = case
@@ -179,21 +208,20 @@ async function syncStages(scope: ReturnType<typeof sql>): Promise<number> {
               * other stages it is only ever a measurement, so they stay
               * 進行中 until a person decides.
               */
-             when m.stage_key = 'novel' and m.fraction >= 1 then 'completed'
+             when m.finishes then 'completed'
              else 'in_progress'
            end::production_stage_status,
-           progress_percent = greatest(
-             s.progress_percent,
-             round(coalesce(m.fraction, 0) * 100)::int
+           progress_percent = least(
+             greatest(s.progress_percent, m.target_percent),
+             case when m.finishes then 100 else 99 end
            ),
            started_at = coalesce(s.started_at, now()),
            completed_at = case
-             when m.stage_key = 'novel' and m.fraction >= 1
-               then coalesce(s.completed_at, now())
+             when m.finishes then coalesce(s.completed_at, now())
              else s.completed_at
            end,
            updated_at = now()
-      from measured m
+      from capped m
      where s.episode_id = m.episode_id
        and s.stage_key = m.stage_key::production_stage_key
        and m.fraction is not null
@@ -208,9 +236,9 @@ async function syncStages(scope: ReturnType<typeof sql>): Promise<number> {
        -- And only when it would change something, so this is cheap to re-run.
        and (
          s.status = 'not_started'
-         or s.progress_percent < round(coalesce(m.fraction, 0) * 100)::int
+         or s.progress_percent < m.target_percent
          -- Reaching 完成 is a change even when the percentage did not move.
-         or (m.stage_key = 'novel' and m.fraction >= 1 and s.status <> 'completed')
+         or (m.finishes and s.status <> 'completed')
        )
   `)
 

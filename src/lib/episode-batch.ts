@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { arcs, episodeProductionStages, episodes } from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
 import { episodeTitleFor, planEpisodeBatch } from '@/lib/episode-batch-view'
+import { stageStatusPatch } from '@/lib/episode-stages'
 
 export * from '@/lib/episode-batch-view'
 import type { SessionUser } from '@/lib/auth/session'
@@ -205,9 +206,15 @@ export async function bulkUpdateEpisodes(input: {
     if (stage && stageState) {
       const rows = await tx
         .update(episodeProductionStages)
+        /*
+         * 跟單筆那條走同一個運算式 (Z166).
+         *
+         * 本來這裡只寫 `status` 與 `completedAt`：把一批已完成的階段改成進行
+         * 中，`progress_percent` 會留在 100——看板印「進行中 100%」，而完成度
+         * 一個數字都不會動。`startedAt` 也從來沒被設過。
+         */
         .set({
-          status: stageState,
-          ...(stageState === 'completed' ? { completedAt: new Date() } : { completedAt: null }),
+          ...stageStatusPatch(stageState),
           updatedAt: new Date(),
         })
         .where(

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { episodes, projects, tasks, users } from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
+import { studioMembers } from '@/lib/members'
 import type { SessionUser } from '@/lib/auth/session'
 import { visibleProjects } from '@/lib/project-access'
 import {
@@ -89,7 +90,8 @@ export async function taskBoard(userId: string): Promise<TaskBoard> {
       .where(visibleProjects(userId))
       .orderBy(asc(projects.createdAt)),
 
-    db.select({ id: users.id, name: users.name }).from(users).orderBy(asc(users.createdAt)),
+    // 同一份清單也餵給階段指派，所以它住在 `@/lib/members` (Z166)。
+    studioMembers(),
   ])
 
   const board = rows.map((row) => ({

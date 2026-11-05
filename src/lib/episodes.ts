@@ -152,6 +152,7 @@ export async function listEpisodes(
             status: episodeProductionStages.status,
             progressPercent: episodeProductionStages.progressPercent,
             note: episodeProductionStages.note,
+            assigneeId: episodeProductionStages.assigneeId,
           })
           .from(episodeProductionStages)
           .where(
@@ -172,6 +173,7 @@ export async function listEpisodes(
       status: row.status,
       progressPercent: row.progressPercent,
       note: row.note,
+      assigneeId: row.assigneeId,
     })
     stagesByEpisode.set(row.episodeId, map)
   }
@@ -197,6 +199,7 @@ export async function listEpisodes(
               status: 'not_started' as ProductionStageStatus,
               progressPercent: 0,
               note: '',
+              assigneeId: null,
             }
         ),
       }
@@ -528,6 +531,7 @@ export async function getEpisodeDetail(
       status: episodeProductionStages.status,
       progressPercent: episodeProductionStages.progressPercent,
       note: episodeProductionStages.note,
+      assigneeId: episodeProductionStages.assigneeId,
     })
     .from(episodeProductionStages)
     .where(
@@ -545,6 +549,7 @@ export async function getEpisodeDetail(
       status: found2?.status ?? 'not_started',
       progressPercent: found2?.progressPercent ?? 0,
       note: found2?.note ?? '',
+      assigneeId: found2?.assigneeId ?? null,
     }
   })
 

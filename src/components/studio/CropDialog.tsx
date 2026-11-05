@@ -70,8 +70,41 @@ const OUTPUT_MAX: Record<'wide' | 'portrait' | 'square', number> = {
  * iOS Safari 單張圖解碼約 16.7 MP 就會自行降採樣或讓 `drawImage` 畫出空
  * 白——而 `toBlob` 仍然會回一個合法的 blob，於是**一張全黑的封面會安靜地被
  * 上傳**。`MAX_IMAGE_BYTES` 擋不住：8000×6000 的 JPEG 很容易低於 12 MB。
+ *
+ * 兩個用途：顯示一句警語，以及決定要不要跑 `canvasHasPixels()`。後者本來是
+ * **每一張圖都跑**，所以這個常數只是個註解；現在它真的在擋東西 (Z166)。
  */
 const MAX_SOURCE_PIXELS = 16_000_000
+
+/**
+ * 畫布上有沒有任何東西被畫上去 (Z166).
+ *
+ * 跨整張均勻抽樣（約 4096 個點），只要有一個點不是完全透明就算有畫到。
+ *
+ * 上一版只抽**左上角 64×64**，於是一張去背的 PNG（人物居中、四角透明）會被
+ * 判成「畫不出來」——而角色定妝照正是這一支最主要的用途，去背人像的左上角本
+ * 來就是透明的。
+ *
+ * 只看 alpha 是對的：Safari 畫不出來的時候整張都是 alpha 0，而任何真的畫上
+ * 去的像素 alpha 都大於 0。
+ *
+ * 要說清楚它蓋不到什麼：Safari 的另一種行為是**自行降採樣**——那會畫出看得
+ * 見但座標錯位的內容，alpha 檢查照樣通過，裁出來的構圖是錯的。這裡沒有辦法
+ * 偵測那個，所以超過上限時另外顯示警語請人先縮小再上傳。
+ */
+function canvasHasPixels(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number
+): boolean {
+  const { data } = ctx.getImageData(0, 0, width, height)
+  // 乘 4 讓步進永遠落在 alpha 通道上。
+  const stride = Math.max(1, Math.floor((width * height) / 4096)) * 4
+  for (let i = 3; i < data.length; i += stride) {
+    if (data[i] !== 0) return true
+  }
+  return false
+}
 
 export function CropDialog({
   file,
@@ -226,20 +259,17 @@ export function CropDialog({
       ctx.drawImage(image, sx, sy, sw, sh, 0, 0, outWidth, outHeight)
 
       /*
-       * 畫出來是不是全黑／全透明。
+       * 只有**超大圖**才檢查畫出來是不是全空 (Z166).
        *
-       * 超大圖在 Safari 上 `drawImage` 會安靜地什麼都沒畫，而 `toBlob` 照樣
-       * 回一個合法的 blob。抽樣檢查比「上傳完才發現封面是黑的」便宜太多。
+       * 這個檢查存在的唯一理由是 iOS Safari 在 `MAX_SOURCE_PIXELS` 以上會讓
+       * `drawImage` 什麼都不畫而 `toBlob` 照樣回一個合法的 blob。對每一張圖
+       * 都跑它，換來的是把去背 PNG 誤殺成「這張圖太大」——一張 800KB 的小圖
+       * 完全無法裁切，而錯誤訊息還在說它太大。
        */
-      const sample = ctx.getImageData(0, 0, Math.min(outWidth, 64), Math.min(outHeight, 64)).data
-      let visible = false
-      for (let i = 3; i < sample.length; i += 4) {
-        if (sample[i] !== 0) {
-          visible = true
-          break
-        }
-      }
-      if (!visible) {
+      if (
+        image.naturalWidth * image.naturalHeight > MAX_SOURCE_PIXELS &&
+        !canvasHasPixels(ctx, outWidth, outHeight)
+      ) {
         throw new Error('這張圖太大，瀏覽器畫不出來。請用「用原圖，不裁切」或先縮小再上傳。')
       }
 

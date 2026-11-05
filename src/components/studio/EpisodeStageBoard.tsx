@@ -30,6 +30,13 @@ import { cn } from '@/lib/utils'
  *
  * 也就是說：手動把小說設成已完成，下一次存檔就會被改回去。這件事一定要寫在
  * 畫面上，不能讓人設了之後發現它自己變回去——那比不給設更讓人不信任系統。
+ *
+ * ## 三個欄位，三條獨立的送出路徑 (Z166)
+ *
+ * 狀態、備註、指派各自只送自己那一個欄位。Z165 剛加備註的時候是讓它**順便把
+ * 現在的狀態一起送回去**，於是每打一次備註就等於重新宣告一次「把這個階段設
+ * 成已完成」：`completed_at` 被重蓋成今天、活動紀錄多一筆假的狀態變更、而介
+ * 面還跳一個「已完成」的提示。
  */
 
 export type StageCell = {
@@ -37,29 +44,52 @@ export type StageCell = {
   status: ProductionStageStatus
   progressPercent: number
   note: string
+  assigneeId: string | null
+}
+
+type Patch = {
+  state?: ProductionStageStatus
+  note?: string
+  assigneeId?: string | null
 }
 
 export function EpisodeStageBoard({
   projectId,
   episodeId,
   stages,
+  members,
   canWrite,
 }: {
   projectId: string
   episodeId: string
   stages: StageCell[]
+  /** 「指派給誰」的選項；`@/lib/members` 的 `studioMembers()`。 */
+  members: { id: string; name: string }[]
   canWrite: boolean
 }) {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState<string | null>(null)
 
-  async function change(
-    stage: ProductionStageKey,
-    state: ProductionStageStatus,
-    note?: string
-  ) {
-    if (busy) return
+  /**
+   * 送一個欄位。
+   *
+   * `patch` 只帶**真的要改的那一個**——API 那邊 `state` 是可選的，沒給就一個
+   * 時間戳都不會動。
+   */
+  async function send(stage: ProductionStageKey, patch: Patch, said: string) {
+    /*
+     * 上一個還在飛就擋下來，而且**要說出來**。
+     *
+     * 本來是 `if (busy) return`，沒有提示也沒有錯誤：在請求回來之前點進備註
+     * 框打字再失焦，整段輸入會被安靜丟掉，而輸入框裡還留著剛打的字，看起來
+     * 像存好了。
+     */
+    if (busy) {
+      toast.error('上一個還在存', '等一下再改這一個。')
+      return
+    }
+
     setBusy(stage)
     try {
       const response = await apiFetch(
@@ -67,15 +97,14 @@ export function EpisodeStageBoard({
         {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
-          // `note` 不給就是不動它——給空字串才是清掉。
-          body: JSON.stringify({ episodeId, stage, state, ...(note !== undefined ? { note } : {}) }),
+          body: JSON.stringify({ episodeId, stage, ...patch }),
         }
       )
       if (!response.ok) throw new Error(await readApiError(response))
 
       toast.success(
-        `${PRODUCTION_STAGE_LABEL[stage]}：${PRODUCTION_STAGE_STATUS_LABEL[state]}`,
-        state === 'completed' && !stageCompletionSticks(stage)
+        `${PRODUCTION_STAGE_LABEL[stage]}：${said}`,
+        patch.state === 'completed' && !stageCompletionSticks(stage)
           ? '小說的完成是從正文推導的——下一次存檔如果沒有「完」的標記，這裡會被改回去。'
           : undefined
       )
@@ -100,6 +129,7 @@ export function EpisodeStageBoard({
       <ul className="flex flex-col gap-1.5">
         {stages.map((cell) => {
           const measured = MEASURED_STAGES.includes(cell.key)
+          const assignee = members.find((member) => member.id === cell.assigneeId)
 
           return (
             <li
@@ -142,25 +172,30 @@ export function EpisodeStageBoard({
               )}
 
               {/*
-                備註 (Z165)。
-                這一條鏈本來三層都是死的：API 收 note、lib 寫 note、看板畫
-                note，中間缺讀取（`EpisodeStageCell` 沒有這一欄）也缺輸入。
-                補齊之後「等配音檔」「要等素材」這種話才有地方寫。
+                備註 (Z165/Z166)。
 
-                失焦才送，不是每打一個字送一次。
+                `key={cell.note}` 不是裝飾：這是個不受控的輸入框，而伺服器那
+                邊 zod 會 `.trim()`。打「　等配音　」存成「等配音」之後，React
+                不會更新已掛載節點的 `defaultValue`，DOM 裡還是帶空白的舊字
+                串——於是之後每一次失焦 `!==` 都成立，每一次都再送一發。加上
+                key，伺服器的值一變這個節點就重掛，`defaultValue` 重新生效。
               */}
               {canWrite ? (
                 <input
+                  key={cell.note}
                   defaultValue={cell.note}
                   placeholder="備註"
                   maxLength={1000}
+                  disabled={busy !== null}
                   aria-label={`${PRODUCTION_STAGE_LABEL[cell.key]} 的備註`}
                   onBlur={(event) => {
-                    if (event.target.value !== cell.note) {
-                      void change(cell.key, cell.status, event.target.value)
+                    // 比 trim 過的值——伺服器存進去的就是 trim 過的。
+                    const next = event.target.value.trim()
+                    if (next !== cell.note) {
+                      void send(cell.key, { note: next }, next ? '備註已存' : '備註已清掉')
                     }
                   }}
-                  className="min-w-0 flex-1 rounded bg-transparent px-1 py-0.5 text-[10px] text-ink-400 ring-1 ring-inset ring-transparent transition-colors hover:ring-stage-700 focus:bg-stage-850 focus:text-ink-100 focus:ring-accent-500 focus:outline-none"
+                  className="min-w-0 flex-1 rounded bg-transparent px-1 py-0.5 text-[10px] text-ink-400 ring-1 ring-inset ring-transparent transition-colors hover:ring-stage-700 focus:bg-stage-850 focus:text-ink-100 focus:ring-accent-500 focus:outline-none disabled:opacity-40"
                 />
               ) : (
                 cell.note && (
@@ -170,18 +205,54 @@ export function EpisodeStageBoard({
                 )
               )}
 
-              {canWrite && (
-                <span className="ml-auto flex items-center gap-1.5">
-                  {busy === cell.key && (
-                    <Loader2 aria-hidden className="size-3 animate-spin text-ink-600" />
-                  )}
+              <span className="ml-auto flex items-center gap-1.5">
+                {busy === cell.key && (
+                  <Loader2 aria-hidden className="size-3 animate-spin text-ink-600" />
+                )}
+
+                {/*
+                  指派給誰 (Z166)。
+
+                  Z165 把寫入接到 DB 就停下來了——兩支查詢都沒有 select 它，畫
+                  面上沒有任何地方看得到。指派完回 200、資料真的寫進去了，然後
+                  誰也看不見。這個下拉是那條鏈缺的最後一截。
+                */}
+                {canWrite ? (
+                  <select
+                    value={cell.assigneeId ?? ''}
+                    disabled={busy !== null}
+                    aria-label={`${PRODUCTION_STAGE_LABEL[cell.key]} 的負責人`}
+                    onChange={(event) => {
+                      const id = event.target.value || null
+                      const name = members.find((member) => member.id === id)?.name
+                      void send(
+                        cell.key,
+                        { assigneeId: id },
+                        name ? `指派給 ${name}` : '已取消指派'
+                      )
+                    }}
+                    className="h-6 max-w-24 rounded bg-stage-850 px-1 text-[10px] text-ink-300 ring-1 ring-inset ring-stage-700 focus:ring-2 focus:ring-accent-500 focus:outline-none disabled:opacity-40"
+                  >
+                    <option value="">未指派</option>
+                    {members.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  assignee && <span className="text-[10px] text-ink-500">{assignee.name}</span>
+                )}
+
+                {canWrite && (
                   <select
                     value={cell.status}
-                    disabled={busy === cell.key}
+                    disabled={busy !== null}
                     aria-label={`${PRODUCTION_STAGE_LABEL[cell.key]} 的狀態`}
-                    onChange={(event) =>
-                      void change(cell.key, event.target.value as ProductionStageStatus)
-                    }
+                    onChange={(event) => {
+                      const state = event.target.value as ProductionStageStatus
+                      void send(cell.key, { state }, PRODUCTION_STAGE_STATUS_LABEL[state])
+                    }}
                     className="h-6 rounded bg-stage-850 px-1 text-[10px] text-ink-300 ring-1 ring-inset ring-stage-700 focus:ring-2 focus:ring-accent-500 focus:outline-none disabled:opacity-40"
                   >
                     {PRODUCTION_STAGE_STATUSES.map((value) => (
@@ -190,8 +261,8 @@ export function EpisodeStageBoard({
                       </option>
                     ))}
                   </select>
-                </span>
-              )}
+                )}
+              </span>
             </li>
           )
         })}

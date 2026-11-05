@@ -507,13 +507,27 @@ export const assetUpdateSchema = z.object({
   episodeId: uuid.nullable().optional(),
 })
 
-export const stageUpdateSchema = z.object({
-  episodeId: uuid,
-  stage: z.enum(PRODUCTION_STAGE_KEYS),
-  state: z.enum(PRODUCTION_STAGE_STATUSES),
-  assigneeId: uuid.nullable().optional(),
-  note: z.string().trim().max(1000).optional(),
-})
+export const stageUpdateSchema = z
+  .object({
+    episodeId: uuid,
+    stage: z.enum(PRODUCTION_STAGE_KEYS),
+    /*
+     * 改狀態才給 (Z166).
+     *
+     * 本來是必填，於是備註輸入框只能把「現在的狀態」一起送回來——而那等於每
+     * 打一次備註就重新宣告一次「把這個階段設成已完成」：`completed_at` 被重
+     * 蓋成今天、活動紀錄多一筆假的狀態變更、介面跳一個「已完成」的提示。
+     */
+    state: z.enum(PRODUCTION_STAGE_STATUSES).optional(),
+    assigneeId: uuid.nullable().optional(),
+    note: z.string().trim().max(1000).optional(),
+  })
+  // 三個可改的欄位一個都沒給，是在要求什麼？擋下來，不要跑一次空的 update。
+  .refine(
+    (value) =>
+      value.state !== undefined || value.note !== undefined || value.assigneeId !== undefined,
+    { message: '沒有指定要改什麼' }
+  )
 
 export const aiRunSchema = z.object({
   /** 依這一集的小說生成（Z113）。正文由伺服器讀，不經過瀏覽器。 */

@@ -8,6 +8,7 @@ import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { assetPreviewUrl } from '@/lib/asset-url'
 import { episodeEditable, getEpisodeDetail } from '@/lib/episodes'
+import { studioMembers } from '@/lib/members'
 import { requireProjectPage } from '@/lib/project-access'
 import { toPercent } from '@/lib/production'
 
@@ -36,9 +37,11 @@ export default async function EpisodeDetailPage({ params }: Params) {
   const { projectId, episodeId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const [row, editable] = await Promise.all([
+  const [row, editable, members] = await Promise.all([
     getEpisodeDetail(project.id, episodeId),
     episodeEditable(project.id, episodeId),
+    // 階段的「指派給誰」要名字，不只是 id (Z166)。
+    studioMembers(),
   ])
 
   if (!row || !editable) notFound()
@@ -147,7 +150,9 @@ export default async function EpisodeDetailPage({ params }: Params) {
             status: cell.status,
             progressPercent: cell.progressPercent,
             note: cell.note,
+            assigneeId: cell.assigneeId,
           }))}
+          members={members}
           canWrite={canWrite}
         />
       </div>

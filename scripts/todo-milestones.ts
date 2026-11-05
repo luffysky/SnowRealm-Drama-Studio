@@ -145,6 +145,17 @@ function report(entries: Entry[], nav: string): number {
     (m) => ({ label: m[1]!, milestone: m[2]! })
   )
 
+  /*
+   * 沒有東西要比對的時候要說出來 (Z166).
+   *
+   * 側邊欄現在沒有任何項目掛徽章，於是這個區段什麼都不印——而一個什麼都不印
+   * 的檢查看起來就是「一切正常」，分不出「比對過沒問題」與「根本沒比對到東
+   * 西」。那正是這支腳本自己在說的「抓不到已知的壞例子就直接說工具壞了」。
+   */
+  if (navEntries.length === 0) {
+    console.log('  ·  側邊欄目前沒有任何項目掛里程碑徽章——沒有東西要比對。')
+  }
+
   for (const item of navEntries) {
     // 標題剛好等於側邊欄文字的那一條才算，避免模糊比對亂配。
     const match = entries.filter((e) => e.title === item.label)

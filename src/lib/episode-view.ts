@@ -46,6 +46,16 @@ export type EpisodeStageCell = {
    * 串。API 收 note、lib 寫 note、看板畫 note，中間就缺這一欄。
    */
   note: string
+  /**
+   * 誰負責這個階段 (Z166).
+   *
+   * Z165 把 `assignee_id` 的**寫入**接起來了——API 收、lib 寫、DB 真的存
+   * 進去——然後就停在那裡：兩支查詢都沒有 select 它，型別裡沒有這一欄，畫
+   * 面上沒有任何地方看得到。指派完回 200，然後沒有人看得見。
+   *
+   * 那是「收下、回報成功、靜默丟掉」的鏡像版，一樣糟：寫得進去、讀不出來。
+   */
+  assigneeId: string | null
 }
 
 export type EpisodeRow = {

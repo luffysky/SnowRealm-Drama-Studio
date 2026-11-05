@@ -36,7 +36,7 @@ export function ImagePicker({
   projectId: string
   assetId: string | null
   onChange: (assetId: string | null) => void
-  /** `wide` 16:10 for covers, `portrait` 2:3 for book covers and people. */
+  /** `wide` 16:9 for covers, `portrait` 2:3 for book covers and people. */
   shape?: 'wide' | 'portrait' | 'square'
   label?: string
   hint?: string

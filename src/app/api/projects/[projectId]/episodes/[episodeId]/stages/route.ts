@@ -33,7 +33,8 @@ export const PATCH = handle(
       projectId,
       episodeId,
       stage: input.stage,
-      state: input.state,
+      // 只改備註／只改指派時 `state` 不給——給了會重蓋 `completed_at` (Z166)。
+      ...(input.state !== undefined ? { state: input.state } : {}),
       ...(input.note !== undefined ? { note: input.note } : {}),
       // 階段真的有 assignee 欄位 (Z165)——收下就要用，不要靜默丟掉。
       ...(input.assigneeId !== undefined ? { assigneeId: input.assigneeId } : {}),
