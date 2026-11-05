@@ -28,6 +28,7 @@
     "db:verify": "tsx scripts/db-verify.ts",
     "check:links": "tsx scripts/check-links.ts",
     "check:api": "tsx scripts/check-api-wiring.ts",
+    "check:ai": "tsx scripts/check-ai-tasks.ts",
     "check": "npm run typecheck && npm run lint && npm run check:links && npm run check:api && npm run test"
   },
   "dependencies": {
