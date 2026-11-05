@@ -1,6 +1,16 @@
 'use client'
 
-import { Crown, Loader2, Network, Pencil, Plus, Search, Trash2, UserRound } from 'lucide-react'
+import {
+  Crown,
+  Loader2,
+  Network,
+  Pencil,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  UserRound,
+} from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -648,6 +658,16 @@ function CharacterFields({
         />
       )}
 
+      {/*
+       * 角色設計與定妝 (Z70).
+       *
+       * 這個 AI 任務的 prompt、定價、佇列一直都在，介面上沒有地方按得到。
+       * 放在外觀分頁，因為它產出的四個欄位有三個在這裡。
+       */}
+      {tab === 'appearance' && (
+        <DesignButton projectId={projectId} characterId={character.id} />
+      )}
+
       {fields.map((field) => (
         <label key={field.key} className="flex flex-col gap-1">
           <span className="flex items-baseline gap-2 text-[11px] text-ink-400">
@@ -676,6 +696,62 @@ function CharacterFields({
       ))}
 
       <p className="text-[10px] text-ink-700">離開欄位時自動儲存。</p>
+    </div>
+  )
+}
+
+/**
+ * 叫 AI 寫一版外觀與聲線 (Z70).
+ *
+ * 只排隊，不直接寫。產出停在 AI 製片中心的「待確認」，人按了採用才會進
+ * 角色——而採用**只填原本空著的欄位**：角色設定沒有版本歷史，蓋掉就是真的
+ * 沒了，而外型與性格正是作者最可能自己寫過的地方。
+ */
+function DesignButton({ projectId, characterId }: { projectId: string; characterId: string }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+
+  async function run() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/characters/${characterId}/design`,
+        { method: 'POST' }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      toast.success(
+        '排進去了',
+        '產出會停在 AI 製片中心的「待確認」，採用之後只會填空著的欄位，不會蓋掉你寫的。'
+      )
+      // 催一下 worker，不等它回應。
+      void apiFetch('/api/ai/worker', { method: 'POST', keepalive: true }).catch(() => {})
+    } catch (cause) {
+      toast.error('排不進去', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1 border-t border-stage-800 pt-3">
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy}
+        className="tap inline-flex w-fit items-center gap-1.5 rounded-lg bg-stage-800 px-3 py-1.5 text-[11px] text-ink-200 transition-colors hover:text-ink-50 disabled:opacity-40"
+      >
+        {busy ? (
+          <Loader2 aria-hidden className="size-3.5 animate-spin" />
+        ) : (
+          <Sparkles aria-hidden className="size-3.5" />
+        )}
+        {busy ? '排入中…' : '讓 AI 寫一版外觀與聲線'}
+      </button>
+      <p className="text-[10px] leading-relaxed text-ink-700">
+        會參考這個角色現有的設定與世界觀。採用時只填空欄位。
+      </p>
     </div>
   )
 }

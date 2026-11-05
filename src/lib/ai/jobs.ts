@@ -329,6 +329,21 @@ export async function applyCandidate(input: {
     return { job: done ?? job, versionId: null }
   }
 
+  /*
+   * 角色設計寫的是角色欄位，不是正文 (Z70).
+   *
+   * 跟上面那個分支同一個理由：沒有它的話，採用會走到下面的
+   * `applyToDocument`，而這個任務沒有 document 目標——於是任務被標成已採用、
+   * 角色一個字都沒變。那正是這裡要避免的那種「說有寫入其實沒有」。
+   */
+  if (job.targetType === 'character') {
+    const { applyCharacterDesign } = await import('@/lib/character-design')
+    await applyCharacterDesign({ jobId: job.id, user: input.user })
+
+    const [done] = await db.select().from(aiJobs).where(eq(aiJobs.id, job.id)).limit(1)
+    return { job: done ?? job, versionId: null }
+  }
+
   let versionId: string | null = null
 
   // Only document targets are written automatically; other target types are

@@ -58,8 +58,19 @@ const TASK_INSTRUCTIONS: Record<AiTaskKind, string> = {
   WORLD_GENERATE: '依分類擴寫世界觀設定條目，內容需與既有設定相容，並標示與哪些既有條目相關。',
   WORLD_CONSISTENCY:
     '檢查提供的內容與既有世界觀設定是否矛盾。逐條輸出：衝突位置、引用原文、衝突的設定條目、可信度。只報告，不要自行修正正式設定。',
+  /*
+   * 改成結構化輸出 (Z70).
+   *
+   * 本來回自由文字，於是「外觀提示詞與聲線建議」混在一段散文裡——誰也分不
+   * 出哪一句該寫進 `visualPrompt`、哪一句該寫進 `voiceNote`，所以這個任務
+   * 產出之後**沒有任何地方能套用它**。
+   */
   CHARACTER_DESIGN:
-    '依人物設定撰寫外觀提示詞與聲線建議。外觀提示詞需具體到可直接用於生圖，並確保跨集一致性。',
+    '依人物設定撰寫外觀與聲線。外觀提示詞需具體到可直接用於生圖，並確保跨集一致性。' +
+    '只回一個 JSON 物件，四個欄位皆為字串：' +
+    'appearance（外型、服裝、髮型，中文敘述）、visualPrompt（定妝提示詞）、' +
+    'negativePrompt（負面提示詞）、voiceNote（聲線建議）。' +
+    '沒有把握的欄位給空字串，不要編。',
   STORYBOARD_GENERATE:
     '依劇本產生分鏡鏡頭表。每個鏡頭需包含：場次、秒數、景別、運鏡、畫面描述、台詞、生圖提示詞。所有鏡頭秒數加總必須落在目標片長範圍內。',
   ASSET_GENERATE: '依需求撰寫素材生成提示詞，包含正向提示詞與負向提示詞。',
@@ -171,6 +182,7 @@ export const TASK_EFFORT: Record<AiTaskKind, 'low' | 'medium' | 'high'> = {
 }
 
 export const STRUCTURED_TASKS: ReadonlySet<AiTaskKind> = new Set<AiTaskKind>([
+  'CHARACTER_DESIGN',
   'DIALOGUE_ATTRIBUTE',
   'STORYBOARD_GENERATE',
   'WORLD_CONSISTENCY',

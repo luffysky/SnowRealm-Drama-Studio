@@ -81,6 +81,11 @@ const DEDICATED: { kind: string; where: string; why: string }[] = [
     where: 'AudiobookPanel.tsx',
     why: '「產生有聲書」按鈕 → /audiobook',
   },
+  {
+    kind: 'CHARACTER_DESIGN',
+    where: 'CharacterBrowser.tsx',
+    why: '角色頁外觀分頁「讓 AI 寫一版外觀與聲線」→ /characters/*/design',
+  },
 ]
 
 /** 介面檔：使用者看得到的畫面，不含 api 與 lib。 */
