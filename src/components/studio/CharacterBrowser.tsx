@@ -10,6 +10,7 @@ import {
   Sparkles,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
@@ -20,6 +21,7 @@ import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import {
+  CHARACTER_PORTRAIT_SLOT,
   CHARACTER_TIER_LABEL,
   CHARACTER_TIERS,
   type CharacterTierValue,
@@ -57,7 +59,10 @@ export type CharacterItem = {
   voiceId: string
   voiceStyle: string
   voiceNote: string
+  /** 定妝照——`portraits` 裡被選中的那一張。 */
   keyVisualAssetId: string | null
+  /** 這個角色的所有圖 (Z167)。上傳順序。 */
+  portraits: { assetId: string; label: string }[]
   episodeCount: number
   novelEpisodeCount: number
   scriptEpisodeCount: number
@@ -279,7 +284,7 @@ export function CharacterBrowser({
                 one at all: the column, the validator and this renderer all
                 existed, and the PATCH silently dropped the field.
               */}
-              <PortraitPicker
+              <PortraitGallery
                 key={selected.id}
                 projectId={projectId}
                 character={selected}
@@ -1001,16 +1006,28 @@ function CreateDialog({
 }
 
 /**
- * 角色定妝照 — the portrait, with upload attached.
+ * 角色圖庫 — 多張圖，其中一張是定妝照 (Z167).
  *
- * Saved immediately rather than batched into a form: there is no form here,
- * the rest of this panel saves on blur, and an image that uploads and then
- * waits for a 儲存 button is an image people assume is already saved.
+ * 本來只有**一個位子**：上傳第二張就把第一張頂掉，而被頂掉的那一張還留在素
+ * 材庫裡、沒有任何地方看得到它曾經屬於這個角色。而角色設計本來就是「畫幾版
+ * 再挑一版」——只給一個位子，等於要人在上傳的那一刻就決定好。
  *
- * The asset is linked to the character as well as written to
- * `key_visual_asset_id`, so deleting it later can tell what still points at it.
+ * ## 不用改 schema
+ *
+ * `asset_links` 早就有 `entity_type`/`entity_id`/`slot`，而上傳時帶 `linkTo`
+ * 就會建那一列。所以「多張圖」本來就存得下，缺的一直只是把它們列出來。
+ *
+ * ## 定妝照不只是排第一
+ *
+ * 分鏡與 AI 生圖讀的是 `key_visual_asset_id`，所以它要標出來，換掉的時候也
+ * 要說一聲。它永遠是圖庫裡的一張（`updateCharacter` 會補上連結），而移掉它
+ * 的時候由最早的那一張遞補——留一個「有圖但沒有定妝照」的角色，等於安靜地
+ * 讓那個角色失去樣貌參考。
+ *
+ * 存檔是立刻的，不是按一顆「儲存」：這個面板其他欄位都是失焦即存，而一張上
+ * 傳完才等按鈕的圖，是一張所有人都以為已經存好的圖。
  */
-function PortraitPicker({
+function PortraitGallery({
   projectId,
   character,
   canWrite,
@@ -1021,42 +1038,190 @@ function PortraitPicker({
 }) {
   const router = useRouter()
   const toast = useToast()
-  const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  async function commit(assetId: string | null) {
-    setSaving(true)
+  const primary = character.keyVisualAssetId
+  const portraits = character.portraits
+
+  /*
+   * 只有一張、而且它就是定妝照的時候不畫縮圖列——上面那個大預覽就是它，再畫
+   * 一次只是重複。但「只有一張、卻不是定妝照」要畫，不然沒有任何辦法把它選
+   * 起來。
+   */
+  const showStrip =
+    portraits.length > 1 || (portraits.length === 1 && portraits[0]!.assetId !== primary)
+
+  async function run(
+    failed: string,
+    call: () => Promise<Response>,
+    said: (body: unknown) => string
+  ) {
+    if (busy) return
+    setBusy(true)
     try {
-      const response = await apiFetch(
-        `/api/projects/${projectId}/characters/${character.id}`,
-        {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ keyVisualAssetId: assetId }),
-        }
-      )
+      const response = await call()
       if (!response.ok) throw new Error(await readApiError(response))
-
-      toast.success(assetId ? '定妝照已更新' : '已移除定妝照')
+      const body: unknown = await response.json().catch(() => null)
+      toast.success(said(body))
       router.refresh()
     } catch (error) {
-      toast.error('定妝照儲存失敗', error instanceof Error ? error.message : undefined)
+      toast.error(failed, error instanceof Error ? error.message : undefined)
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
   }
 
-  if (!canWrite) return <Portrait character={character} size="lg" />
+  function makePrimary(assetId: string) {
+    const name = portraits.find((item) => item.assetId === assetId)?.label
+    return run(
+      '定妝照換不了',
+      () =>
+        apiFetch(`/api/projects/${projectId}/characters/${character.id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ keyVisualAssetId: assetId }),
+        }),
+      () => (name ? `定妝照換成「${name}」` : '定妝照已更新')
+    )
+  }
+
+  function unlink(assetId: string) {
+    const name = portraits.find((item) => item.assetId === assetId)?.label
+    return run(
+      '移除失敗',
+      () =>
+        apiFetch(`/api/projects/${projectId}/characters/${character.id}/portraits/${assetId}`, {
+          method: 'DELETE',
+        }),
+      (body) => {
+        /*
+         * 遞補了就要說出來。
+         *
+         * 移掉的是定妝照時，最早的那一張會自動接上——分鏡與 AI 生圖下一次讀
+         * 到的就是新的那一張。不說的話，使用者只知道刪了一張圖，不知道這個角
+         * 色的樣貌參考換人了。
+         */
+        const info = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+        const wasPrimary = info.wasPrimary === true
+        const promoted = typeof info.promotedTo === 'string' ? info.promotedTo : null
+
+        if (!wasPrimary) return name ? `已移除「${name}」` : '已從這個角色移除'
+        if (!promoted) return '定妝照已移除——這個角色現在沒有樣貌參考了'
+        const next = portraits.find((item) => item.assetId === promoted)?.label
+        return next ? `已移除，定妝照改用「${next}」` : '已移除，定妝照由另一張遞補'
+      }
+    )
+  }
+
+  const strip = showStrip && (
+    <ul className="flex max-w-56 flex-wrap gap-1.5">
+      {portraits.map((item) => {
+        const isPrimary = item.assetId === primary
+        return (
+          <li key={item.assetId} className="relative">
+            <button
+              type="button"
+              disabled={busy || isPrimary || !canWrite}
+              onClick={() => void makePrimary(item.assetId)}
+              title={
+                isPrimary
+                  ? `${item.label}（定妝照）`
+                  : canWrite
+                    ? `把「${item.label}」設為定妝照`
+                    : item.label
+              }
+              className={cn(
+                'block size-11 overflow-hidden rounded-md ring-1 transition-colors',
+                isPrimary ? 'ring-2 ring-accent-500' : 'ring-stage-700 enabled:hover:ring-stage-500',
+                busy && 'opacity-50'
+              )}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={assetPreviewUrl(item.assetId)}
+                alt={item.label}
+                loading="lazy"
+                decoding="async"
+                className="size-full object-cover"
+              />
+            </button>
+
+            {isPrimary && (
+              <span className="pointer-events-none absolute -bottom-1 left-0 rounded bg-accent-600 px-1 text-[8px] leading-tight text-white">
+                定妝
+              </span>
+            )}
+
+            {canWrite && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void unlink(item.assetId)}
+                aria-label={`把「${item.label}」從這個角色移除`}
+                className="absolute -top-1 -right-1 grid size-4 place-items-center rounded-full bg-stage-950 text-ink-400 ring-1 ring-stage-700 transition-colors hover:text-rose-300"
+              >
+                <X aria-hidden className="size-2.5" />
+              </button>
+            )}
+          </li>
+        )
+      })}
+    </ul>
+  )
+
+  if (!canWrite) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Portrait character={character} size="lg" />
+        {strip}
+      </div>
+    )
+  }
 
   return (
-    <ImagePicker
-      projectId={projectId}
-      assetId={character.keyVisualAssetId}
-      onChange={(assetId) => void commit(assetId)}
-      shape="portrait"
-      label="定妝照"
-      hint="分鏡與 AI 生圖會拿這張當角色的樣貌參考。直式、臉部清楚最好。"
-      linkTo={{ entityType: 'character', entityId: character.id, slot: 'key_visual' }}
-      disabled={saving}
-    />
+    <div className="flex min-w-0 flex-col gap-2">
+      {/*
+        大預覽就是定妝照，而上傳是**新增**一張，不是換掉這一張。
+
+        `key` 帶張數：上傳完成後這個元件要重掛，不然 `ImagePicker` 內部還留著
+        剛傳完那一筆的預覽，看起來像是「換掉了」。
+      */}
+      <ImagePicker
+        key={portraits.length}
+        projectId={projectId}
+        assetId={primary}
+        onChange={(assetId) => {
+          if (assetId) {
+            /*
+             * 剛傳完的那一張已經被 `linkTo` 掛上去了。
+             *
+             * 還沒有定妝照的話就讓它當——第一張圖不該還要再點一次才算定妝。
+             * 已經有了就只是加進圖庫，不動定妝照：覆蓋掉人家挑好的那一張，正
+             * 是這個功能要修掉的毛病。
+             */
+            if (primary) {
+              toast.success('已加入圖庫', '要換定妝照的話點下面的縮圖。')
+              router.refresh()
+            } else {
+              void makePrimary(assetId)
+            }
+          } else if (primary) {
+            // ImagePicker 的「移除」指的是這個大預覽，也就是定妝照本人。
+            void unlink(primary)
+          }
+        }}
+        shape="portrait"
+        label="角色圖"
+        hint="一個角色可以放多張；其中一張設為定妝照——分鏡與 AI 生圖讀的就是那一張。直式、臉部清楚最好。"
+        linkTo={{
+          entityType: 'character',
+          entityId: character.id,
+          slot: CHARACTER_PORTRAIT_SLOT,
+        }}
+        disabled={busy}
+      />
+
+      {strip}
+    </div>
   )
 }

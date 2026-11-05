@@ -585,3 +585,14 @@ export const NOTIFICATION_KIND_LABEL: Record<NotificationKindValue, string> = {
   MENTION: '提及你',
   SYSTEM: '系統訊息',
 }
+
+/**
+ * 角色圖掛在 `asset_links` 的哪一個 slot (Z167).
+ *
+ * 上傳時寫、查詢時讀、UI 也要帶同一個字串——寫成常數而不是三個地方各打一次
+ * 'key_visual'：打錯一個地方的結果是圖上傳成功，而圖庫裡看不到它。
+ *
+ * 住在 constants 而不是 `@/lib/characters`，因為那個檔案碰 `@/db`——用戶端
+ * 元件一 import 就建置失敗（見 `npm run check:client`）。
+ */
+export const CHARACTER_PORTRAIT_SLOT = 'key_visual'

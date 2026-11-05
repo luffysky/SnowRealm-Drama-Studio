@@ -1,9 +1,16 @@
 import { and, asc, count, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { assets, characterRelationships, characters, episodeCharacters, episodes } from '@/db/schema'
+import {
+  assetLinks,
+  assets,
+  characterRelationships,
+  characters,
+  episodeCharacters,
+  episodes,
+} from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
-import type { CharacterTierValue } from '@/lib/constants'
+import { CHARACTER_PORTRAIT_SLOT, type CharacterTierValue } from '@/lib/constants'
 
 /**
  * 角色資料庫 (designs 10, 11).
@@ -55,8 +62,23 @@ export type RelationshipRow = {
   toEpisodeNumber: number | null
 }
 
+/**
+ * 一張角色圖 (Z167).
+ *
+ * 一個角色可以有很多張；`characters.key_visual_asset_id` 指的是其中被選為
+ * 定妝照的那一張。
+ */
+export type CharacterPortrait = {
+  assetId: string
+  /** 顯示用；素材的 `title`，沒設就用原始檔名。 */
+  label: string
+}
+
+/** 列表用的角色，多帶一份圖庫。`updateCharacter` 回的是不帶圖的 `CharacterRow`。 */
+export type CharacterListRow = CharacterRow & { portraits: CharacterPortrait[] }
+
 export type CharacterOverview = {
-  characters: CharacterRow[]
+  characters: CharacterListRow[]
   relationships: RelationshipRow[]
   countsByTier: Record<string, number>
   total: number
@@ -117,7 +139,7 @@ export async function getCharacters(
 
   const ids = rows.map((r) => r.id)
 
-  const [appearances, relationshipRows] = await Promise.all([
+  const [appearances, relationshipRows, portraitRows] = await Promise.all([
     ids.length
       ? db
           .select({
@@ -152,7 +174,47 @@ export async function getCharacters(
       })
       .from(characterRelationships)
       .where(eq(characterRelationships.projectId, projectId)),
+
+    /*
+     * 角色圖 (Z167).
+     *
+     * 一次撈完這一頁所有角色的圖，不是每個角色一支查詢。`asset_links` 本來
+     * 就有 `entity_type`/`entity_id`/`slot`，所以多圖不需要任何 schema 改
+     * 動——缺的一直只是「列出來」這件事。
+     *
+     * 只算上傳完成且沒被軟刪的：一張還在上傳的圖放進圖庫會變成破圖，而刪掉
+     * 的圖留在圖庫裡會讓人以為它還在。
+     */
+    ids.length
+      ? db
+          .select({
+            characterId: assetLinks.entityId,
+            assetId: assets.id,
+            title: assets.title,
+            name: assets.name,
+          })
+          .from(assetLinks)
+          .innerJoin(assets, eq(assets.id, assetLinks.assetId))
+          .where(
+            and(
+              eq(assetLinks.entityType, 'character'),
+              inArray(assetLinks.entityId, ids),
+              eq(assetLinks.slot, CHARACTER_PORTRAIT_SLOT),
+              eq(assets.uploadStatus, 'COMPLETED'),
+              isNull(assets.deletedAt)
+            )
+          )
+          // 上傳順序。`sort_order` 全專案沒有人寫，拿它排序等於沒排。
+          .orderBy(asc(assets.createdAt))
+      : Promise.resolve([]),
   ])
+
+  const portraitsBy = new Map<string, CharacterPortrait[]>()
+  for (const row of portraitRows) {
+    const list = portraitsBy.get(row.characterId) ?? []
+    list.push({ assetId: row.assetId, label: row.title || row.name })
+    portraitsBy.set(row.characterId, list)
+  }
 
   const appearancesBy = new Map(appearances.map((a) => [a.characterId, a]))
   const nameOf = new Map(rows.map((r) => [r.id, r.name]))
@@ -166,6 +228,7 @@ export async function getCharacters(
       episodeCount: Number(appearancesBy.get(row.id)?.n ?? 0),
       novelEpisodeCount: appearancesBy.get(row.id)?.novel ?? 0,
       scriptEpisodeCount: appearancesBy.get(row.id)?.script ?? 0,
+      portraits: portraitsBy.get(row.id) ?? [],
     })),
     relationships: relationshipRows.map((row) => ({
       ...row,
@@ -299,6 +362,28 @@ export async function updateCharacter(input: {
 
   if (!updated) throw ApiError.notFound('找不到這個角色')
 
+  /*
+   * 被選為定妝照的那一張，一定要在圖庫裡 (Z167).
+   *
+   * 這是這個功能唯一需要維持的不變式。上傳走 `linkTo` 會自己建連結，但「把
+   * 素材庫裡既有的一張圖設成定妝照」這條路不會——少了這一步，那張圖會是定
+   * 妝照卻不出現在縮圖列，於是沒有任何辦法把它換掉。
+   *
+   * `isPrimary` 刻意不寫：哪一張是定妝照只有 `key_visual_asset_id` 說得上
+   * 話。兩個欄位說同一件事，遲早會對不上。
+   */
+  if (input.patch.keyVisualAssetId) {
+    await db
+      .insert(assetLinks)
+      .values({
+        assetId: input.patch.keyVisualAssetId,
+        entityType: 'character',
+        entityId: input.characterId,
+        slot: CHARACTER_PORTRAIT_SLOT,
+      })
+      .onConflictDoNothing()
+  }
+
   const [appearance] = await db
     .select({
       n: count(),
@@ -314,6 +399,77 @@ export async function updateCharacter(input: {
     novelEpisodeCount: appearance?.novel ?? 0,
     scriptEpisodeCount: appearance?.script ?? 0,
   }
+}
+
+/**
+ * 把一張圖從角色身上移掉 (Z167).
+ *
+ * 只解除連結，**不刪素材**：檔案留在素材庫。角色圖跟其他素材一樣可能被別的
+ * 地方引用（分鏡的參考圖、對話附件），而「從這個角色移除」不該連帶把別人正
+ * 在用的檔案刪掉。要真的刪檔案有素材中心那條路，它會先檢查引用。
+ *
+ * 移掉的剛好是定妝照的時候，把最早的那一張遞補上去，並回報遞補到哪一張。
+ * 留一個「有圖但沒有定妝照」的角色更糟：分鏡與 AI 生圖讀的就是定妝照，那會
+ * 安靜地變成沒有樣貌參考。
+ */
+export async function unlinkCharacterPortrait(input: {
+  projectId: string
+  characterId: string
+  assetId: string
+}): Promise<{ promotedTo: string | null; wasPrimary: boolean }> {
+  const [character] = await db
+    .select({ id: characters.id, keyVisualAssetId: characters.keyVisualAssetId })
+    .from(characters)
+    .where(
+      and(
+        eq(characters.id, input.characterId),
+        eq(characters.projectId, input.projectId),
+        isNull(characters.deletedAt)
+      )
+    )
+    .limit(1)
+
+  if (!character) throw ApiError.notFound('找不到這個角色')
+
+  const removed = await db
+    .delete(assetLinks)
+    .where(
+      and(
+        eq(assetLinks.assetId, input.assetId),
+        eq(assetLinks.entityType, 'character'),
+        eq(assetLinks.entityId, input.characterId),
+        eq(assetLinks.slot, CHARACTER_PORTRAIT_SLOT)
+      )
+    )
+    .returning({ id: assetLinks.id })
+
+  if (removed.length === 0) throw ApiError.notFound('這張圖不在這個角色的圖庫裡')
+
+  const wasPrimary = character.keyVisualAssetId === input.assetId
+  if (!wasPrimary) return { promotedTo: null, wasPrimary: false }
+
+  const [next] = await db
+    .select({ assetId: assets.id })
+    .from(assetLinks)
+    .innerJoin(assets, eq(assets.id, assetLinks.assetId))
+    .where(
+      and(
+        eq(assetLinks.entityType, 'character'),
+        eq(assetLinks.entityId, input.characterId),
+        eq(assetLinks.slot, CHARACTER_PORTRAIT_SLOT),
+        eq(assets.uploadStatus, 'COMPLETED'),
+        isNull(assets.deletedAt)
+      )
+    )
+    .orderBy(asc(assets.createdAt))
+    .limit(1)
+
+  await db
+    .update(characters)
+    .set({ keyVisualAssetId: next?.assetId ?? null, updatedAt: new Date() })
+    .where(eq(characters.id, input.characterId))
+
+  return { promotedTo: next?.assetId ?? null, wasPrimary: true }
 }
 
 /** Soft delete, so a cut character can come back without losing their notes. */
