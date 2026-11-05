@@ -90,7 +90,21 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'read_chapter',
-    description: '讀一集的小說正文。要先用 list_episodes 拿到 episodeId。',
+    /*
+     * 把額度寫進工具說明裡 (Z101).
+     *
+     * 模型看不到 `READ_BUDGET_CHARS`，它只看得到工具說明。不講的話它會一集
+     * 一集照讀，讀到額度用完才收到「這是摘要」——那時候錢已經花掉了，而且
+     * 它拿到的是一堆半截的章節。
+     *
+     * 講出來之後它就能自己排序：先讀最相關的那幾集。這比我們在程式裡猜
+     * 「哪幾集算相鄰」準，因為只有它知道這一輪在問什麼。
+     */
+    description:
+      '讀一集的小說正文。要先用 list_episodes 拿到 episodeId。' +
+      '每一輪對話的正文讀取額度有限（約三萬字，大約四集），' +
+      '**先讀最相關的那幾集**；額度用完之後只會拿到摘要與開頭。' +
+      '只需要知道劇情走向的話，list_episodes 的大綱通常就夠，不必讀全文。',
     input_schema: {
       type: 'object',
       properties: { episodeId: { type: 'string' } },
@@ -157,10 +171,101 @@ const TOOLS: Anthropic.Tool[] = [
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * 一輪助理對話最多讀多少字正文 (Z101).
+ *
+ * 沒有這個上限的時候，`read_chapter` 回傳**整集的正文，沒有任何節制**——
+ * 也就是說這一輪花多少錢是模型決定的，不是我們決定的。
+ *
+ * ## 真正的乘數不是字數，是回合
+ *
+ * 每一個工具回合都會把**整段對話重送一次**。所以第一回合讀進來的四萬字，
+ * 在第二、三、四、五、六回合都會再付一次錢。實測那筆 `/outline` 就是這樣：
+ * 三集一共 17,724 字，帳單 $0.42——以 opus-5-5 的 $4/M 算，單讀一次只要
+ * 約 $0.07，差距全在重送。
+ *
+ * 所以上限要看的是「讀進對話裡的總量」，而不是「單次回傳多大」。
+ *
+ * ## 三萬字是怎麼來的
+ *
+ * 這部小說一集約 7,400 字，所以三萬字大約是四集。中文大致一字一 token，
+ * 最壞情況（六個回合都重送）約 $0.72。那是一輪對話的天花板，不是常態。
+ *
+ * 超過之後**不是沉默地截斷**：回傳摘要加開頭，而且明講這是摘要。模型如果
+ * 以為自己讀完了整章，它會很有信心地總結一篇它只看了四分之一的東西——那
+ * 比直接說「讀不到」糟糕得多。
+ */
+const READ_BUDGET_CHARS = 30_000
+
+/** 超出預算時，除了摘要還附多少開頭。 */
+const EXCERPT_CHARS = 1_200
+
+export type ReadBudget = {
+  /** 還可以讀幾個字。 */
+  remaining: number
+  /** 已經讀了幾個字，用來說明。 */
+  spent: number
+  /** 有幾章因為超過預算只拿到摘要。 */
+  trimmed: number
+}
+
+export function newReadBudget(limit = READ_BUDGET_CHARS): ReadBudget {
+  return { remaining: limit, spent: 0, trimmed: 0 }
+}
+
+/**
+ * 一章的正文，照預算給全文或給摘要。
+ *
+ * 抽成純函式是為了**測得到**：預算這種東西的錯法是「看起來有在限制、實際
+ * 上沒有」，而那在真的跑一輪對話時完全看不出來——帳單要到月底才說話。
+ *
+ * `budget` 會被就地改動。這是刻意的：同一輪裡每一次讀取都從同一份額度扣，
+ * 各自一份的話模型多叫幾次就繞過去了。
+ */
+export function chapterForModel(input: {
+  heading: string
+  body: string
+  summary: string
+  budget: ReadBudget
+  excerptChars?: number
+}): string {
+  const { heading, body, summary, budget } = input
+  const excerptChars = input.excerptChars ?? EXCERPT_CHARS
+
+  if (body.length <= budget.remaining) {
+    budget.remaining -= body.length
+    budget.spent += body.length
+    return `${heading}\n${body}`
+  }
+
+  /*
+   * 超出預算：給摘要加開頭，**而且明說**。
+   *
+   * 安靜地截斷是這裡最危險的做法——模型若以為自己讀完了整章，它會很有信心
+   * 地總結一篇只看了四分之一的東西，而那個錯誤沒有任何跡象。
+   */
+  budget.trimmed += 1
+
+  const excerpt = body.slice(0, excerptChars)
+  budget.spent += excerpt.length
+  budget.remaining = 0
+
+  const trimmed = summary.trim()
+
+  return (
+    `${heading}\n` +
+    `［這一章沒有完整給你：本輪讀取額度用完了。` +
+    `全章 ${body.length} 字，下面只有${trimmed ? '摘要與' : ''}開頭 ${excerpt.length} 字。` +
+    `需要完整內容請分幾輪讀，或直接說要讀哪一段。］\n` +
+    (trimmed ? `摘要：${trimmed}\n` : '') +
+    `開頭：${excerpt}…`
+  )
+}
+
 async function runTool(
   name: string,
   input: Record<string, unknown>,
-  ctx: { conversationId: string }
+  ctx: { conversationId: string; budget: ReadBudget }
 ): Promise<ToolResult> {
   switch (name) {
     case 'list_projects': {
@@ -240,6 +345,7 @@ async function runTool(
           chapterId: chapters.id,
           title: chapters.title,
           content: chapters.content,
+          summary: chapters.summary,
           number: episodes.number,
           episodeTitle: episodes.title,
         })
@@ -258,14 +364,23 @@ async function runTool(
 
       if (rows.length === 0) return { text: '這一集還沒有正文。' }
 
-      return {
-        text: rows
-          .map(
-            (r) =>
-              `【章節 id=${r.chapterId}】${r.title || '未命名'}\n${stripHtml(r.content)}`
-          )
-          .join('\n\n'),
-      }
+      /*
+       * 一章一章地從預算裡扣 (Z101).
+       *
+       * 扣得完就給全文；扣不完就給摘要加開頭，**而且明說這是摘要**。
+       * 安靜地截斷是這裡最危險的做法——模型若以為自己讀完了整章，它會很有
+       * 信心地總結一篇只看了四分之一的東西，而那個錯誤沒有任何跡象。
+       */
+      const parts = rows.map((row) =>
+        chapterForModel({
+          heading: `【章節 id=${row.chapterId}】${row.title || '未命名'}`,
+          body: stripHtml(row.content),
+          summary: row.summary ?? '',
+          budget: ctx.budget,
+        })
+      )
+
+      return { text: parts.join('\n\n') }
     }
 
     case 'list_characters': {
@@ -564,6 +679,14 @@ export async function runAssistant(input: {
   let outputTokens = 0
   let reply = ''
 
+  /*
+   * 整輪共用一份讀取預算 (Z101).
+   *
+   * 共用是重點。每個工具呼叫各自一份的話，模型只要多叫幾次就繞過去了——
+   * 而這個上限存在的理由正是「這一輪花多少錢不該由模型決定」。
+   */
+  const budget = newReadBudget()
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
     const response = await client.messages.create({
       model: DEFAULT_MODEL,
@@ -600,6 +723,7 @@ export async function runAssistant(input: {
     for (const use of toolUses) {
       const outcome = await runTool(use.name, use.input as Record<string, unknown>, {
         conversationId: input.conversationId,
+        budget,
       })
 
       if (outcome.proposal) pending.push(outcome.proposal)
