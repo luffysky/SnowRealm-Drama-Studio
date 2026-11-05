@@ -271,4 +271,65 @@ describe.skipIf(!ready)('卷', () => {
     expect(main!.firstNumber).not.toBeNull()
     expect(main!.lastNumber).toBeGreaterThanOrEqual(main!.firstNumber!)
   })
+
+  /**
+   * 集號在**作品**裡唯一，不是在卷裡唯一 (Z148).
+   *
+   * 原本只有 `(arc_id, number)` 的唯一約束。在每部作品只有一卷的時候那跟
+   * 「作品內唯一」是同一件事——但這個檔案測的正是「卷可以新增、集數可以
+   * 搬動」，而那一刻起兩者就分家了：**卷一有 EP007、卷二再建一個 EP007，
+   * 資料庫本來會收下。**
+   *
+   * 正文裡每一句「第 007 集」、小說、劇本、分鏡、有聲書全部指這個號碼。
+   * 兩集同號之後那些參照沒有答案，而且**不會有任何地方報錯**——查詢照樣
+   * 回傳，只是回傳兩筆。
+   *
+   * 擋它的是資料庫的部分唯一索引（migration 0030），不是應用層的檢查。
+   * 寫成測試是因為索引是可以被下一個 migration 拿掉的。
+   */
+  it('另一卷不能用已經存在的集號', async () => {
+    const { and, eq, isNull } = await import('drizzle-orm')
+
+    const [existing] = await db
+      .select({ number: schema.episodes.number })
+      .from(schema.episodes)
+      .where(and(eq(schema.episodes.projectId, projectId), isNull(schema.episodes.deletedAt)))
+      .limit(1)
+
+    // 沒有集數的話這個測試什麼都沒驗到，而那是靜悄悄的綠燈。
+    expect(existing).toBeDefined()
+
+    const [arc] = await db
+      .insert(schema.arcs)
+      .values({ projectId, index: 98, title: '集號唯一性測試用', plannedEpisodes: 0 })
+      .returning({ id: schema.arcs.id })
+
+    expect(arc).toBeDefined()
+
+    let thrown: unknown = null
+    try {
+      await db.insert(schema.episodes).values({
+        projectId,
+        arcId: arc!.id,
+        number: existing!.number,
+      })
+    } catch (cause) {
+      thrown = cause
+    } finally {
+      await db.delete(schema.arcs).where(eq(schema.arcs.id, arc!.id))
+    }
+
+    expect(thrown).not.toBeNull()
+
+    /*
+     * 比對**原因**，不是只比對「有丟出東西」。
+     *
+     * Drizzle 把資料庫的錯誤包起來，`message` 只剩 "Failed query: insert
+     * into …"，真正的理由在 `cause` 裡。只斷言「它丟了」的話，這個測試在
+     * 插入因為完全無關的理由失敗時（例如少了一個必填欄位）照樣會綠——
+     * 而那時候索引可能根本沒生效。
+     */
+    const detail = `${(thrown as Error).message} ${String((thrown as { cause?: unknown }).cause ?? '')}`
+    expect(detail).toMatch(/episodes_project_number_idx/)
+  })
 })

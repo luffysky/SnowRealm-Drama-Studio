@@ -8,6 +8,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
 import { users } from './auth'
@@ -179,6 +180,23 @@ export const episodes = pgTable(
   },
   (t) => [
     unique('episodes_arc_number_key').on(t.arcId, t.number),
+    /*
+     * 集號在**一部作品裡**唯一，不是在一卷裡唯一 (Z148).
+     *
+     * 上面那條 `(arc_id, number)` 的唯一約束曾經被讀成「第幾集 within the
+     * arc」——在每部作品只有一卷的時候那是對的。但 Z128 讓卷可以新增、集數
+     * 可以搬動之後，它就擋不住真正要擋的事：**卷一有 EP007、卷二也建一個
+     * EP007，資料庫會收下。**
+     *
+     * 而正文裡每一句「第 007 集」、小說、劇本、分鏡全部指這個號碼。兩集同號
+     * 之後，那些參照就沒有答案了，而且不會有任何地方報錯。
+     *
+     * 加 `where deleted_at is null`：軟刪除掉的集數不該占著號碼不放，
+     * 否則刪掉 EP007 之後就永遠補不回一個 EP007。
+     */
+    uniqueIndex('episodes_project_number_idx')
+      .on(t.projectId, t.number)
+      .where(sql`${t.deletedAt} is null`),
     index('episodes_arc_number_idx').on(t.arcId, t.number),
     index('episodes_project_idx').on(t.projectId),
     index('episodes_status_idx').on(t.status),
