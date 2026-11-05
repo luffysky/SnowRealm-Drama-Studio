@@ -19,7 +19,9 @@ import {
   PER_PAGE_OPTIONS,
   type EpisodeListResult,
   type EpisodeRow,
+  type EpisodeSegment,
   type EpisodeView,
+  type StageColumn,
 } from '@/lib/episode-view'
 import {
   PRODUCTION_STAGE_ABBR,
@@ -32,6 +34,7 @@ import {
 import { ArcBar } from '@/components/studio/ArcBar'
 import { EpisodeBatchCreate } from '@/components/studio/EpisodeBatchCreate'
 import { EpisodeBulkEdit } from '@/components/studio/EpisodeBulkEdit'
+import { ProgressView, SegmentView } from '@/components/studio/EpisodeAltViews'
 import {
   EpisodeEditDialog,
   type EditableEpisode,
@@ -90,10 +93,14 @@ export type EpisodeManagerProps = {
    * 二十筆、一個字都不顯示它。
    */
   editable?: EditableEpisode | null
+  /** 每階段跨全作品的完成度，給「進度總覽」(Z37)。 */
+  stageColumns?: StageColumn[]
+  /** 每十集一段的彙總，給「分段檢視」(Z37)。 */
+  segments?: EpisodeSegment[]
 }
 
 /** Dates cross into a Client Component, so they travel as ISO strings. */
-type SerialisedEpisode = Omit<EpisodeRow, 'dueDate' | 'updatedAt'> & {
+export type SerialisedEpisode = Omit<EpisodeRow, 'dueDate' | 'updatedAt'> & {
   dueDate: string | null
   updatedAt: string
 }
@@ -116,6 +123,8 @@ export function EpisodeManager({
   existingNumbers = [],
   defaultTargetSec = 150,
   editable = null,
+  stageColumns = [],
+  segments = [],
 }: EpisodeManagerProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -189,8 +198,8 @@ export function EpisodeManager({
         <div className="flex gap-1 rounded-lg bg-stage-900 p-0.5 ring-1 ring-stage-700">
           {EPISODE_VIEWS.map((option) => {
             const isCurrent = option === view
-            const ready = option === 'LIST' || option === 'CARD'
-            return ready ? (
+            // 四種都做出來了 (Z37)：PROGRESS 與 SEGMENT 本來是灰的、掛著 M1。
+            return (
               <button
                 key={option}
                 type="button"
@@ -205,16 +214,6 @@ export function EpisodeManager({
               >
                 {EPISODE_VIEW_LABEL[option]}
               </button>
-            ) : (
-              <span
-                key={option}
-                aria-disabled="true"
-                title={`「${EPISODE_VIEW_LABEL[option]}」尚未實作，預計於 M1 階段交付`}
-                className="cursor-default rounded-md px-2.5 py-1 text-[11px] text-ink-700 select-none"
-              >
-                {EPISODE_VIEW_LABEL[option]}
-                <span className="ml-1 text-[9px]">M1</span>
-              </span>
             )
           })}
         </div>
@@ -335,6 +334,19 @@ export function EpisodeManager({
               }
               className="py-14"
             />
+          ) : view === 'PROGRESS' ? (
+            <ProgressView
+              rows={rows}
+              columns={stageColumns}
+              selectedId={selected?.id ?? null}
+              onPick={(id) => go({ ep: id }, true)}
+            />
+          ) : view === 'SEGMENT' ? (
+            <SegmentView
+              segments={segments}
+              perPage={perPage}
+              onGoToPage={(target) => go({ page: target, view: null })}
+            />
           ) : view === 'CARD' ? (
             <CardView
               rows={rows}
@@ -355,7 +367,11 @@ export function EpisodeManager({
             />
           )}
 
-          {rows.length > 0 && (
+          {/*
+            分段檢視不分頁：它一次就是全部十二段，下面再放一個「第 1 / 12
+            頁」只會讓人以為段也分頁了。
+          */}
+          {rows.length > 0 && view !== 'SEGMENT' && (
             <Pagination
               page={page}
               pageCount={pageCount}

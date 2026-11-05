@@ -10,7 +10,9 @@ import {
   type EpisodeQuery,
   type EpisodeRow,
   type EpisodeStageCell,
+  type EpisodeSegment,
   type EpisodeStats,
+  type StageColumn,
 } from '@/lib/episode-view'
 import {
   aggregateProgress,
@@ -365,6 +367,123 @@ export async function updateEpisode(input: {
   })
 
   return { id: input.episodeId }
+}
+
+/**
+ * 把集數切成固定大小的段 (Z37, 分段檢視).
+ *
+ * 120 集的清單一次只看得到二十筆，而「做到哪裡了」是一個整體的問題。切成
+ * 十二段之後，哪一段卡住一眼就看得出來。
+ *
+ * 在 SQL 裡分段，不是把 120 集讀出來在記憶體裡分：這個檢視只需要每一段的
+ * 四個數字，而集數列帶著 logline 與九筆階段。
+ */
+export async function episodeSegments(
+  projectId: string,
+  size = 10
+): Promise<EpisodeSegment[]> {
+  /*
+   * 段大小內嵌成字面值，不走參數 (Z37).
+   *
+   * 寫成 `${size}` 的時候 Drizzle 會綁成 `$1`，而 SELECT 與 GROUP BY 各出現
+   * 一次就是兩個不同的參數位置——Postgres 因此無法認定那是同一個運算式，回
+   * 「column must appear in the GROUP BY clause」。
+   *
+   * 內嵌安全，因為這裡先驗證它是正整數；`size` 也只由伺服器端呼叫端決定。
+   */
+  const step = Math.max(1, Math.floor(size))
+  const bucket = sql<number>`((${episodes.number} - 1) / ${sql.raw(String(step))})::int`
+
+  /*
+   * 兩段查詢，不是一段帶相關子查詢。
+   *
+   * 第一版把 `STAGE_FRACTION` 塞進一個別名為 `s` 的子查詢裡，而那個常數是
+   * 用 `episodeProductionStages` 的欄位組的——Drizzle 會展開成未別名的
+   * `episode_production_stages.status`，於是 Postgres 回 `missing RTE`。
+   * 分成兩段各自 group by 同一個 bucket 再合併，沒有別名可以對錯。
+   */
+  const counts = await db
+    .select({
+      bucket: bucket.as('bucket'),
+      from: sql<number>`min(${episodes.number})`.mapWith(Number),
+      to: sql<number>`max(${episodes.number})`.mapWith(Number),
+      total: sql<number>`count(*)`.mapWith(Number),
+      done: sql<number>`count(*) filter (where ${episodes.status} = 'DONE')`.mapWith(Number),
+      inProgress: sql<number>`count(*) filter (
+        where ${episodes.status} in ('WRITING','STORYBOARD','PRODUCTION','REVIEW')
+      )`.mapWith(Number),
+    })
+    .from(episodes)
+    .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt)))
+    .groupBy(bucket)
+    .orderBy(bucket)
+
+  const fractions = await db
+    .select({
+      bucket: bucket.as('bucket'),
+      done: sql<string>`coalesce(sum(${STAGE_FRACTION}), 0)`,
+    })
+    .from(episodeProductionStages)
+    .innerJoin(episodes, eq(episodes.id, episodeProductionStages.episodeId))
+    .where(and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt)))
+    .groupBy(bucket)
+
+  const doneByBucket = new Map(fractions.map((row) => [row.bucket, Number(row.done ?? 0)]))
+
+  return counts.map((row) => ({
+    from: row.from,
+    to: row.to,
+    total: row.total,
+    done: row.done,
+    inProgress: row.inProgress,
+    pending: Math.max(row.total - row.done - row.inProgress, 0),
+    progress: aggregateProgress(
+      doneByBucket.get(row.bucket) ?? 0,
+      row.total * STAGES_PER_EPISODE
+    ),
+  }))
+}
+
+/**
+ * 每個階段跨全作品的完成度 (Z37, 進度總覽).
+ *
+ * 比 `getProductionProgress()` 輕：那一支還要算趨勢、里程碑與集數統計，而這
+ * 個檢視只要九個數字。分母用集數而不是階段列數——階段列沒建出來的那幾集要
+ * 讀成「還沒開始」，不是「不存在」（跟 production-progress 同一個判斷）。
+ */
+export async function stageCompletion(projectId: string): Promise<StageColumn[]> {
+  const scope = and(eq(episodes.projectId, projectId), isNull(episodes.deletedAt))!
+
+  const [[totals], rows] = await Promise.all([
+    db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(episodes).where(scope),
+    db
+      .select({
+        key: episodeProductionStages.stageKey,
+        done: sql<string>`coalesce(sum(${STAGE_FRACTION}), 0)`,
+        completed: sql<number>`count(*) filter (
+          where ${episodeProductionStages.status} = 'completed'
+        )`.mapWith(Number),
+        total: sql<number>`count(*)`.mapWith(Number),
+      })
+      .from(episodeProductionStages)
+      .innerJoin(episodes, eq(episodes.id, episodeProductionStages.episodeId))
+      .where(scope)
+      .groupBy(episodeProductionStages.stageKey),
+  ])
+
+  const episodeCount = totals?.n ?? 0
+  const byKey = new Map(rows.map((row) => [row.key, row]))
+
+  return PRODUCTION_STAGE_KEYS.map((key) => {
+    const row = byKey.get(key)
+    const total = Math.max(episodeCount, Number(row?.total ?? 0))
+    return {
+      key,
+      done: Number(row?.completed ?? 0),
+      total,
+      progress: aggregateProgress(Number(row?.done ?? 0), total),
+    }
+  })
 }
 
 /** One episode with its stages, for the detail rail. */

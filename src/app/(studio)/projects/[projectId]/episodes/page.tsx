@@ -6,11 +6,13 @@ import { getSessionUser } from '@/lib/auth/session'
 import { EPISODE_STATUSES, type EpisodeStatusValue } from '@/lib/constants'
 import {
   episodeEditable,
+  episodeSegments,
   getEpisodeDetail,
   listEpisodes,
   parsePerPage,
   parseSort,
   parseView,
+  stageCompletion,
   type EpisodeRow,
 } from '@/lib/episodes'
 import { listArcs } from '@/lib/arcs'
@@ -73,6 +75,8 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
   const arcParam = one(sp.arc)
   const arcId = arcs.some((arc) => arc.id === arcParam) ? arcParam : ''
 
+  const view = parseView(one(sp.view))
+
   const result = await listEpisodes(project.id, {
     page: Number(one(sp.page)) || 1,
     perPage: parsePerPage(one(sp.per)),
@@ -93,13 +97,28 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
   // 只有被選中那一集需要完整欄位（synopsis 五千字，列表不顯示）。
   const editable = selected ? await episodeEditable(project.id, selected.id) : null
 
+  /*
+   * 另外兩種檢視要的彙總 (Z37)。
+   *
+   * 兩個都是跨全部集數的——列表一次只看得到二十筆，而「做到哪裡了」是整體
+   * 的問題。只在用到的時候查：列表與卡片檢視不需要它們。
+   */
+  const [stageColumns, segments] =
+    view === 'PROGRESS'
+      ? [await stageCompletion(project.id), []]
+      : view === 'SEGMENT'
+        ? [[], await episodeSegments(project.id)]
+        : [[], []]
+
   return (
     <EpisodeManager
       canWrite={can(user, 'episode.write')}
       projectId={project.id}
       result={{ ...result, rows: result.rows.map(serialise) }}
       selected={selected ? serialise(selected) : null}
-      view={parseView(one(sp.view))}
+      view={view}
+      stageColumns={stageColumns}
+      segments={segments}
       search={one(sp.q)}
       status={status ?? ''}
       stage={stage ?? ''}

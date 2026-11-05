@@ -56,6 +56,26 @@ export type EpisodeRow = {
   stages: EpisodeStageCell[]
 }
 
+export type StageColumn = {
+  key: ProductionStageKey
+  /** 這個階段已完成的集數。 */
+  done: number
+  total: number
+  /** 0–1，含進行中的部分分數。 */
+  progress: number
+}
+
+export type EpisodeSegment = {
+  from: number
+  to: number
+  total: number
+  done: number
+  inProgress: number
+  pending: number
+  /** 0–1。 */
+  progress: number
+}
+
 export type EpisodeStats = {
   total: number
   done: number
