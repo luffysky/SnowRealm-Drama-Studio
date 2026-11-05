@@ -17,7 +17,7 @@ export const POST = handle(
     request: Request,
     context: { params: Promise<{ projectId: string; shotId: string }> }
   ) => {
-    const user = await requirePermission('episode.write')
+    const user = await requirePermission('shot.write')
     const { projectId, shotId } = await context.params
     await requireProjectApi(projectId, user.id)
 

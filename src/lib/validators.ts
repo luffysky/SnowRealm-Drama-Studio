@@ -1053,6 +1053,41 @@ export const voicePreviewSchema = z.object({
 /* 跨作品任務 (Z89)                                                            */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * 定稿審核的一個決定 (Z41).
+ *
+ * `versionId` 只有 APPROVE 用得到，而且可以不給：不給的時候路由會先把現在這
+ * 份內容凍成一版再釘住它。章節存檔**不會**產生快照（`versions` 只在明確保留
+ * 或刪章節備份時長出來），所以要求前端一定要給一個 versionId，等於要求它先去
+ * 找一個多半不存在的東西。
+ * UNLOCK 必須說原因，那是這個鎖存在的理由（解鎖是一個刻意、可歸屬的動作）。
+ */
+export const approvalDecisionSchema = z
+  .object({
+    documentId: uuid,
+    action: z.enum(['REQUEST', 'APPROVE', 'REJECT', 'UNLOCK']),
+    versionId: uuid.optional(),
+    note: z.string().trim().max(2000).optional().default(''),
+  })
+  .refine((input) => input.action !== 'UNLOCK' || input.note.trim().length > 0, {
+    message: '解除鎖定必須說明原因',
+    path: ['note'],
+  })
+  .refine((input) => input.action !== 'REJECT' || input.note.trim().length > 0, {
+    message: '退回必須說明原因',
+    path: ['note'],
+  })
+
+/** 審稿意見。整份文件層級的留言；選取某一段的錨點介面在編輯器裡，還沒做。 */
+export const reviewNoteSchema = z.object({
+  documentId: uuid,
+  body: z.string().trim().min(1, '意見不能空白').max(4000),
+})
+
+export const reviewNoteStateSchema = z.object({
+  state: z.enum(['OPEN', 'RESOLVED']),
+})
+
 export const taskCreateSchema = z.object({
   projectId: uuid,
   episodeId: uuid.nullable().optional(),

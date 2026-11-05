@@ -447,6 +447,16 @@ async function applyToDocument(input: {
 
     if (!doc) throw ApiError.notFound('找不到目標文件')
 
+    /*
+     * 定稿鎖在這一條也要生效 (Z41).
+     *
+     * 這是 AI 產出寫回 document 的那一條路。只擋人手存檔不擋這裡的話，「已
+     * 定稿」就只是擋住了比較慢的那一條路——而且覆蓋還會留下一個版本快照，
+     * 看起來完全正常。
+     */
+    const { assertNotLocked } = await import('@/lib/approvals')
+    await assertNotLocked('DOCUMENT', doc.id)
+
     const nextVersion = doc.version + 1
     const charCount = input.content.replace(/\s/g, '').length
 

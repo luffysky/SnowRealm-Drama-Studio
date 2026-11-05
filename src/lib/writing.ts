@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { chapters, documents, episodes, scenes, users, versions } from '@/db/schema'
 import { ApiError } from '@/lib/api'
+import { assertNotLocked } from '@/lib/approvals'
 import { resyncEpisodeStages } from '@/lib/stage-sync'
 import type { SessionUser } from '@/lib/auth/session'
 import type { DocumentKindValue } from '@/lib/constants'
@@ -334,6 +335,9 @@ export async function createChapter(input: {
   title: string
   user: SessionUser
 }): Promise<{ chapter: ChapterRow; lockRevision: number }> {
+  // 定稿之後不能再加章節 (Z41)。
+  await assertNotLocked('DOCUMENT', input.documentId)
+
   const [last] = await db
     .select({ sortOrder: chapters.sortOrder })
     .from(chapters)
@@ -411,6 +415,9 @@ export async function deleteChapter(input: {
     .limit(1)
 
   if (!chapter) throw ApiError.notFound('找不到這個章節')
+
+  // 定稿之後連刪章節都要先解鎖 (Z41)。刪掉一章當然改變了被定稿的那份內容。
+  await assertNotLocked('DOCUMENT', chapter.documentId)
 
   const removed = await db.transaction(async (tx) => {
     // Conditional update: matches nothing when the document moved on.
@@ -521,6 +528,15 @@ export async function replaceChapterContent(input: {
     .limit(1)
 
   if (!chapter) throw ApiError.notFound('找不到這個章節')
+
+  /*
+   * AI 採用也要過這個鎖 (Z41).
+   *
+   * 這條路徑是 AI 產出寫回正文的那一條。鎖只擋人手存檔、不擋 AI 採用的話，
+   * 「已定稿」就只是擋住了比較慢的那一條路——而且覆蓋還會留下一個版本快照，
+   * 看起來完全正常。
+   */
+  await assertNotLocked('DOCUMENT', chapter.documentId)
 
   const charCount = countRichTextChars(input.content)
 
@@ -653,6 +669,9 @@ export async function saveScene(input: {
 
   if (!scene) throw ApiError.notFound('找不到這個場次')
 
+  // 劇本跟小說同一個規則 (Z41)：定稿鎖住之後要先解鎖才改得了。
+  await assertNotLocked('DOCUMENT', scene.documentId)
+
   const estimatedSec = estimateSceneSeconds(input.content)
 
   return db.transaction(async (tx) => {
@@ -781,6 +800,18 @@ export async function saveChapter(input: {
 
   if (!chapter) throw ApiError.notFound('找不到這個章節')
 
+  /*
+   * 定稿鎖要真的擋得住 (Z41).
+   *
+   * `assertNotLocked` 的註解從一開始就寫著「Call this at the top of any write
+   * path for approvable content — a hidden Save button is not an authorisation
+   * check」，而在這之前它**沒有被放在任何一條寫入路徑上**。
+   *
+   * 所以 spec v2 §6.5「已定稿內容必須透過審核解鎖或建立修訂版」在這之前只是
+   * 一句話：審核頁面會顯示「已鎖定」，而這一支照樣存得進去。
+   */
+  await assertNotLocked('DOCUMENT', chapter.documentId)
+
   // Rich text: the markup must not inflate the count.
   const charCount = countRichTextChars(input.content)
 
@@ -871,7 +902,7 @@ export async function snapshotDocument(input: {
   documentId: string
   label: string
   user: SessionUser
-}): Promise<{ version: number }> {
+}): Promise<{ version: number; id: string }> {
   return db.transaction((tx) => appendSnapshot(tx, input))
 }
 
@@ -887,7 +918,7 @@ export async function snapshotDocument(input: {
 async function appendSnapshot(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   input: { documentId: string; label: string; user: SessionUser }
-): Promise<{ version: number }> {
+): Promise<{ version: number; id: string }> {
   {
     const [document] = await tx
       .select()
@@ -926,34 +957,46 @@ async function appendSnapshot(
 
     const nextVersion = document.version + 1
 
-    await tx.insert(versions).values({
-      targetType: 'DOCUMENT',
-      targetId: input.documentId,
-      version: nextVersion,
-      parentVersionId: previous?.id ?? null,
-      snapshot: {
-        kind: document.kind,
-        scenes: sceneSnapshot,
-        chapters: rows.map((row) => ({
-          id: row.id,
-          sortOrder: row.sortOrder,
-          title: row.title,
-          summary: row.summary,
-          content: row.content,
-        })),
-      },
-      charCount: document.charCount,
-      label: input.label.trim(),
-      authorId: input.user.id,
-      authorName: input.user.name,
-    })
+    const [inserted] = await tx
+      .insert(versions)
+      .values({
+        targetType: 'DOCUMENT',
+        targetId: input.documentId,
+        version: nextVersion,
+        parentVersionId: previous?.id ?? null,
+        snapshot: {
+          kind: document.kind,
+          scenes: sceneSnapshot,
+          chapters: rows.map((row) => ({
+            id: row.id,
+            sortOrder: row.sortOrder,
+            title: row.title,
+            summary: row.summary,
+            content: row.content,
+          })),
+        },
+        charCount: document.charCount,
+        label: input.label.trim(),
+        authorId: input.user.id,
+        authorName: input.user.name,
+      })
+      .returning({ id: versions.id })
+
+    if (!inserted) throw new Error('Failed to append version snapshot')
 
     await tx
       .update(documents)
       .set({ version: nextVersion, updatedAt: new Date() })
       .where(eq(documents.id, input.documentId))
 
-    return { version: nextVersion }
+    /*
+     * 連 id 一起回 (Z41).
+     *
+     * 定稿要釘住一個**確切的** version id（`approve()` 不收「目前那一版」）。
+     * 只回版本號的話，呼叫端得再查一次「最新的那一筆」——而那中間有人存了一
+     * 次就會釘錯一版，而且釘錯的那一版看起來跟釘對的一樣。
+     */
+    return { version: nextVersion, id: inserted.id }
   }
 }
 

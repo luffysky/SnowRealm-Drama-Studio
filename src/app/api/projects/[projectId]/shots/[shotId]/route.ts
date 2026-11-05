@@ -9,7 +9,7 @@ type Context = { params: Promise<{ projectId: string; shotId: string }> }
 
 /** 改一個鏡頭的欄位 (Z39/Z40). */
 export const PATCH = handle(async (request: Request, context: Context) => {
-  const user = await requirePermission('episode.write')
+  const user = await requirePermission('shot.write')
   const { projectId, shotId } = await context.params
   await requireProjectApi(projectId, user.id)
 
@@ -26,7 +26,7 @@ export const PATCH = handle(async (request: Request, context: Context) => {
  * spec v2 §5 要求保留的「重要內容」。後面的鏡頭序號會往前遞補，見 `deleteShot`。
  */
 export const DELETE = handle(async (_request: Request, context: Context) => {
-  const user = await requirePermission('episode.write')
+  const user = await requirePermission('shot.write')
   const { projectId, shotId } = await context.params
   await requireProjectApi(projectId, user.id)
 

@@ -106,7 +106,7 @@ export default async function StoryboardPage({ params, searchParams }: Params) {
       duration={view.duration}
       cast={view.cast}
       hasScript={view.hasScript}
-      canWrite={can(user, 'episode.write')}
+      canWrite={can(user, 'shot.write')}
       currency={user.displayCurrency}
       fx={fx}
       providerReady={provider.available}

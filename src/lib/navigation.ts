@@ -216,7 +216,8 @@ export const PROJECT_TABS: ProjectTab[] = [
   { key: 'storyboard', label: '分鏡工作台', segment: 'storyboard', ready: true, design: 12 },
   { key: 'assets', label: '素材資產中心', segment: 'assets', ready: true, design: 81 },
   { key: 'production', label: '製作流程', segment: 'production', ready: true, design: 17 },
-  { key: 'reviews', label: '審核發布', segment: 'reviews', ready: false, milestone: 'M4', design: 58 },
+  // Z41：定稿、鎖定、解鎖、審稿意見，而且那個鎖真的擋得住存檔。
+  { key: 'reviews', label: '審核發布', segment: 'reviews', ready: true, design: 58 },
   { key: 'versions', label: '版本紀錄', segment: 'versions', ready: true, design: 8 },
 ]
 
