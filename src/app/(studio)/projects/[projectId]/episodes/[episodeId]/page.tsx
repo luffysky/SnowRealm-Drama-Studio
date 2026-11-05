@@ -1,4 +1,4 @@
-import { BookOpen, Clapperboard, FileText, Package } from 'lucide-react'
+import { BookOpen, Clapperboard, FileText, GitCompare, Package } from 'lucide-react'
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
@@ -63,6 +63,17 @@ export default async function EpisodeDetailPage({ params }: Params) {
       label: '素材',
       icon: Package,
     },
+    /*
+     * 版本比對 (Z163, design 35)。
+     *
+     * 比對本身在版本紀錄頁早就做好了（DiffViewer、同文件限定、還原）。缺的
+     * 一直是**從某一集進去**——`?ep=EP007` 會預選那一集最新的兩版。
+     */
+    {
+      href: `/projects/${project.id}/versions?ep=${label}`,
+      label: '版本比對',
+      icon: GitCompare,
+    },
   ]
 
   return (
@@ -103,7 +114,7 @@ export default async function EpisodeDetailPage({ params }: Params) {
           </div>
 
           {/* 每一段內容一個入口。這一頁的另一半理由就是它。 */}
-          <nav className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <nav className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             {links.map((link) => (
               <Link
                 key={link.href}

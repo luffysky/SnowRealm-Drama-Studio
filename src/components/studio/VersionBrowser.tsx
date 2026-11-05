@@ -55,6 +55,8 @@ export type VersionItem = {
 export type VersionBrowserProps = {
   projectId: string
   versions: VersionItem[]
+  /** 從 `?ep=` 帶進來的初始篩選，例如 `EP007` (Z163)。 */
+  defaultSearch?: string
   stats: {
     total: number
     approved: number
@@ -65,14 +67,52 @@ export type VersionBrowserProps = {
   }
 }
 
-export function VersionBrowser({ projectId, versions, stats }: VersionBrowserProps) {
+export function VersionBrowser({
+  projectId,
+  versions,
+  stats,
+  defaultSearch = '',
+}: VersionBrowserProps) {
   const router = useRouter()
   const toast = useToast()
 
   const [kind, setKind] = useState<DocumentKindValue | 'ALL'>('ALL')
-  const [search, setSearch] = useState('')
-  const [selectedId, setSelectedId] = useState(versions[0]?.id ?? null)
-  const [compareId, setCompareId] = useState<string | null>(versions[1]?.id ?? null)
+
+  /*
+   * 從網址帶進來的集數 (Z163).
+   *
+   * 設計稿 35 的「內容比較」是從某一集進來的：挑一集，看它的兩個版本並排。
+   * 這一頁本來只能從全專案的清單裡自己找——而在一百多筆版本裡翻出「第 7 集
+   * 的上一版」不是一個人會想做的事。
+   *
+   * 讀 `?ep=EP007` 當初始篩選，並且**預選那一集最新的兩版**，一進來就是 A
+   * 對 B。只當初始值：之後使用者自己改的以他為準。
+   */
+  const [search, setSearch] = useState(defaultSearch)
+
+  const initial = useMemo(() => {
+    if (!defaultSearch) {
+      return { selected: versions[0]?.id ?? null, compare: versions[1]?.id ?? null }
+    }
+
+    const term = defaultSearch.trim().toLowerCase()
+    const mine = versions.filter((version) =>
+      `ep${String(version.episodeNumber).padStart(3, '0')}`.includes(term)
+    )
+    const newest = mine[0]
+    // 同一份文件的才比得了——小說對劇本沒有意義。
+    const previous = newest
+      ? mine.find((v) => v.documentId === newest.documentId && v.id !== newest.id)
+      : undefined
+
+    return {
+      selected: newest?.id ?? versions[0]?.id ?? null,
+      compare: previous?.id ?? null,
+    }
+  }, [defaultSearch, versions])
+
+  const [selectedId, setSelectedId] = useState(initial.selected)
+  const [compareId, setCompareId] = useState<string | null>(initial.compare)
   const [mode, setMode] = useState<'split' | 'unified'>('split')
   const [restoring, setRestoring] = useState<VersionItem | null>(null)
   const [busy, setBusy] = useState(false)
