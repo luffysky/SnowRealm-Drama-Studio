@@ -2,6 +2,7 @@
 
 import { ImageUp, Loader2, Trash2 } from 'lucide-react'
 import { useRef, useState, type DragEvent } from 'react'
+import { CropDialog } from '@/components/studio/CropDialog'
 import { useUploader } from '@/components/studio/useUploader'
 import { assetPreviewUrl } from '@/lib/asset-url'
 import { acceptFor, familyOf, resolveMimeType } from '@/lib/media-types'
@@ -46,6 +47,8 @@ export function ImagePicker({
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [rejected, setRejected] = useState<string | null>(null)
+  /** 選好了、還沒裁的那一個檔案 (Z65)。 */
+  const [cropping, setCropping] = useState<File | null>(null)
 
   const uploader = useUploader({
     projectId,
@@ -78,6 +81,21 @@ export function ImagePicker({
       return
     }
 
+    /*
+     * 先裁切再上傳 (Z65).
+     *
+     * 封面在列表、卡片與工作區頂端都是固定比例的框，所以直接存原圖等於讓
+     * `object-cover` 替人決定構圖——一張直式照片會被從中間切掉頭。
+     *
+     * 裁切視窗用的就是這個 picker 的 `shape`，所以看到的框就是之後會顯示
+     * 的框。
+     */
+    setCropping(file)
+  }
+
+  /** 裁切完（或按了「用原圖」）之後才真的進上傳佇列。 */
+  function upload(file: File) {
+    setCropping(null)
     uploader.enqueue([file], 'IMAGE')
   }
 
@@ -92,6 +110,15 @@ export function ImagePicker({
 
   return (
     <div className="flex flex-col gap-2">
+      {cropping && (
+        <CropDialog
+          file={cropping}
+          shape={shape}
+          onCancel={() => setCropping(null)}
+          onDone={upload}
+        />
+      )}
+
       <div
         onDragOver={(event) => {
           event.preventDefault()
