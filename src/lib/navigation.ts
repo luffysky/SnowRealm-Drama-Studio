@@ -145,8 +145,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: '團隊管理',
     icon: 'Users',
     href: '/team',
-    ready: false,
-    milestone: 'M4',
+    ready: true,
     design: 20,
   },
   {
