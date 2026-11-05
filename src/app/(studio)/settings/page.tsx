@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { SystemSettings } from '@/components/studio/SystemSettings'
 import { BUILT_IN_PRICING, DEFAULT_MODEL } from '@/lib/ai/anthropic'
 import { can } from '@/lib/auth/rbac'
+import { turnConfigured } from '@/lib/turn'
 import { getSessionUser } from '@/lib/auth/session'
 import { AI_JOB_KIND_LABEL, AI_JOB_KINDS } from '@/lib/constants'
 import {
@@ -55,6 +56,8 @@ export default async function SystemSettingsPage() {
       profiles={profiles}
       defaultModel={DEFAULT_MODEL}
       ice={ice}
+      /* 只傳布林——金鑰永遠不離開伺服器 (Z103)。 */
+      relayConfigured={turnConfigured()}
       tasks={AI_JOB_KINDS.map((kind) => ({ kind, label: AI_JOB_KIND_LABEL[kind] }))}
     />
   )

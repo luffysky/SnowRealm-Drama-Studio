@@ -34,6 +34,8 @@ type Props = {
   profiles: TaskProfiles
   defaultModel: string
   ice: IceServer[]
+  /** Cloudflare TURN 的金鑰有沒有設 (Z103)。只回布林，金鑰不離開伺服器。 */
+  relayConfigured: boolean
   tasks: { kind: string; label: string }[]
 }
 
@@ -67,7 +69,11 @@ export function SystemSettings(props: Props) {
         defaultModel={props.defaultModel}
         canEdit={props.canEdit}
       />
-      <IceSection servers={props.ice} canEdit={props.canEdit} />
+      <IceSection
+        servers={props.ice}
+        canEdit={props.canEdit}
+        relayConfigured={props.relayConfigured}
+      />
 
       {/*
         沒有用 `Section` 包：那個元件的骨架是「改東西 → 儲存」，而這一塊什麼
@@ -666,7 +672,16 @@ function TasksSection({
 /* 通話伺服器                                                                   */
 /* -------------------------------------------------------------------------- */
 
-function IceSection({ servers, canEdit }: { servers: IceServer[]; canEdit: boolean }) {
+function IceSection({
+  servers,
+  canEdit,
+  relayConfigured,
+}: {
+  servers: IceServer[]
+  canEdit: boolean
+  /** Cloudflare TURN 的金鑰有沒有設 (Z103)。 */
+  relayConfigured: boolean
+}) {
   const put = useSaver()
   const [draft, setDraft] = useState<IceServer[]>(servers)
   const dirty = JSON.stringify(draft) !== JSON.stringify(servers)
@@ -679,6 +694,25 @@ function IceSection({ servers, canEdit }: { servers: IceServer[]; canEdit: boole
       dirty={dirty}
       onSave={() => put('/api/settings/ice', { servers: draft }, '通話伺服器')}
     >
+      {/*
+        中繼有沒有設定，要說出來 (Z103).
+        `turnConfigured()` 的註解從一開始就寫著「for the settings screen to
+        report」，而設定頁從來沒有報過——於是「通話接不通是因為沒開中繼」跟
+        「開了但還是不通」在畫面上長得一模一樣。
+      */}
+      <p
+        className={cn(
+          'rounded-lg px-3 py-2 text-[11px] leading-relaxed ring-1 ring-inset',
+          relayConfigured
+            ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30'
+            : 'bg-stage-850/60 text-ink-400 ring-stage-700/70'
+        )}
+      >
+        {relayConfigured
+          ? 'Cloudflare TURN 中繼已設定——點對點穿不過去的時候會自動改走中繼。'
+          : '還沒有設定 Cloudflare TURN。兩邊都在一般家用網路時不需要；行動網路、公司網路與 CGNAT 只有中繼能通。填 CLOUDFLARE_TURN_KEY_ID 與 CLOUDFLARE_TURN_API_TOKEN 就自動生效，不用改程式。'}
+      </p>
+
       <div className="flex flex-col gap-2">
         {draft.map((server, index) => (
           <div
