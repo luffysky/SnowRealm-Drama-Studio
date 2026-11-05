@@ -54,7 +54,11 @@ export function EpisodeStageBoard({
   const toast = useToast()
   const [busy, setBusy] = useState<string | null>(null)
 
-  async function change(stage: ProductionStageKey, state: ProductionStageStatus) {
+  async function change(
+    stage: ProductionStageKey,
+    state: ProductionStageStatus,
+    note?: string
+  ) {
     if (busy) return
     setBusy(stage)
     try {
@@ -63,7 +67,8 @@ export function EpisodeStageBoard({
         {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ episodeId, stage, state }),
+          // `note` 不給就是不動它——給空字串才是清掉。
+          body: JSON.stringify({ episodeId, stage, state, ...(note !== undefined ? { note } : {}) }),
         }
       )
       if (!response.ok) throw new Error(await readApiError(response))
@@ -136,10 +141,33 @@ export function EpisodeStageBoard({
                 </span>
               )}
 
-              {cell.note && (
-                <span className="min-w-0 flex-1 truncate text-[10px] text-ink-600">
-                  {cell.note}
-                </span>
+              {/*
+                備註 (Z165)。
+                這一條鏈本來三層都是死的：API 收 note、lib 寫 note、看板畫
+                note，中間缺讀取（`EpisodeStageCell` 沒有這一欄）也缺輸入。
+                補齊之後「等配音檔」「要等素材」這種話才有地方寫。
+
+                失焦才送，不是每打一個字送一次。
+              */}
+              {canWrite ? (
+                <input
+                  defaultValue={cell.note}
+                  placeholder="備註"
+                  maxLength={1000}
+                  aria-label={`${PRODUCTION_STAGE_LABEL[cell.key]} 的備註`}
+                  onBlur={(event) => {
+                    if (event.target.value !== cell.note) {
+                      void change(cell.key, cell.status, event.target.value)
+                    }
+                  }}
+                  className="min-w-0 flex-1 rounded bg-transparent px-1 py-0.5 text-[10px] text-ink-400 ring-1 ring-inset ring-transparent transition-colors hover:ring-stage-700 focus:bg-stage-850 focus:text-ink-100 focus:ring-accent-500 focus:outline-none"
+                />
+              ) : (
+                cell.note && (
+                  <span className="min-w-0 flex-1 truncate text-[10px] text-ink-600">
+                    {cell.note}
+                  </span>
+                )
               )}
 
               {canWrite && (

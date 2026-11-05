@@ -39,6 +39,13 @@ export type EpisodeStageCell = {
   key: ProductionStageKey
   status: ProductionStageStatus
   progressPercent: number
+  /**
+   * 這個階段的備註 (Z165).
+   *
+   * 本來不在這個型別裡，而階段看板已經在顯示它——於是那段顯示永遠拿到空字
+   * 串。API 收 note、lib 寫 note、看板畫 note，中間就缺這一欄。
+   */
+  note: string
 }
 
 export type EpisodeRow = {

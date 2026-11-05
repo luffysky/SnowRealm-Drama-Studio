@@ -1,7 +1,7 @@
 'use client'
 
 import { Check, Link2, MoreHorizontal } from 'lucide-react'
-import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { cn } from '@/lib/utils'
@@ -37,6 +37,7 @@ export function CardMenu({
   /** 複製到剪貼簿的連結；相對路徑，開啟時才補上網域。 */
   shareUrl: string
 }) {
+  const router = useRouter()
   const toast = useToast()
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -98,18 +99,40 @@ export function CardMenu({
       {open && (
         <div
           role="menu"
-          className="panel absolute right-0 bottom-full z-30 mb-1 flex w-40 flex-col overflow-hidden rounded-lg bg-stage-850 py-1 ring-1 shadow-xl ring-stage-700"
+          /*
+            往**下**開 (Z165)。
+            卡片根是 `overflow-hidden`，而這個選單只能開在卡片裡面。往上開的
+            話，在 320px 寬的手機上封面只有 162px 高，185px 的選單上緣會被切
+            掉——第一個項目看不見。往下開至少從按鈕往內長。
+          */
+          className="panel absolute top-full right-0 z-30 mt-1 flex max-h-48 w-40 flex-col overflow-y-auto rounded-lg bg-stage-850 py-1 ring-1 shadow-xl ring-stage-700"
         >
+          {/*
+            用 `<button>` + `router.push`，不是 `<Link>` (Z165).
+
+            整張作品卡的根**就是** `<Link>`，所以選單裡放 `<Link>` 會變成
+            `<a>` 包 `<a>`——不合法的 HTML。功能上目前看不出壞（內層先
+            stopPropagation、Next 再 preventDefault），但輔助科技是真的壞：
+            外層連結的可及名稱會把整個選單的文字吃進去。
+
+            同一個檔案裡的收藏鍵早就為了這個理由用 `<span role="button">`
+            而不是 `<button>`，註解也寫了。這裡破了同一條規則。
+          */}
           {items.map((item) => (
-            <Link
+            <button
               key={item.href}
+              type="button"
               role="menuitem"
-              href={item.href}
-              onClick={(event) => event.stopPropagation()}
-              className="px-3 py-1.5 text-[11px] text-ink-300 transition-colors hover:bg-stage-800 hover:text-ink-50"
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setOpen(false)
+                router.push(item.href)
+              }}
+              className="px-3 py-1.5 text-left text-[11px] text-ink-300 transition-colors hover:bg-stage-800 hover:text-ink-50"
             >
               {item.label}
-            </Link>
+            </button>
           ))}
 
           <span aria-hidden className="my-1 h-px bg-stage-700" />

@@ -24,14 +24,54 @@ import { Dialog } from '@/components/ui/Dialog'
  * 換成 WebP 會讓「我上傳的是 PNG」這句話變成不是真的。
  */
 
+/**
+ * 比例要跟**實際顯示的框**一致 (Z165).
+ *
+ * `wide` 本來寫 16/10，而全專案每一個真的顯示封面的地方都是 `aspect-video`
+ * ——作品卡、集數詳情、影片播放、作品總覽、集數卡片。實測作品卡封面是
+ * 373×210 ≈ 16:9。
+ *
+ * 差這一點的後果不是醜，是**對話框那句「視窗的比例就是這張圖實際顯示的比
+ * 例」不成立**：裁成 16:10 之後 `object-cover` 會再切掉上下約 5%，於是人
+ * 對好的構圖還是會被切。一個說謊的預覽比沒有預覽糟。
+ */
 const ASPECT: Record<'wide' | 'portrait' | 'square', number> = {
-  wide: 16 / 10,
+  wide: 16 / 9,
   portrait: 2 / 3,
   square: 1,
 }
 
-/** 裁切視窗的像素寬。輸出解析度由它與比例決定。 */
+/** 裁切視窗的顯示寬度。**只是 UI**，跟輸出解析度無關。 */
 const WINDOW_WIDTH = 480
+
+/**
+ * 輸出解析度上限，依形狀分開 (Z165).
+ *
+ * 輸出本來直接用視窗的 480 寬，而那是**做了比不做糟**的那種：
+ *
+ *  - 作品卡封面實測最寬 387 CSS px，DPR 2 的螢幕要 774 裝置像素——480 等於
+ *    1.6 倍上採樣，看得出來的糊。而上傳原圖本來是清楚的。
+ *  - 更糟的是角色定妝照：它走同一支（`shape="portrait"`），而那張圖的用途
+ *    寫在它自己的提示裡——「分鏡與 AI 生圖會拿這張當角色的樣貌參考」。把
+ *    AI 的參考圖壓到 480 寬，之後每一張生出來的圖都從那裡開始。
+ *
+ * 絕不**上**採樣：輸出取「裁切區域的原始像素」與這個上限的較小者，所以小
+ * 圖不會被放大成一張更大的糊圖。
+ */
+const OUTPUT_MAX: Record<'wide' | 'portrait' | 'square', number> = {
+  wide: 1920,
+  portrait: 1440,
+  square: 1024,
+}
+
+/**
+ * 來源像素上限。
+ *
+ * iOS Safari 單張圖解碼約 16.7 MP 就會自行降採樣或讓 `drawImage` 畫出空
+ * 白——而 `toBlob` 仍然會回一個合法的 blob，於是**一張全黑的封面會安靜地被
+ * 上傳**。`MAX_IMAGE_BYTES` 擋不住：8000×6000 的 JPEG 很容易低於 12 MB。
+ */
+const MAX_SOURCE_PIXELS = 16_000_000
 
 export function CropDialog({
   file,
@@ -96,6 +136,13 @@ export function CropDialog({
 
   const scale = minScale * zoom
 
+  /** 告訴人實際會存成多大，不是視窗多大。 */
+  const outputSize = (() => {
+    const sw = WINDOW_WIDTH / scale
+    const width = Math.max(1, Math.round(Math.min(sw, OUTPUT_MAX[shape])))
+    return { width, height: Math.max(1, Math.round(width / aspect)) }
+  })()
+
   /** 夾住位移，讓視窗永遠落在圖裡面。 */
   function clamp(next: { x: number; y: number }, atScale: number) {
     if (!image) return next
@@ -154,20 +201,47 @@ export function CropDialog({
     if (!image || busy) return
     setBusy(true)
     try {
-      const canvas = document.createElement('canvas')
-      canvas.width = WINDOW_WIDTH
-      canvas.height = windowHeight
-
-      const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('這個瀏覽器不支援 canvas')
-
       // 視窗左上角對應到原圖的哪一點。
       const sx = -offset.x / scale
       const sy = -offset.y / scale
       const sw = WINDOW_WIDTH / scale
       const sh = windowHeight / scale
 
-      ctx.drawImage(image, sx, sy, sw, sh, 0, 0, WINDOW_WIDTH, windowHeight)
+      /*
+       * 輸出取「裁切區域的原始像素」與上限的較小者——不上採樣。
+       *
+       * 視窗是 480 寬只是為了畫面好看；把它直接當輸出解析度，等於每一張封面
+       * 都被壓成 480，而顯示的地方要 774。
+       */
+      const outWidth = Math.max(1, Math.round(Math.min(sw, OUTPUT_MAX[shape])))
+      const outHeight = Math.max(1, Math.round(outWidth / aspect))
+
+      const canvas = document.createElement('canvas')
+      canvas.width = outWidth
+      canvas.height = outHeight
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('這個瀏覽器不支援 canvas')
+
+      ctx.drawImage(image, sx, sy, sw, sh, 0, 0, outWidth, outHeight)
+
+      /*
+       * 畫出來是不是全黑／全透明。
+       *
+       * 超大圖在 Safari 上 `drawImage` 會安靜地什麼都沒畫，而 `toBlob` 照樣
+       * 回一個合法的 blob。抽樣檢查比「上傳完才發現封面是黑的」便宜太多。
+       */
+      const sample = ctx.getImageData(0, 0, Math.min(outWidth, 64), Math.min(outHeight, 64)).data
+      let visible = false
+      for (let i = 3; i < sample.length; i += 4) {
+        if (sample[i] !== 0) {
+          visible = true
+          break
+        }
+      }
+      if (!visible) {
+        throw new Error('這張圖太大，瀏覽器畫不出來。請用「用原圖，不裁切」或先縮小再上傳。')
+      }
 
       // 沿用來源格式：偷偷換格式會讓「我上傳的是 PNG」變成不是真的。
       const type = /^image\/(png|jpeg|webp)$/.test(file.type) ? file.type : 'image/jpeg'
@@ -278,7 +352,12 @@ export function CropDialog({
         {image && (
           <p className="text-[10px] text-ink-600">
             原圖 {image.naturalWidth} × {image.naturalHeight}，
-            裁切後 {WINDOW_WIDTH} × {windowHeight}
+            裁切後 {outputSize.width} × {outputSize.height}
+            {image.naturalWidth * image.naturalHeight > MAX_SOURCE_PIXELS && (
+              <span className="ml-1 text-amber-400">
+                這張圖很大，部分瀏覽器可能畫不出來——裁完如果是黑的，改用「用原圖」。
+              </span>
+            )}
           </p>
         )}
       </div>

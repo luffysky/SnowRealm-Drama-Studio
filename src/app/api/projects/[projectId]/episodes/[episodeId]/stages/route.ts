@@ -35,6 +35,8 @@ export const PATCH = handle(
       stage: input.stage,
       state: input.state,
       ...(input.note !== undefined ? { note: input.note } : {}),
+      // 階段真的有 assignee 欄位 (Z165)——收下就要用，不要靜默丟掉。
+      ...(input.assigneeId !== undefined ? { assigneeId: input.assigneeId } : {}),
       user,
     })
 

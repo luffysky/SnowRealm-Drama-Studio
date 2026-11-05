@@ -146,7 +146,7 @@ export default async function EpisodeDetailPage({ params }: Params) {
             key: cell.key,
             status: cell.status,
             progressPercent: cell.progressPercent,
-            note: '',
+            note: cell.note,
           }))}
           canWrite={canWrite}
         />

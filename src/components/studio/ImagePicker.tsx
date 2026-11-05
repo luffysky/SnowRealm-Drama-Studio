@@ -106,7 +106,13 @@ export function ImagePicker({
   }
 
   const frame =
-    shape === 'portrait' ? 'aspect-2/3 w-24' : shape === 'square' ? 'size-24' : 'aspect-16/10 w-40'
+    /*
+     * `wide` 的縮圖用 `aspect-video` (Z165).
+     *
+     * 本來是 `aspect-16/10`，而全專案真的顯示封面的地方全是 `aspect-video`。
+     * 這個縮圖是上傳完之後唯一的預覽，它跟實際顯示不一樣就等於在騙人。
+     */
+    shape === 'portrait' ? 'aspect-2/3 w-24' : shape === 'square' ? 'size-24' : 'aspect-video w-40'
 
   return (
     <div className="flex flex-col gap-2">

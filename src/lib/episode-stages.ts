@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { episodeProductionStages, episodes } from '@/db/schema'
+import { episodeProductionStages, episodes, users } from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import {
@@ -41,6 +41,17 @@ export async function updateEpisodeStage(input: {
   stage: ProductionStageKey
   state: ProductionStageStatus
   note?: string
+  /**
+   * 誰負責這個階段 (Z165).
+   *
+   * `episode_production_stages` **真的有** `assignee_id` 與 `assignee_type`，
+   * 還有一支專屬索引——欄位在、索引在、全專案沒有人寫（實查 2160 筆全是
+   * null）。schema 收下它卻在路由層丟掉，就是上一輪才修掉的那個「收下、回報
+   * 成功、靜默丟掉」。這次欄位是真的，所以實作它而不是拿掉。
+   *
+   * `undefined` 代表不動，`null` 代表取消指派。
+   */
+  assigneeId?: string | null
   user: SessionUser
 }): Promise<{ stage: ProductionStageKey; state: ProductionStageStatus }> {
   const [episode] = await db
@@ -58,6 +69,16 @@ export async function updateEpisodeStage(input: {
    * 位會有三條路徑各自不同的意思。`startedAt` 用 coalesce 保留第一次：重新
    * 開始不是第一次開始。
    */
+  // 指派給誰：要是真的使用者，不然 FK 會在寫入時才炸。
+  if (input.assigneeId) {
+    const [member] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, input.assigneeId))
+      .limit(1)
+    if (!member) throw ApiError.notFound('找不到這個成員')
+  }
+
   const now = new Date()
   const updated = await db
     .update(episodeProductionStages)
@@ -66,10 +87,33 @@ export async function updateEpisodeStage(input: {
       ...(input.state === 'completed'
         ? { completedAt: now, progressPercent: 100 }
         : { completedAt: null }),
+      /*
+       * 從已完成退回進行中，要把 `progressPercent` 拉下來 (Z165).
+       *
+       * 設成完成時寫了 100，而 `STAGE_FRACTION` 對 `in_progress` 算的是
+       * `progress_percent / 100`——所以不動它的話，退回進行中之後**完成度
+       * 一個數字都不會變**：九大階段、作品總覽、進度總覽、分段檢視全部照
+       * 舊，而看板自己還會印「進行中 100%」。
+       *
+       * 夾到 99：它不再是完成，就不該再算成一整格。
+       */
+      ...(input.state === 'in_progress' || input.state === 'in_review' || input.state === 'blocked'
+        ? { progressPercent: sql`least(${episodeProductionStages.progressPercent}, 99)` }
+        : {}),
+      /*
+       * `startedAt` 用 coalesce 保留第一次——重新開始不是第一次開始。
+       *
+       * 這段註解本來就寫在這裡，而程式沒有實作它：`startedAt` 只會在
+       * `not_started` 時被清掉，從來不會被設值。而那五個沒有量測來源的階段
+       * 只有這條路徑能動，所以它們的 `started_at` 永遠是 null。
+       */
       ...(input.state === 'not_started'
         ? { startedAt: null, progressPercent: 0 }
-        : {}),
+        : { startedAt: sql`coalesce(${episodeProductionStages.startedAt}, now())` }),
       ...(input.note !== undefined ? { note: input.note } : {}),
+      ...(input.assigneeId !== undefined
+        ? { assigneeId: input.assigneeId, assigneeType: input.assigneeId ? ('USER' as const) : null }
+        : {}),
       updatedAt: now,
     })
     .where(
@@ -94,7 +138,11 @@ export async function updateEpisodeStage(input: {
       stageKey: input.stage,
       status: input.state,
       ...(input.state === 'completed' ? { completedAt: now, progressPercent: 100 } : {}),
+      ...(input.state !== 'not_started' ? { startedAt: now } : {}),
       ...(input.note !== undefined ? { note: input.note } : {}),
+      ...(input.assigneeId
+        ? { assigneeId: input.assigneeId, assigneeType: 'USER' as const }
+        : {}),
     })
   }
 
