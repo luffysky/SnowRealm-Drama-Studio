@@ -56,14 +56,17 @@ export function ProjectOverview({
   project,
   currency,
   fx,
+  ai,
 }: {
   project: ProjectOverviewData
   currency: CurrencyValue
   fx: FxRates
+  /** 頁面組好的 AI 發動鈕，渲染在標題列右邊 (Z153)。 */
+  ai?: ReactNode
 }) {
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
-      <OverviewHeading project={project} />
+      <OverviewHeading project={project} ai={ai} />
       <KpiRow project={project} currency={currency} fx={fx} />
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
@@ -94,7 +97,13 @@ export function ProjectOverview({
  * The title, cover, status, tags and logline are not repeated here: they live
  * in the workspace header, which every tab shares.
  */
-function OverviewHeading({ project }: { project: ProjectOverviewData }) {
+function OverviewHeading({
+  project,
+  ai,
+}: {
+  project: ProjectOverviewData
+  ai?: ReactNode
+}) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
       <h2 className="inline-flex items-center gap-2 text-sm font-semibold text-ink-100">
@@ -114,6 +123,12 @@ function OverviewHeading({ project }: { project: ProjectOverviewData }) {
           </div>
         )}
       </dl>
+
+      {/*
+        作品企劃生成 (Z153)。總覽是它唯一說得通的位置：這個任務談的是整部作
+        品的賣點、受眾與分部規劃，不是某一集的事。
+      */}
+      {ai && <div className="ml-auto flex items-center gap-2">{ai}</div>}
     </div>
   )
 }

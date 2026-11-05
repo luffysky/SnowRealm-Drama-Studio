@@ -1,5 +1,6 @@
 import { handle, jsonOk, parseJson, requirePermission } from '@/lib/api'
 import { buildContext, estimateJob } from '@/lib/ai/jobs'
+import type { AiEstimateResponse } from '@/lib/ai/types'
 import { aiRunSchema } from '@/lib/validators'
 
 /**
@@ -29,5 +30,5 @@ export const POST = handle(async (request: Request) => {
     context,
   })
 
-  return jsonOk({ estimate })
+  return jsonOk<AiEstimateResponse>({ estimate })
 })

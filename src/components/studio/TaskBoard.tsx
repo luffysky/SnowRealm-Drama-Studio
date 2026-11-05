@@ -1,8 +1,9 @@
 'use client'
 
-import { AlertTriangle, Loader2, Plus } from 'lucide-react'
+import { AlertTriangle, Loader2, Plus, Sparkles } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { TaskSuggester } from '@/components/studio/TaskSuggester'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import {
@@ -14,6 +15,7 @@ import {
   type TaskPriorityValue,
   type TaskStatusValue,
 } from '@/lib/constants'
+import type { CurrencyValue, FxRates } from '@/lib/money'
 import { cn, formatRelativeZh } from '@/lib/utils'
 
 /**
@@ -57,6 +59,7 @@ export function TaskBoard({
   overdue,
   total,
   canWrite,
+  suggest,
 }: {
   columns: Column[]
   projects: { id: string; title: string }[]
@@ -64,11 +67,21 @@ export function TaskBoard({
   overdue: number
   total: number
   canWrite: boolean
+  /** AI 任務建議要用的東西，伺服器端備好的 (Z153)。 */
+  suggest?: {
+    /** 進度摘要。空字串代表沒有進度可以依據。 */
+    sourceText: string
+    currency: CurrencyValue
+    fx: FxRates
+    providerReady: boolean
+    providerDetail?: string
+  }
 }) {
   const router = useRouter()
   const toast = useToast()
 
   const [open, setOpen] = useState(false)
+  const [suggesting, setSuggesting] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
 
   const [projectId, setProjectId] = useState(projects[0]?.id ?? '')
@@ -143,16 +156,57 @@ export function TaskBoard({
         </span>
 
         {canWrite && projects.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setOpen((value) => !value)}
-            className="tap ml-auto inline-flex items-center gap-1.5 rounded-lg bg-accent-600 px-3 py-1.5 text-[11px] text-white transition-colors hover:bg-accent-500"
-          >
-            <Plus aria-hidden className="size-3.5" />
-            新增任務
-          </button>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {/*
+              AI 任務建議 (Z153)。
+
+              放在「新增任務」旁邊，因為它做的是同一件事——只是由模型先擬一
+              份。產出不會直接進看板：逐條勾選過才建立。
+
+              沒有進度摘要就禁用並說原因，不是給一顆按下去才發現沒東西可以
+              依據的鈕（spec v2 §4）。
+            */}
+            {suggest && (
+              <button
+                type="button"
+                onClick={() => setSuggesting(true)}
+                disabled={!suggest.sourceText}
+                title={suggest.sourceText ? undefined : '還沒有任何進度資料可以依據。'}
+                className={cn(
+                  'tap inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] transition-colors',
+                  suggest.sourceText
+                    ? 'bg-stage-800 text-ink-200 ring-1 ring-inset ring-stage-700 hover:text-ink-50'
+                    : 'cursor-not-allowed bg-stage-850 text-ink-600 ring-1 ring-inset ring-stage-700'
+                )}
+              >
+                <Sparkles aria-hidden className="size-3.5 text-accent-400" />
+                AI 建議任務
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setOpen((value) => !value)}
+              className="tap inline-flex items-center gap-1.5 rounded-lg bg-accent-600 px-3 py-1.5 text-[11px] text-white transition-colors hover:bg-accent-500"
+            >
+              <Plus aria-hidden className="size-3.5" />
+              新增任務
+            </button>
+          </div>
         )}
       </div>
+
+      {suggesting && suggest && (
+        <TaskSuggester
+          projects={projects}
+          sourceText={suggest.sourceText}
+          currency={suggest.currency}
+          fx={suggest.fx}
+          providerReady={suggest.providerReady}
+          {...(suggest.providerDetail ? { providerDetail: suggest.providerDetail } : {})}
+          onClose={() => setSuggesting(false)}
+        />
+      )}
 
       {open && canWrite && (
         <form

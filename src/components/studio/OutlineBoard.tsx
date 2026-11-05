@@ -12,11 +12,13 @@ import {
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
+import { AiTaskLauncher } from '@/components/studio/AiTaskLauncher'
 import { OutlineGenerator } from '@/components/studio/OutlineGenerator'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Field'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import { outlineDigest } from '@/lib/ai/digest'
 import type { ProjectReadiness } from '@/lib/ai/readiness'
 import type { CurrencyValue, FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
@@ -49,6 +51,7 @@ const PER_PAGE = 20
 
 export function OutlineBoard({
   projectId,
+  projectTitle,
   episodes,
   canWrite,
   currency,
@@ -58,6 +61,7 @@ export function OutlineBoard({
   readiness,
 }: {
   projectId: string
+  projectTitle: string
   episodes: OutlineEpisode[]
   canWrite: boolean
   currency: CurrencyValue
@@ -93,6 +97,9 @@ export function OutlineBoard({
   const visible = filtered.slice((current - 1) * PER_PAGE, current * PER_PAGE)
 
   const written = rows.filter((row) => row.logline.trim() || row.synopsis.trim()).length
+
+  /** 送給大綱審視的那份文字。空字串代表一集都還沒寫，按鈕就該是灰的。 */
+  const digest = useMemo(() => outlineDigest(projectTitle, rows), [projectTitle, rows])
 
   function replaceRow(next: OutlineEpisode) {
     setRows((all) => all.map((row) => (row.id === next.id ? next : row)))
@@ -168,6 +175,37 @@ export function OutlineBoard({
             >
               AI 生成大綱
             </Button>
+          )}
+
+          {/*
+            大綱審視 (Z153)。放在「生成」旁邊，因為那是同一件事的兩半：寫完
+            一批之後要有人讀過它。
+
+            摘要在這裡組，不往返伺服器——整份大綱本來就在 `rows` 裡，而
+            `outlineDigest` 是純函式。一集都還沒寫就把按鈕禁用並說原因，而不
+            是讓人花錢換一句「你還沒有大綱」。
+          */}
+          {canWrite && (
+            <AiTaskLauncher
+              label="AI 審視大綱"
+              title="AI 審視分集大綱"
+              description="以責任編輯的角度逐條指出節奏、鉤子、銜接與角色的問題。只報告，不改寫。"
+              projectId={projectId}
+              sourceText={digest}
+              scopeLabel={`審視《${projectTitle}》目前已寫的 ${written} 集大綱`}
+              currency={currency}
+              fx={fx}
+              providerReady={providerReady}
+              {...(providerDetail ? { providerDetail } : {})}
+              {...(digest ? {} : { disabledReason: '還沒有任何一集寫大綱，沒有東西可以審。' })}
+              tasks={[
+                {
+                  kind: 'OUTLINE_REVIEW',
+                  label: '大綱審視',
+                  hint: '逐條指出問題並附上集數與引文；不直接改寫大綱。',
+                },
+              ]}
+            />
           )}
         </div>
       </header>

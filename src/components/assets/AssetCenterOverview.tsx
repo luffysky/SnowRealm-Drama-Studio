@@ -12,6 +12,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { AssetCenterNav } from "@/components/assets/AssetCenterNav";
 import { AssetUploadButton } from "@/components/assets/AssetUploadButton";
 import { EmptyState } from "@/components/ui/StateViews";
@@ -86,11 +87,14 @@ export function AssetCenterOverview({
   data,
   currency,
   fx,
+  ai,
 }: {
   projectId: string;
   data: AssetCenterData;
   currency: CurrencyValue;
   fx: FxRates;
+  /** 頁面組好的 AI 發動鈕，放在「新增檔案」旁邊 (Z153)。 */
+  ai?: ReactNode;
 }) {
   const counts = Object.fromEntries(
     data.byKind.map((row) => [row.kind, row.count]),
@@ -116,7 +120,15 @@ export function AssetCenterOverview({
           the only button on it used to open the music form, which left every
           other kind with no entry point here.
         */}
-        <div className="mb-1">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          {/*
+            素材提示詞生成 (Z153)。
+
+            放在上傳旁邊是因為它是上傳的**前一步**：這個任務寫的是提示詞，
+            不是圖——圖片 adapter 還沒有。拿到提示詞之後人去生圖，再把檔案
+            傳上來。按鈕上的字照這個事實寫，不要寫成「AI 生成素材」。
+          */}
+          {ai}
           <AssetUploadButton projectId={projectId} />
         </div>
       </div>

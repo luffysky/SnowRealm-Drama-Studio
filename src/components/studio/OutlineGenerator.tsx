@@ -18,6 +18,7 @@ import {
 } from '@/lib/outline'
 import type { OutlineEpisode } from '@/components/studio/OutlineBoard'
 import { checkReadiness, type ProjectReadiness } from '@/lib/ai/readiness'
+import type { AiEstimateResponse } from '@/lib/ai/types'
 import { cn } from '@/lib/utils'
 
 /**
@@ -185,8 +186,18 @@ export function OutlineGenerator({
       })
       if (!response.ok) throw new Error(await readApiError(response))
 
-      const body = (await response.json()) as { cost?: number; currency?: string }
-      setEstimate({ cost: Number(body.cost ?? 0), currency: body.currency ?? 'USD' })
+      /*
+       * 同樣讀 `body.estimate` (Z153)。
+       *
+       * 這裡本來讀 `body.cost` 與 `body.currency`，兩個都不存在——回的是
+       * `{ estimate: { estimatedCostUsd, ... } }`。所以這個對話框上那一行
+       * 「預估成本約 NT$0」是真的在顯示零，而不是在顯示便宜。
+       *
+       * 幣別寫死 USD 而不是從回應讀：估價是供應商報的美金價，沒有別的幣別可
+       * 選；顯示時才用 `convert()` 換成使用者的顯示幣別。
+       */
+      const body = (await response.json()) as AiEstimateResponse
+      setEstimate({ cost: Number(body.estimate?.estimatedCostUsd ?? 0), currency: 'USD' })
       setPhase('estimated')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '估算失敗')

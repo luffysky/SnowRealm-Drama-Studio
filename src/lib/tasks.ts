@@ -121,6 +121,8 @@ export async function taskBoard(userId: string): Promise<TaskBoard> {
 export async function createTask(input: {
   projectId: string
   episodeId?: string | null
+  /** 集號；`episodeId` 沒給的時候用它去換 (Z153)。 */
+  episodeNumber?: number | null
   title: string
   description?: string
   status?: TaskStatusValue
@@ -136,6 +138,28 @@ export async function createTask(input: {
     .limit(1)
 
   if (!project) throw ApiError.notFound('找不到這部作品')
+
+  /*
+   * 集號換 id (Z153).
+   *
+   * AI 建議回的是「第 7 集」。換不到就掛在作品層級，**不要擋下整張卡片**：
+   * 建議本身還是有用的，而「第 7 集還沒建立」不是這張卡片的錯。
+   */
+  let episodeId = input.episodeId ?? null
+  if (!episodeId && input.episodeNumber) {
+    const [match] = await db
+      .select({ id: episodes.id })
+      .from(episodes)
+      .where(
+        and(
+          eq(episodes.projectId, input.projectId),
+          eq(episodes.number, input.episodeNumber),
+          isNull(episodes.deletedAt)
+        )
+      )
+      .limit(1)
+    episodeId = match?.id ?? null
+  }
 
   /*
    * 新卡片放在那一欄的最後面。
@@ -154,7 +178,7 @@ export async function createTask(input: {
     .insert(tasks)
     .values({
       projectId: input.projectId,
-      episodeId: input.episodeId ?? null,
+      episodeId,
       title: input.title,
       description: input.description ?? '',
       status: input.status ?? 'TODO',

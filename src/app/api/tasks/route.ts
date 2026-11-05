@@ -20,6 +20,7 @@ export const POST = handle(async (request: Request) => {
   const created = await createTask({
     projectId: input.projectId,
     episodeId: input.episodeId ?? null,
+    episodeNumber: input.episodeNumber ?? null,
     title: input.title,
     description: input.description,
     status: input.status,

@@ -154,6 +154,7 @@ export default async function NovelWorkbenchPage({ params }: Params) {
 
           <OutlineBoard
             projectId={project.id}
+            projectTitle={project.title}
             episodes={outlineRows}
             canWrite={can(user, 'episode.write')}
             currency={user.displayCurrency}

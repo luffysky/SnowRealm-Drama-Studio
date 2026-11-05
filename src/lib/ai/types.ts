@@ -92,6 +92,17 @@ export type AiEstimate = {
   model: string
 }
 
+/**
+ * What `POST /api/ai/estimate` puts on the wire (Z153).
+ *
+ * 存在的理由是這個曾經錯過：路由回 `{ estimate }`，兩個呼叫端一個讀最外層的
+ * `estimatedCostUsd`、一個讀 `cost`，**沒有一個欄位存在**，於是「預估成本」
+ * 在兩個畫面上都永遠顯示零。零不會觸發錯誤處理，所以沒有人會去查。
+ *
+ * 兩邊都用同一個型別宣告，形狀再分岔就編不過去。
+ */
+export type AiEstimateResponse = { estimate: AiEstimate }
+
 export type AiProviderStatus =
   | { available: true; model: string; detail: string }
   /** Rendered as the dialog's explicit 不可用 state, with the reason shown. */

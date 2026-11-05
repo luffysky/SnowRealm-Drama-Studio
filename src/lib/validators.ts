@@ -1017,6 +1017,14 @@ export const voicePreviewSchema = z.object({
 export const taskCreateSchema = z.object({
   projectId: uuid,
   episodeId: uuid.nullable().optional(),
+  /**
+   * 集號，給「由 AI 建議建立」用 (Z153).
+   *
+   * AI 知道的是「第 7 集」，不是一個 UUID。由伺服器換成 `episodeId`，而不是
+   * 讓瀏覽器先查一次再送——那條路上多一個地方可以把卡片掛到別集去。
+   * 兩個都給的時候 `episodeId` 說了算。
+   */
+  episodeNumber: z.coerce.number().int().positive().nullable().optional(),
   title: z.string().trim().min(1, '標題不能空白').max(200),
   description: z.string().trim().max(4000).optional().default(''),
   status: z.enum(TASK_STATUSES).optional().default('TODO'),

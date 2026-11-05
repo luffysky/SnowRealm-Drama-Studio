@@ -7,6 +7,8 @@ import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { AI_JOB_KIND_LABEL, type AiJobKindValue } from '@/lib/constants'
+import { TASKS_READING_NOVEL, TASKS_WITHOUT_SOURCE } from '@/lib/ai/prompts'
+import type { AiEstimateResponse } from '@/lib/ai/types'
 import { formatMoney, type CurrencyValue, type FxRates } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
@@ -156,7 +158,7 @@ export function AiAssistant({
   )
 
   /** Tasks that adapt a novel rather than the text on screen. */
-  const readsNovel = task === 'NOVEL_TO_SCRIPT'
+  const readsNovel = TASKS_READING_NOVEL.has(task)
   const novelSource = novelSources?.find((source) => source.id === novelFrom) ?? null
 
   /** What this task actually reads. */
@@ -185,7 +187,7 @@ export function AiAssistant({
    */
   const ready = readsNovel
     ? Boolean(novelSource && novelSource.charCount > 0)
-    : Boolean(activeSource.trim()) || task === 'PROJECT_PLAN'
+    : Boolean(activeSource.trim()) || TASKS_WITHOUT_SOURCE.has(task)
 
   /**
    * Asks the worker to run now, and says so when it cannot.
@@ -252,15 +254,23 @@ export function AiAssistant({
       })
       if (!response.ok) throw new Error(await readApiError(response))
 
-      const data = (await response.json()) as {
-        estimatedCostUsd: number | null
-        estimatedInputTokens?: number
-        estimatedOutputTokens?: number
-      }
+      /*
+       * 讀 `body.estimate`，不是讀最外層 (Z153).
+       *
+       * 這一支回的是 `{ estimate: { inputTokens, maxOutputTokens,
+       * estimatedCostUsd, model } }`。這裡本來讀最外層的
+       * `estimatedCostUsd` / `estimatedInputTokens` / `estimatedOutputTokens`
+       * ——**三個欄位沒有一個存在**，於是「預估成本」永遠是 $0.00、token 永
+       * 遠是 0。
+       *
+       * 整個流程最前面那一步叫「先估成本，再產生」，spec v3 §0 要求的就是
+       * 它；而它一直在回答零。零不是錯誤訊息，所以沒有人會去查。
+       */
+      const data = (await response.json()) as AiEstimateResponse
 
       setEstimate({
-        usd: data.estimatedCostUsd ?? 0,
-        tokens: (data.estimatedInputTokens ?? 0) + (data.estimatedOutputTokens ?? 0),
+        usd: data.estimate?.estimatedCostUsd ?? 0,
+        tokens: (data.estimate?.inputTokens ?? 0) + (data.estimate?.maxOutputTokens ?? 0),
       })
       setPhase('estimated')
     } catch (error) {

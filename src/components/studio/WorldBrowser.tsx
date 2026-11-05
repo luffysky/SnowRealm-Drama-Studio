@@ -2,7 +2,7 @@
 
 import { BookOpen, Clock, Plus, Search, Trash2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
@@ -59,6 +59,8 @@ export type WorldBrowserProps = {
   countsByCategory: Record<string, number>
   totalEntries: number
   canonEntries: number
+  /** 頁面在伺服器端組好的 AI 發動鈕，渲染在標題列右邊 (Z153)。 */
+  ai?: ReactNode
 }
 
 export function WorldBrowser({
@@ -68,6 +70,7 @@ export function WorldBrowser({
   countsByCategory,
   totalEntries,
   canonEntries,
+  ai,
 }: WorldBrowserProps) {
   const router = useRouter()
   const toast = useToast()
@@ -162,7 +165,13 @@ export function WorldBrowser({
           {totalEntries} 條設定（{canonEntries} 條正史）・{events.length} 個時間線事件
         </p>
 
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/*
+            世界觀生成與一致性檢查 (Z153)。由頁面在伺服器端組好再傳進來：
+            一致性檢查要讀某一集的正文，而「有哪些集有正文」是一次查詢，
+            不該在這個元件裡再問一次。
+          */}
+          {ai}
           <button
             type="button"
             onClick={() => setComposing('entry')}

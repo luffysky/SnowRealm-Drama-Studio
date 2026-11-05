@@ -85,8 +85,26 @@ const TASK_INSTRUCTIONS: Record<AiTaskKind, string> = {
     '判斷依據：說話標記、一來一往的輪替、稱謂與語氣、前後文提到在場的人。'+
     '不確定就填 null 並把 confidence 壓低——寧可不答，不要答錯。'+
     '不要輸出 JSON 以外的任何文字，不要改寫正文。',
+  /*
+   * 改成結構化輸出 (Z153).
+   *
+   * 本來回散文，而散文沒有地方可以去——「建議接下來的任務安排」產出之後，
+   * 人要自己一條一條重打成卡片。那是 Z70 角色設計那條的同一個病：產出跟它
+   * 要去的地方對不起來，於是**沒有任何地方能套用它**。
+   *
+   * 回 JSON，就能在看板上直接勾選建立。這也是 `STRUCTURED_TASKS` 裡唯一的
+   * 判準：有沒有程式真的去 parse 它。
+   */
   TASK_SUGGEST:
-    '依目前製作進度，建議接下來的任務安排。逐條輸出建議，每條標明理由與影響的集數。不要擅自變更既有期限與負責人。',
+    '依目前製作進度，建議接下來該做的任務。' +
+    '只回一個 JSON 陣列，每筆 {title, projectTitle, episodeNumber, priority, reason}：' +
+    'title 是十五字以內、動詞開頭的一句話；' +
+    'projectTitle 必須是上面進度摘要裡出現過的作品名稱，不要自創；' +
+    'episodeNumber 是集號整數，跟特定集數無關就填 null；' +
+    'priority 只能是 URGENT、HIGH、NORMAL、LOW 其中一個；' +
+    'reason 用三十字以內說明為什麼現在該做這件事。' +
+    '不要重複看板上已經有的卡片，不要變更既有期限與負責人。' +
+    '最多十筆。不要輸出 JSON 以外的任何文字。',
 }
 
 export function instructionFor(task: AiTaskKind): string {
@@ -140,7 +158,6 @@ export function buildUserMessage(task: AiTaskKind, context: AiContext): string {
   return `## 任務\n${instructionFor(task)}\n\n${renderContext(context)}`
 }
 
-/** Tasks whose output is parsed as JSON rather than shown as prose. */
 /**
  * Reasoning effort per task.
  *
@@ -181,11 +198,50 @@ export const TASK_EFFORT: Record<AiTaskKind, 'low' | 'medium' | 'high'> = {
   ASSET_GENERATE: 'low',
 }
 
+/**
+ * Tasks whose output is parsed as JSON rather than shown as prose.
+ *
+ * 判準只有一個：**有程式真的去 parse 它**。這個集合會讓相容層送出
+ * `response_format: json_object`，所以放進一個 prompt 要求散文的任務，就是
+ * 在叫模型「用 JSON 寫一篇散文」——它會自己掰一個形狀出來，而介面照散文渲
+ * 染，於是畫面上出現一坨大括號。
+ *
+ * `WORLD_CONSISTENCY` 與 `SCRIPT_ANALYZE` 因此被移出來 (Z153)：它們的
+ * prompt 從頭到尾都是「逐條列出、附上引文」，沒有任何地方 parse 它們的輸
+ * 出。Claude 那邊只是多試一次 parse、失敗就算了，看不出差別；接上 GPT／
+ * DeepSeek 這些相容端點之後才會現形。
+ */
 export const STRUCTURED_TASKS: ReadonlySet<AiTaskKind> = new Set<AiTaskKind>([
   'CHARACTER_DESIGN',
   'DIALOGUE_ATTRIBUTE',
   'STORYBOARD_GENERATE',
-  'WORLD_CONSISTENCY',
   'TASK_SUGGEST',
-  'SCRIPT_ANALYZE',
+])
+
+/**
+ * 不需要「來源內容」就能跑的任務 (Z153).
+ *
+ * 這些從上下文（世界觀、角色、進度摘要）加上使用者的指示生成，沒有一段要
+ * 被改寫的正文。面板本來寫死 `task === 'PROJECT_PLAN'` 一個例外，於是另外
+ * 三種只要一掛上去，「估算成本」就會是灰的而且不說為什麼——spec v2 §4 禁
+ * 止的正是那個。
+ */
+export const TASKS_WITHOUT_SOURCE: ReadonlySet<string> = new Set<AiTaskKind>([
+  'PROJECT_PLAN',
+  'WORLD_GENERATE',
+  'ASSET_GENERATE',
+])
+
+/**
+ * 讀「某一集的小說」而不是螢幕上那段文字的任務 (Z153).
+ *
+ * 正文由伺服器讀（Z113）：一集一萬字，瀏覽器只需要說是哪一集。
+ *
+ * 型別是 `ReadonlySet<string>` 而成員照 `AiTaskKind` 檢查：面板拿到的是
+ * `AiJobKindValue`，那個集合多一個 `NOVEL_TO_AUDIO`（有聲書不是送給語言模型
+ * 的任務）。這樣寫錯種類名稱照樣編不過，而呼叫端不用先轉型。
+ */
+export const TASKS_READING_NOVEL: ReadonlySet<string> = new Set<AiTaskKind>([
+  'NOVEL_TO_SCRIPT',
+  'WORLD_CONSISTENCY',
 ])
