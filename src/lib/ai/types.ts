@@ -98,7 +98,13 @@ export type AiProviderStatus =
   | { available: false; reason: 'missing_key' | 'disabled' | 'error'; detail: string }
 
 export interface AiAdapter {
-  readonly kind: 'ANTHROPIC' | 'IMAGE_GENERIC' | 'VIDEO_GENERIC' | 'TTS_GENERIC'
+  readonly kind:
+    | 'ANTHROPIC'
+    /** 一個種類接七家：GPT、Gemini、DeepSeek、Kimi、千問、GLM、OpenRouter (Z151)。 */
+    | 'OPENAI_COMPATIBLE'
+    | 'IMAGE_GENERIC'
+    | 'VIDEO_GENERIC'
+    | 'TTS_GENERIC'
   readonly label: string
   /** Tasks this adapter can serve; the UI hides the rest. */
   readonly supportedTasks: readonly AiTaskKind[]

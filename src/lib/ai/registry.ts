@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { aiProviders } from '@/db/schema'
 import { decryptSecret } from '@/lib/crypto'
 import { BUILT_IN_PRICING, createAnthropicAdapter } from './anthropic'
+import { createOpenAiCompatibleAdapter } from './openai-compatible'
 import { getModelPricing, getTaskProfiles } from '@/lib/settings'
 import type { AiAdapter, AiTaskKind, MediaAdapter } from './types'
 
@@ -64,6 +65,26 @@ export function adapterFor(row: ProviderRow, overrides?: AiOverrides): AiAdapter
         ...(overrides?.pricing ? { pricing: overrides.pricing } : {}),
         ...(overrides?.taskProfiles ? { taskProfiles: overrides.taskProfiles } : {}),
       })
+    /*
+     * 一個種類接七家 (Z151).
+     *
+     * GPT、Gemini、DeepSeek、Kimi、千問、GLM、OpenRouter 全部提供 OpenAI
+     * 相容的 `/chat/completions`，差別只在 base URL、金鑰與模型名——而那三樣
+     * 都在 `ai_providers` 的欄位裡。所以一列資料就是一家。
+     */
+    case 'OPENAI_COMPATIBLE': {
+      if (!row.baseUrl) return null
+      return createOpenAiCompatibleAdapter({
+        apiKey: keyFor(row),
+        baseUrl: row.baseUrl,
+        label: row.label,
+        enabled: row.enabled,
+        ...(row.defaultModel ? { defaultModel: row.defaultModel } : {}),
+        ...(row.envVarName ? { envVarName: row.envVarName } : {}),
+        ...(overrides?.pricing ? { pricing: overrides.pricing } : {}),
+      })
+    }
+
     case 'IMAGE_GENERIC':
     case 'VIDEO_GENERIC':
     case 'TTS_GENERIC':

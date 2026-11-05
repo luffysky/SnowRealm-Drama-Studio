@@ -205,6 +205,8 @@ export const expenseCategoryEnum = pgEnum('expense_category', [
 /** Pluggable AI backends. The adapter for each lives in src/lib/ai/. */
 export const aiProviderKindEnum = pgEnum('ai_provider_kind', [
   'ANTHROPIC',
+  /** GPT／Gemini／DeepSeek／Kimi／千問／GLM／OpenRouter 共用這一種 (Z151)。 */
+  'OPENAI_COMPATIBLE',
   'IMAGE_GENERIC',
   'VIDEO_GENERIC',
   'TTS_GENERIC',

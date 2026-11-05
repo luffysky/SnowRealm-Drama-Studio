@@ -361,6 +361,7 @@ export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategoryValue, string> = {
 
 export const AI_PROVIDER_KINDS = [
   'ANTHROPIC',
+  'OPENAI_COMPATIBLE',
   'IMAGE_GENERIC',
   'VIDEO_GENERIC',
   'TTS_GENERIC',
@@ -369,6 +370,8 @@ export type AiProviderKindValue = (typeof AI_PROVIDER_KINDS)[number]
 
 export const AI_PROVIDER_KIND_LABEL: Record<AiProviderKindValue, string> = {
   ANTHROPIC: 'Claude（文字）',
+  /** GPT、Gemini、DeepSeek、Kimi、千問、GLM、OpenRouter 共用這一種 (Z151)。 */
+  OPENAI_COMPATIBLE: 'OpenAI 相容（GPT／Gemini／DeepSeek／Kimi／千問／GLM／OpenRouter）',
   IMAGE_GENERIC: '圖片生成',
   VIDEO_GENERIC: '影片生成',
   TTS_GENERIC: '語音合成',

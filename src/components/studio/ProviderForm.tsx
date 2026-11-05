@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import { VENDORS, vendorById } from '@/lib/ai/vendors'
 import {
   AI_PROVIDER_KIND_LABEL,
   AI_PROVIDER_KINDS,
@@ -35,8 +36,14 @@ import {
  * 填完、存好、看起來成功，然後在排任務的時候才發現它不會動。
  */
 
-/** 只有這一種真的接得上。其他三種是 enum 裡的位置，不是能用的東西。 */
-const IMPLEMENTED = new Set<AiProviderKindValue>(['ANTHROPIC'])
+/**
+ * 真的接得上的種類。
+ *
+ * `OPENAI_COMPATIBLE` 一種就涵蓋 GPT、Gemini、DeepSeek、Kimi、千問、GLM、
+ * OpenRouter——它們都提供 OpenAI 相容的 `/chat/completions` (Z151)。
+ * 圖片／影片／語音那三種還是 enum 裡的位置，不是能用的東西。
+ */
+const IMPLEMENTED = new Set<AiProviderKindValue>(['ANTHROPIC', 'OPENAI_COMPATIBLE'])
 
 export function AddProvider({ models }: { models: readonly string[] }) {
   const router = useRouter()
@@ -46,6 +53,8 @@ export function AddProvider({ models }: { models: readonly string[] }) {
   const [saving, setSaving] = useState(false)
 
   const [kind, setKind] = useState<AiProviderKindValue>('ANTHROPIC')
+  /** 選了哪一家。空字串代表自己填 base URL (Z151)。 */
+  const [vendorId, setVendorId] = useState('')
   const [label, setLabel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [defaultModel, setDefaultModel] = useState(models[0] ?? '')
@@ -54,6 +63,7 @@ export function AddProvider({ models }: { models: readonly string[] }) {
   const [enabled, setEnabled] = useState(true)
 
   const implemented = IMPLEMENTED.has(kind)
+  const chosenVendor = vendorId ? vendorById(vendorId) : null
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -128,6 +138,54 @@ export function AddProvider({ models }: { models: readonly string[] }) {
             ))}
           </select>
         </label>
+
+        {/*
+          * 挑廠商，把 base URL 填好 (Z151).
+          *
+          * 不讓人手打 base URL：打錯的結果是一個永遠連不上的供應商，而錯誤
+          * 訊息只會說「連不上」。下拉裡每一個網址都實際請求驗證過。
+          */}
+        {kind === 'OPENAI_COMPATIBLE' && (
+          <label className="flex flex-col gap-1 sm:col-span-2">
+            <span className="text-[10px] text-ink-400">哪一家</span>
+            <select
+              value={vendorId}
+              onChange={(event) => {
+                const picked = vendorById(event.target.value)
+                setVendorId(event.target.value)
+                if (!picked) return
+                setBaseUrl(picked.baseUrl)
+                setEnvVarName(picked.envVarName)
+                if (!label.trim()) setLabel(picked.label)
+                setDefaultModel('')
+              }}
+              className="h-8 rounded-lg bg-stage-850 px-2 text-[11px] text-ink-100 ring-1 ring-inset ring-stage-700 focus:ring-2 focus:ring-accent-500 focus:outline-none"
+            >
+              <option value="">自己填 base URL</option>
+              {VENDORS.map((vendor) => (
+                <option key={vendor.id} value={vendor.id}>
+                  {vendor.label}
+                </option>
+              ))}
+            </select>
+            {chosenVendor && (
+              <span className="text-[10px] leading-relaxed text-ink-600">
+                {chosenVendor.note}
+                {' '}
+                金鑰在{' '}
+                <a
+                  href={chosenVendor.keyUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2 hover:text-ink-300"
+                >
+                  {chosenVendor.keyUrl}
+                </a>
+                {!chosenVendor.listsModels && '　這一家列不出模型清單，模型名要自己填。'}
+              </span>
+            )}
+          </label>
+        )}
 
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-ink-400">名稱</span>

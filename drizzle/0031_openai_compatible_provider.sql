@@ -1,0 +1,18 @@
+-- 一個種類，接得上七家（Z151）。
+--
+-- GPT、Gemini、DeepSeek、Kimi、千問、GLM、OpenRouter——全部都提供 OpenAI
+-- 相容的 `/chat/completions`，差別只在 base URL、金鑰與模型名，而那三樣
+-- `ai_providers` 本來就有欄位。所以不是七個 enum 值配七個適配器，是**一個**。
+--
+-- 每一個端點都實際打過才寫進預設清單（401／400 代表端點真的在，只是要授權）：
+--
+--   api.openai.com/v1                            401
+--   generativelanguage.googleapis.com/v1beta/openai  400「缺 Authorization」
+--   api.deepseek.com                             401
+--   api.moonshot.cn/v1                           401
+--   dashscope.aliyuncs.com/compatible-mode/v1    401
+--   open.bigmodel.cn/api/paas/v4                 401
+--   openrouter.ai/api/v1                         200
+--
+-- `IF NOT EXISTS` 所以重跑安全——`apply-migration.ts` 要求 migration 等冪。
+ALTER TYPE "ai_provider_kind" ADD VALUE IF NOT EXISTS 'OPENAI_COMPATIBLE';

@@ -5,6 +5,7 @@ import { AI_EFFORTS } from '@/lib/settings-view'
 import { CURRENCIES } from '@/lib/money'
 import { PRODUCTION_STAGE_KEYS, PRODUCTION_STAGE_STATUSES } from '@/lib/production'
 import {
+  AI_PROVIDER_KINDS,
   ASSET_KINDS,
   CAMERA_MOVES,
   CHARACTER_TIERS,
@@ -479,7 +480,7 @@ export const aiRunSchema = z.object({
 })
 
 export const aiProviderSchema = z.object({
-  kind: z.enum(['ANTHROPIC', 'IMAGE_GENERIC', 'VIDEO_GENERIC', 'TTS_GENERIC']),
+  kind: z.enum(AI_PROVIDER_KINDS),
   label: z.string().trim().min(1).max(60),
   defaultModel: z.string().trim().max(80).optional().default(''),
   /** Plaintext only on the way in; stored encrypted, never returned. */
