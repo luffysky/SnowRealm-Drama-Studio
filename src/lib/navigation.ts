@@ -127,9 +127,9 @@ export const NAV_SECTIONS: NavSection[] = [
     key: 'tasks',
     label: '跨作品任務',
     icon: 'ListChecks',
+    // Z89：清單、新增、改狀態，而且樂觀鎖真的在比對。
+    ready: true,
     href: '/tasks',
-    ready: false,
-    milestone: 'M3',
     design: 18,
   },
   {

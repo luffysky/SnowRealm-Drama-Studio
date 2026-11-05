@@ -16,6 +16,8 @@ import {
   PROJECT_STATUSES,
   SHOT_SIZES,
   SHOT_STATUSES,
+  TASK_PRIORITIES,
+  TASK_STATUSES,
   WORLD_CATEGORIES,
   WORLD_EVENT_SCOPES,
 } from './constants'
@@ -1007,6 +1009,44 @@ export const voicePreviewSchema = z.object({
   style: z.string().trim().max(60).optional(),
   text: z.string().trim().min(1).max(60).optional(),
 })
+
+/* -------------------------------------------------------------------------- */
+/* 跨作品任務 (Z89)                                                            */
+/* -------------------------------------------------------------------------- */
+
+export const taskCreateSchema = z.object({
+  projectId: uuid,
+  episodeId: uuid.nullable().optional(),
+  title: z.string().trim().min(1, '標題不能空白').max(200),
+  description: z.string().trim().max(4000).optional().default(''),
+  status: z.enum(TASK_STATUSES).optional().default('TODO'),
+  priority: z.enum(TASK_PRIORITIES).optional().default('NORMAL'),
+  assigneeId: uuid.nullable().optional(),
+  dueDate: z.string().trim().optional(),
+})
+
+export const taskUpdateSchema = z
+  .object({
+    status: z.enum(TASK_STATUSES).optional(),
+    priority: z.enum(TASK_PRIORITIES).optional(),
+    assigneeId: uuid.nullable().optional(),
+    progress: z.coerce.number().int().min(0).max(100).optional(),
+    title: z.string().trim().min(1).max(200).optional(),
+    dueDate: z.string().trim().nullable().optional(),
+    /**
+     * 樂觀鎖 (Z89).
+     *
+     * `tasks.lock_revision` 這個欄位本來就在，schema 的註解寫明用途：
+     * 「so two simultaneous board drags cannot silently clobber」。要求呼叫端
+     * 帶上它——不帶的話那個欄位就只是一個沒有人讀的數字，而兩個人同時改同
+     * 一張卡的時候，後寫的會安靜地蓋掉先寫的。
+     */
+    lockRevision: z.coerce.number().int().min(1),
+  })
+  .refine(
+    (value) => Object.keys(value).filter((key) => key !== 'lockRevision').length > 0,
+    { message: '沒有要變更的欄位' }
+  )
 
 /**
  * 哪個任務用哪個模型 (Z152).
