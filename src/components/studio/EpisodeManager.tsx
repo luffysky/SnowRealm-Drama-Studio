@@ -949,6 +949,16 @@ function DetailRail({
         </div>
       )}
 
+      {/* 設計稿 05 的「進入集數詳情 →」(Z36)。側欄放得下「是什麼」，放不下
+          九大階段的手動控制與每一段內容的入口。 */}
+      <Link
+        href={`/projects/${projectId}/episodes/${episode.id}`}
+        className="tap inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent-600 px-3 py-2 text-[11px] font-medium text-white transition-colors hover:bg-accent-500"
+      >
+        進入集數詳情
+        <ChevronRight aria-hidden className="size-3.5" />
+      </Link>
+
       <FinalCutPanel projectId={projectId} episodeId={episode.id} canWrite={canWrite} />
 
       <Link

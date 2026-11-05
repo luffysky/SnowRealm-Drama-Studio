@@ -115,7 +115,6 @@ src/lib/novel-reader-view.ts#READER_STORAGE_KEY
 src/lib/novel-reader-view.ts#SPEECH_PITCH_DEFAULT
 src/lib/novel-reader-view.ts#SPEECH_RATE_DEFAULT
 src/lib/production.ts#PRODUCTION_STAGE_SHORT
-src/lib/production.ts#PRODUCTION_STAGE_STATUS_DOT
 src/lib/production.ts#STAGE_FRACTION_SQL
 src/lib/production.ts#episodeProgress
 src/lib/production.ts#stageFraction
@@ -164,12 +163,10 @@ src/lib/validators.ts#assetUpdateSchema
 src/lib/validators.ts#characterSchema
 src/lib/validators.ts#confirmNameSchema
 src/lib/validators.ts#documentSaveSchema
-src/lib/validators.ts#episodeSchema
 src/lib/validators.ts#expenseSchema
 src/lib/validators.ts#profileSchema
 src/lib/validators.ts#projectSchema
 src/lib/validators.ts#shotReorderSchema
-src/lib/validators.ts#stageUpdateSchema
 src/lib/validators.ts#taskSchema
 src/lib/validators.ts#worldEntrySchema
 src/lib/writing.ts#estimateSceneSeconds

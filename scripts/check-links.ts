@@ -152,12 +152,17 @@ function matches(link: string, route: string): boolean {
  * 每次執行都先拿兩個**真的出現過**的壞連結試一次：如果連它們都抓不到，就
  * 直接說這支工具壞了，不要報平安。
  *
- * 這兩個不是假想的例子：浮動播放器連過 `/listen/<作品>`，AI 收件匣連過
- * `/projects/<作品>/episodes/<集數>`，兩個都是使用者踩到才發現的。
+ * 這兩個不是假想的例子：浮動播放器連過 `/listen/<作品>`，而
+ * `/watch/<作品>/<集數>` 是影片播放頁連過的——兩個都是使用者踩到才發現的。
+ *
+ * **`/projects/*\/episodes/*` 以前在這份清單裡，2026-11-05 拿掉了**：Z36 把
+ * 集數詳情頁做出來，那條路由真的存在了，所以它不再是壞連結。這支工具當場
+ * 報「我壞了」而不是報平安——那正是它該做的事，但也表示這種自我檢查必須跟
+ * 著路由一起維護。
  */
 function selfTest(routes: string[]): boolean {
-  const shouldFail = ['/listen/*', '/projects/*/episodes/*']
-  const shouldPass = ['/listen', '/projects/*/episodes']
+  const shouldFail = ['/listen/*', '/watch/*/*']
+  const shouldPass = ['/listen', '/projects/*/episodes', '/projects/*/episodes/*']
 
   const missed = shouldFail.filter((path) => routes.some((route) => matches(path, route)))
   const falseAlarm = shouldPass.filter((path) => !routes.some((route) => matches(path, route)))
