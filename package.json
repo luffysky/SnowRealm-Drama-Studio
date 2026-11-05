@@ -29,7 +29,8 @@
     "check:links": "tsx scripts/check-links.ts",
     "check:api": "tsx scripts/check-api-wiring.ts",
     "check:ai": "tsx scripts/check-ai-tasks.ts",
-    "check": "npm run typecheck && npm run lint && npm run check:links && npm run check:api && npm run check:ai && npm run test"
+    "check:dead": "tsx scripts/check-dead-wiring.ts",
+    "check": "npm run typecheck && npm run lint && npm run check:links && npm run check:api && npm run check:ai && npm run check:dead && npm run test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
