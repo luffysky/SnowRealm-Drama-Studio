@@ -13,6 +13,7 @@ import {
   type EpisodeRow,
 } from '@/lib/episodes'
 import { listArcs } from '@/lib/arcs'
+import { existingEpisodeNumbers } from '@/lib/episode-batch'
 import { requireProjectPage } from '@/lib/project-access'
 import { PRODUCTION_STAGE_KEYS, type ProductionStageKey } from '@/lib/production'
 
@@ -62,6 +63,12 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
    * second 卷 exists would leave no way to make one.
    */
   const arcs = await listArcs(project.id)
+
+  /*
+   * 批次建立的預覽要**全部**的集號，不是當前頁那二十筆 (Z66)。240 個整數，
+   * 比起「預覽說會建 120 集、實際跳過 118 集」便宜太多。
+   */
+  const existingNumbers = await existingEpisodeNumbers(project.id)
   const arcParam = one(sp.arc)
   const arcId = arcs.some((arc) => arc.id === arcParam) ? arcParam : ''
 
@@ -95,6 +102,8 @@ export default async function EpisodesPage({ params, searchParams }: Params) {
       sort={parseSort(one(sp.sort))}
       arcs={arcs}
       arcId={arcId}
+      existingNumbers={existingNumbers}
+      defaultTargetSec={Math.round((project.targetMinSec + project.targetMaxSec) / 2)}
     />
   )
 }

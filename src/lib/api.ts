@@ -16,51 +16,10 @@ import { getSessionUser, type SessionUser } from '@/lib/auth/session'
  * can quote the id from a failure and it can be found in the logs.
  */
 
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly code: string = 'error',
-    readonly details?: unknown,
-    /** Extra response headers, e.g. Retry-After on a 429. */
-    readonly headers?: Record<string, string>
-  ) {
-    super(message)
-    this.name = 'ApiError'
-  }
+import { ApiError } from '@/lib/api-error'
 
-  static unauthorized(message = '請先登入') {
-    return new ApiError(401, message, 'unauthorized')
-  }
-
-  static forbidden(message = '權限不足') {
-    return new ApiError(403, message, 'forbidden')
-  }
-
-  static notFound(message = '找不到資料') {
-    return new ApiError(404, message, 'not_found')
-  }
-
-  static badRequest(message: string, details?: unknown) {
-    return new ApiError(400, message, 'bad_request', details)
-  }
-
-  /** Someone else saved first, or the record is still referenced. */
-  static conflict(message = '資料已被另一位成員修改，請重新載入', details?: unknown) {
-    return new ApiError(409, message, 'conflict', details)
-  }
-
-  static rateLimited(message: string, retryAfterSec: number) {
-    return new ApiError(429, message, 'rate_limited', { retryAfterSec }, {
-      'Retry-After': String(retryAfterSec),
-    })
-  }
-
-  /** A required credential is not configured on the server. */
-  static notConfigured(message: string, details?: unknown) {
-    return new ApiError(503, message, 'not_configured', details)
-  }
-}
+// 既有呼叫端都是 `from '@/lib/api'`，所以照樣從這裡出去。
+export { ApiError } from '@/lib/api-error'
 
 export type ApiErrorBody = {
   error: { code: string; message: string; requestId: string; details?: unknown }

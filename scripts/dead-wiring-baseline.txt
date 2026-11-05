@@ -164,8 +164,6 @@ src/lib/validators.ts#assetUpdateSchema
 src/lib/validators.ts#characterSchema
 src/lib/validators.ts#confirmNameSchema
 src/lib/validators.ts#documentSaveSchema
-src/lib/validators.ts#episodeBatchSchema
-src/lib/validators.ts#episodeBulkUpdateSchema
 src/lib/validators.ts#episodeSchema
 src/lib/validators.ts#expenseSchema
 src/lib/validators.ts#profileSchema

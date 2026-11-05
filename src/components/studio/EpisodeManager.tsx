@@ -30,6 +30,8 @@ import {
   type ProductionStageStatus,
 } from '@/lib/production'
 import { ArcBar } from '@/components/studio/ArcBar'
+import { EpisodeBatchCreate } from '@/components/studio/EpisodeBatchCreate'
+import { EpisodeBulkEdit } from '@/components/studio/EpisodeBulkEdit'
 import type { ArcRow } from '@/lib/arcs-view'
 import { cn } from '@/lib/utils'
 import { FinalCutPanel } from '@/components/studio/FinalCutPanel'
@@ -68,6 +70,15 @@ export type EpisodeManagerProps = {
   heading?: string
   /** Whether this member may change the final cut. */
   canWrite?: boolean
+  /**
+   * 這部作品已經有的集號，給批次建立的預覽用 (Z66).
+   *
+   * 要全部，不是當前頁的那二十筆——預覽說「會建 120 集」而實際跳過 118 集
+   * 的話，那個預覽比沒有更糟。17 製作進度重用這個元件但不建集數，所以可選。
+   */
+  existingNumbers?: number[]
+  /** 批次建立時預填的目標片長，取自作品設定。 */
+  defaultTargetSec?: number
 }
 
 /** Dates cross into a Client Component, so they travel as ISO strings. */
@@ -91,12 +102,34 @@ export function EpisodeManager({
   arcId = '',
   heading = '集數管理',
   canWrite = false,
+  existingNumbers = [],
+  defaultTargetSec = 150,
 }: EpisodeManagerProps) {
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
 
   const [draftSearch, setDraftSearch] = useState(search)
+
+  /*
+   * 批次編輯選的是哪幾集 (Z67).
+   *
+   * 跟 `selected`（詳情列看的那一集）是兩回事，所以叫 picked——同一個字會
+   * 讓「選了三集」跟「正在看第七集」在程式裡長得一樣。
+   *
+   * 不放進網址：它是一個動作的暫時狀態，不是一個看得到的位置。把五十個 id
+   * 塞進 query string，換頁還會跟著跑。
+   */
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+
+  function togglePick(id: string) {
+    setPicked((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   /**
    * Rewrites the query string.
@@ -162,11 +195,30 @@ export function EpisodeManager({
           })}
         </div>
 
+        {/* 批次建立集數 (Z66)。驗證器寫好很久、一直沒有介面。 */}
+        {canWrite && arcs.length > 0 && (
+          <EpisodeBatchCreate
+            projectId={projectId}
+            arcs={arcs.map((arc) => ({ id: arc.id, title: arc.title }))}
+            defaultTargetSec={defaultTargetSec}
+            existingNumbers={existingNumbers}
+          />
+        )}
+
         <span className="ml-auto text-[11px] text-ink-500">
           顯示：第 {page} / {pageCount} 頁
           {matched !== stats.total && `（篩選後 ${matched} 集）`}
         </span>
       </header>
+
+      {/* 批次編輯 (Z67)。選了才出現——沒選的時候它只是一條佔位的灰條。 */}
+      {canWrite && picked.size > 0 && (
+        <EpisodeBulkEdit
+          projectId={projectId}
+          selected={[...picked]}
+          onClear={() => setPicked(new Set())}
+        />
+      )}
 
       <StatsBar stats={stats} />
 
@@ -256,9 +308,23 @@ export function EpisodeManager({
               className="py-14"
             />
           ) : view === 'CARD' ? (
-            <CardView rows={rows} projectId={projectId} selectedId={selected?.id ?? null} go={go} />
+            <CardView
+              rows={rows}
+              projectId={projectId}
+              selectedId={selected?.id ?? null}
+              go={go}
+              picked={canWrite ? picked : null}
+              onPick={togglePick}
+            />
           ) : (
-            <ListView rows={rows} selectedId={selected?.id ?? null} go={go} />
+            <ListView
+              rows={rows}
+              selectedId={selected?.id ?? null}
+              go={go}
+              /* 沒有寫入權限就不給多選——批次編輯的每一顆按鈕都會被擋下來。 */
+              picked={canWrite ? picked : null}
+              onPick={togglePick}
+            />
           )}
 
           {rows.length > 0 && (
@@ -327,10 +393,15 @@ function ListView({
   rows,
   selectedId,
   go,
+  picked,
+  onPick,
 }: {
   rows: SerialisedEpisode[]
   selectedId: string | null
   go: Go
+  /** 批次編輯選取的集數；null 代表這個畫面不開放多選 (Z67)。 */
+  picked: Set<string> | null
+  onPick: (id: string) => void
 }) {
   return (
     <>
@@ -338,6 +409,11 @@ function ListView({
         <table className="w-full text-left text-xs">
           <thead className="text-[10px] text-ink-600">
             <tr className="border-b border-stage-700/60">
+              {picked && (
+                <th scope="col" className="w-8 pl-4">
+                  <span className="sr-only">選取</span>
+                </th>
+              )}
               <th scope="col" className="w-20 px-4 py-2 font-medium">
                 集數
               </th>
@@ -371,6 +447,21 @@ function ListView({
                   row.id === selectedId ? 'bg-accent-600/10' : 'hover:bg-stage-850/60'
                 )}
               >
+                {picked && (
+                  /*
+                   * `stopPropagation`：這一列整列可以點（進詳情），而勾選不
+                   * 該順便換頁——少了它，每勾一集就跳走一次。
+                   */
+                  <td className="pl-4" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={picked.has(row.id)}
+                      onChange={() => onPick(row.id)}
+                      aria-label={`選取第 ${row.number} 集`}
+                      className="size-3.5 accent-accent-500"
+                    />
+                  </td>
+                )}
                 <td className="px-4 py-2 font-medium text-ink-300 tabular-nums">
                   EP{String(row.number).padStart(3, '0')}
                 </td>
@@ -405,12 +496,27 @@ function ListView({
       {/* Below lg the seven columns become seven slivers; stack instead. */}
       <ul className="flex flex-col lg:hidden">
         {rows.map((row) => (
-          <li key={row.id}>
+          <li key={row.id} className="flex items-center border-b border-stage-800/70">
+            {/*
+              核取方塊放在按鈕**外面**：`<button>` 裡面不能再放可互動元素，
+              放進去在鍵盤與螢幕閱讀器上都是壞的。
+            */}
+            {picked && (
+              <label className="flex shrink-0 items-center pl-4">
+                <span className="sr-only">選取第 {row.number} 集</span>
+                <input
+                  type="checkbox"
+                  checked={picked.has(row.id)}
+                  onChange={() => onPick(row.id)}
+                  className="size-3.5 accent-accent-500"
+                />
+              </label>
+            )}
             <button
               type="button"
               onClick={() => go({ ep: row.id }, true)}
               className={cn(
-                'flex w-full flex-col gap-1.5 border-b border-stage-800/70 px-4 py-3 text-left transition-colors',
+                'flex w-full flex-col gap-1.5 px-4 py-3 text-left transition-colors',
                 row.id === selectedId ? 'bg-accent-600/10' : 'hover:bg-stage-850/60'
               )}
             >
@@ -440,16 +546,35 @@ function CardView({
   rows,
   selectedId,
   go,
+  picked,
+  onPick,
 }: {
   rows: SerialisedEpisode[]
   projectId: string
   selectedId: string | null
   go: Go
+  picked: Set<string> | null
+  onPick: (id: string) => void
 }) {
   return (
     <ul className="grid gap-2 p-3 sm:grid-cols-2 2xl:grid-cols-3">
       {rows.map((row) => (
-        <li key={row.id}>
+        <li key={row.id} className="relative">
+          {/*
+            疊在卡片角落，但在 `<button>` **外面**——按鈕裡面不能再放可互動
+            元素。`z-10` 讓它壓在卡片上方，不然整張卡片的點擊會蓋掉它。
+          */}
+          {picked && (
+            <label className="absolute top-2 left-2 z-10 flex rounded bg-stage-950/70 p-1 ring-1 ring-stage-700">
+              <span className="sr-only">選取第 {row.number} 集</span>
+              <input
+                type="checkbox"
+                checked={picked.has(row.id)}
+                onChange={() => onPick(row.id)}
+                className="size-3.5 accent-accent-500"
+              />
+            </label>
+          )}
           <button
             type="button"
             onClick={() => go({ ep: row.id }, true)}
