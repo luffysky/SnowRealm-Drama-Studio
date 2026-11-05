@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { CalendarDays, Crown, Heart, PlayCircle, Coins, MoreHorizontal } from 'lucide-react'
+import { CalendarDays, Crown, Heart, PlayCircle, Coins } from 'lucide-react'
 import { useState } from 'react'
+import { CardMenu } from '@/components/studio/CardMenu'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import {
@@ -213,13 +214,18 @@ export function ProjectCard({
 
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate text-[11px] text-ink-400">{episodeLine}</span>
-          <span
-            aria-hidden
-            title="更多操作尚未實作，預計於 M1 階段交付"
-            className="shrink-0 cursor-default text-ink-700"
-          >
-            <MoreHorizontal className="size-4" />
-          </span>
+          {/* Z38：以前是個禁用的 span，標著「預計於 M1 階段交付」。 */}
+          <CardMenu
+            label={`《${project.title}》的更多操作`}
+            shareUrl={`/projects/${project.id}`}
+            items={[
+              { href: `/projects/${project.id}/episodes`, label: '集數管理' },
+              { href: `/projects/${project.id}/novel`, label: '小說編輯' },
+              { href: `/projects/${project.id}/storyboard`, label: '分鏡工作台' },
+              { href: `/projects/${project.id}/production`, label: '製作流程' },
+              { href: `/projects/${project.id}/reviews`, label: '審核發布' },
+            ]}
+          />
         </div>
 
         <div className="flex items-center gap-2">
