@@ -12,6 +12,7 @@ async function main() {
     .select({ id: projects.id, title: projects.title })
     .from(projects)
     .where(isNull(projects.deletedAt))
+    .orderBy(projects.createdAt)
     .limit(1)
   if (!project) throw new Error('沒有作品')
 

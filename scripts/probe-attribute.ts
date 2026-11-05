@@ -19,6 +19,7 @@ async function main() {
     .select({ id: projects.id })
     .from(projects)
     .where(eq(projects.title, '一灶見山河'))
+    .orderBy(projects.createdAt)
     .limit(1)
   if (!project) throw new Error('找不到作品')
 

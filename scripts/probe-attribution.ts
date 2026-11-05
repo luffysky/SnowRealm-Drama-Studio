@@ -13,6 +13,7 @@ async function main() {
     .select({ id: projects.id, title: projects.title })
     .from(projects)
     .where(eq(projects.title, '一灶見山河'))
+    .orderBy(projects.createdAt)
     .limit(1)
   if (!project) return process.exit(0)
 

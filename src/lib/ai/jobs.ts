@@ -58,7 +58,24 @@ export async function buildContext(input: {
   let projectId = input.projectId ?? null
 
   if (input.userInstruction) context.userInstruction = input.userInstruction
-  if (input.sourceText) context.sourceText = input.sourceText
+
+  /*
+   * 送純文字給模型，不要送 HTML (Z115).
+   *
+   * 小說編輯器傳的是它自己的原始內容，而那是 HTML。實測這部作品的 11 章：
+   * 123,559 個字元裡 **43,928 個是標籤**——**35.6% 的 token 在買 `<p>`**。
+   *
+   * 而且不只是錢：標籤會干擾模型判斷段落。`<h2>` 跟 `<p>` 在模型眼裡就是
+   * 內容的一部分，於是它要一邊讀故事一邊忽略排版。
+   *
+   * 修在這裡而不是修在編輯器，因為這是 sourceText 進入 AI 上下文的**唯一
+   * 入口**——估價（`/api/ai/estimate`）跟真正送出（`/api/ai/jobs`）都走這
+   * 一支。修在呼叫端就會變成「估的時候算標籤、送的時候不算」，那兩個數字
+   * 是並排顯示給人看的。
+   *
+   * 對已經是純文字的輸入是等冪的：沒有標籤可以拿掉，只會順手 trim。
+   */
+  if (input.sourceText) context.sourceText = stripHtmlToText(input.sourceText)
 
   // An explicit novel wins: it is the thing being adapted.
   if (input.novelEpisodeId) {

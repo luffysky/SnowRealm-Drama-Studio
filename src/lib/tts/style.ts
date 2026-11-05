@@ -76,6 +76,22 @@ const COLD_SMILE =
   /笑[^，。！？」]{0,6}(沒有|毫無|不帶|全無)[^，。！？」]{0,4}(溫度|溫暖|暖意|笑意)|(沒有|毫無|不帶)[^，。！？」]{0,4}溫度/
 
 /**
+ * 笑的是旁人，不是說話的人 (Z144).
+ *
+ * 實測逮到的那一句是「周圍幾個**看熱鬧的攤販**忍不住笑出聲」，後面接的台詞
+ * 被判成 cheerful——但那是鬨笑，是看戲，不是高興。
+ *
+ * 根本問題比「哪個詞算開心」深一層：情緒證據是從**上一段**讀來的，而上一段
+ * 描述的人不一定是下一句開口的人。要真的分辨得做指代解析，那是另一個題目。
+ *
+ * 這裡只處理最清楚的一種：上一段笑的是**一群人**。一群人不會是「說話的那
+ * 一個」，所以那個笑不該被借給他。認不出來就不給風格——平淡地唸過去，比用
+ * 錯的情緒唸誠實。
+ */
+const CROWD_LAUGH =
+  /(看熱鬧|圍觀|旁觀)|((眾人|人群|旁人|路人|百姓|攤販|眾位|大夥|眾食客)[^。！？」]{0,8}笑)/
+
+/**
  * 每一種情緒的證據。
  *
  * 全部是**正文寫出來的情緒詞**，不是從標點推的。順序有意義：先比對的贏，
@@ -102,7 +118,12 @@ export function emotionOf(text: string, context = ''): Emotion | null {
   const both = `${context}${text}`
 
   for (const row of EVIDENCE) {
-    if (row.emotion === 'cheerful' && (BITTER_LAUGH.test(both) || COLD_SMILE.test(both))) continue
+    if (
+      row.emotion === 'cheerful' &&
+      (BITTER_LAUGH.test(both) || COLD_SMILE.test(both) || CROWD_LAUGH.test(both))
+    ) {
+      continue
+    }
     if (row.pattern.test(both)) return row.emotion
   }
 

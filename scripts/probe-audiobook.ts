@@ -20,7 +20,8 @@ async function main() {
 
   const [project] = await db
     .select({ id: projects.id, title: projects.title })
-    .from(projects).where(eq(projects.title, '一灶見山河')).limit(1)
+    .from(projects).where(eq(projects.title, '一灶見山河')).orderBy(projects.createdAt)
+    .limit(1)
   if (!project) throw new Error('找不到作品')
 
   const [episode] = await db

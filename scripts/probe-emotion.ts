@@ -4,14 +4,11 @@ loadEnv()
 /** 情緒是從哪一句話判出來的。判錯比判不出來難聽，所以要看原文。 */
 async function main() {
   const { novelForReading } = await import('../src/lib/novel-export')
-  const { db } = await import('../src/db')
-  const { projects } = await import('../src/db/schema')
-  const { isNull } = await import('drizzle-orm')
+  const { mainProject } = await import('./helpers/main-project')
   const { emotionOf } = await import('../src/lib/tts/style')
   const { isDialogue } = await import('../src/lib/narration')
 
-  const [project] = await db.select({ id: projects.id }).from(projects).where(isNull(projects.deletedAt)).limit(1)
-  if (!project) throw new Error('沒有作品')
+  const project = await mainProject()
 
   const chapters = await novelForReading(project.id)
   const found = new Map<string, { line: string; context: string }[]>()
