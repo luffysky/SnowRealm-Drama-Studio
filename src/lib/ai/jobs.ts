@@ -309,11 +309,28 @@ export async function estimateJob(input: {
  * The only route from AI output into real data. Writes a version snapshot of
  * the *existing* content first, so applying a candidate is always reversible.
  */
+/**
+ * 採用之後到底寫了什麼 (Z71).
+ *
+ * `versionId` 本來是唯一的回報，而面板用「有沒有 versionId」來決定要說
+ * 「已寫回，可在版本紀錄回溯」還是「還沒有自動寫回」。這對 document 目標是
+ * 對的，但分鏡、角色設計、對白歸屬**都有寫進去、都沒有 version 快照**——照
+ * 那個判斷法會對著一個剛建好 32 個鏡頭的任務說「還沒有自動寫回」。
+ *
+ * 所以回一句話：寫了什麼、寫進哪裡。沒寫就說沒寫。
+ */
+export type ApplyOutcome = {
+  job: AiJobRow
+  versionId: string | null
+  /** 給人看的一句話；null 代表這份產出沒有自動寫回任何地方。 */
+  wrote: string | null
+}
+
 export async function applyCandidate(input: {
   user: SessionUser
   jobId: string
   candidateIndex: number
-}): Promise<{ job: AiJobRow; versionId: string | null }> {
+}): Promise<ApplyOutcome> {
   const [job] = await db.select().from(aiJobs).where(eq(aiJobs.id, input.jobId)).limit(1)
   if (!job) throw ApiError.notFound('找不到該 AI 任務')
   if (job.status !== 'AWAITING_REVIEW') {
@@ -336,7 +353,7 @@ export async function applyCandidate(input: {
     await applyAttribution({ jobId: job.id, user: input.user })
 
     const [done] = await db.select().from(aiJobs).where(eq(aiJobs.id, job.id)).limit(1)
-    return { job: done ?? job, versionId: null }
+    return { job: done ?? job, versionId: null, wrote: '對白歸屬已寫入這一集' }
   }
 
   /*
@@ -351,7 +368,22 @@ export async function applyCandidate(input: {
     await applyCharacterDesign({ jobId: job.id, user: input.user })
 
     const [done] = await db.select().from(aiJobs).where(eq(aiJobs.id, job.id)).limit(1)
-    return { job: done ?? job, versionId: null }
+    return { job: done ?? job, versionId: null, wrote: '角色的外觀與聲線已更新' }
+  }
+
+  /*
+   * 分鏡寫的是鏡頭表，不是正文 (Z71).
+   *
+   * 跟上面兩個分支同一個理由。沒有它的話，採用會走到下面的
+   * `applyToDocument`，而這個任務的目標是一集的鏡頭、不是一份 document——
+   * 於是任務被標成已採用、一個鏡頭都沒建。
+   */
+  if (job.targetType === 'episode_shots') {
+    const { applyStoryboard } = await import('@/lib/storyboard-apply')
+    const { created } = await applyStoryboard({ jobId: job.id, user: input.user })
+
+    const [done] = await db.select().from(aiJobs).where(eq(aiJobs.id, job.id)).limit(1)
+    return { job: done ?? job, versionId: null, wrote: `建立了 ${created} 個鏡頭` }
   }
 
   let versionId: string | null = null
@@ -392,7 +424,11 @@ export async function applyCandidate(input: {
     summary: `套用 AI 產出（${job.kind} / ${candidate.label}）`,
   })
 
-  return { job: updated, versionId }
+  return {
+    job: updated,
+    versionId,
+    wrote: versionId ? '已寫回正文，原本的內容存成了版本' : null,
+  }
 }
 
 async function applyToDocument(input: {

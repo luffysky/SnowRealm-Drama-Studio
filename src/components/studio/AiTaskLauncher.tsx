@@ -35,6 +35,8 @@ export function AiTaskLauncher({
   sourceTextByTask,
   novelSources,
   scopeLabel,
+  targetType,
+  targetId,
   currency,
   fx,
   providerReady,
@@ -55,6 +57,9 @@ export function AiTaskLauncher({
   sourceTextByTask?: Partial<Record<AiJobKindValue, string>>
   novelSources?: { id: string; number: number; title: string; charCount: number }[]
   scopeLabel?: string
+  /** 採用時寫到哪裡去；不給的話採用只會標記、不會寫入 (Z71)。 */
+  targetType?: string
+  targetId?: string | null
   currency: CurrencyValue
   fx: FxRates
   providerReady: boolean
@@ -108,6 +113,8 @@ export function AiTaskLauncher({
             {...(sourceTextByTask ? { sourceTextByTask } : {})}
             {...(novelSources ? { novelSources } : {})}
             {...(scopeLabel ? { scopeLabel } : {})}
+            {...(targetType ? { targetType } : {})}
+            {...(targetId ? { targetId } : {})}
             tasks={tasks}
             currency={currency}
             fx={fx}

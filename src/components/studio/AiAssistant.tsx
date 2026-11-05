@@ -90,6 +90,15 @@ export type AiAssistantProps = {
   initialTask?: AiJobKindValue
   /** What the task will run on, when it is narrower than the whole chapter. */
   scopeLabel?: string
+  /**
+   * 採用時要寫到哪裡去 (Z71).
+   *
+   * 不給的話 `applyCandidate` 沒有目標，於是採用只會把任務標成已採用、一個
+   * 字都沒改——而面板會照實說「還沒有自動寫回」。分鏡要的是
+   * `episode_shots`，它有專屬的寫入分支。
+   */
+  targetType?: string
+  targetId?: string | null
 }
 
 type Phase = 'idle' | 'estimating' | 'estimated' | 'running' | 'review' | 'failed'
@@ -133,6 +142,8 @@ export function AiAssistant({
   providerDetail,
   initialTask,
   scopeLabel,
+  targetType,
+  targetId,
 }: AiAssistantProps) {
   const toast = useToast()
 
@@ -176,8 +187,20 @@ export function AiAssistant({
       includeWorld: true,
       includeCharacters: true,
       candidates: 1,
+      ...(targetType ? { targetType } : {}),
+      ...(targetId ? { targetId } : {}),
     }),
-    [task, projectId, episodeId, activeSource, instruction, readsNovel, novelFrom]
+    [
+      task,
+      projectId,
+      episodeId,
+      activeSource,
+      instruction,
+      readsNovel,
+      novelFrom,
+      targetType,
+      targetId,
+    ]
   )
 
   /*
@@ -406,10 +429,18 @@ export function AiAssistant({
        */
       const applied = (await response.json().catch(() => null)) as {
         versionId?: string | null
+        wrote?: string | null
       } | null
 
-      if (applied?.versionId) {
-        toast.success('已採用', '原本的內容已存成版本，可在版本紀錄回溯')
+      /*
+       * 照伺服器說的講 (Z71).
+       *
+       * 這裡本來用「有沒有 versionId」當判準，而分鏡、角色設計、對白歸屬都是
+       * 有寫進去、沒有 version 快照的——照那個判準會對著一個剛建好 32 個鏡頭
+       * 的任務說「還沒有自動寫回」。現在伺服器直接回一句它做了什麼。
+       */
+      if (applied?.wrote) {
+        toast.success('已採用', applied.wrote)
       } else {
         toast.warning('已標記為採用', '這份產出還沒有自動寫回正文——請自行複製需要的段落。')
       }

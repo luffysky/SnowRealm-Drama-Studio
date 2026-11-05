@@ -269,6 +269,45 @@ export const shotSchema = z.object({
   notes: z.string().trim().max(2000).optional().default(''),
 })
 
+/**
+ * 改一個鏡頭的局部欄位 (Z39).
+ *
+ * 每一欄都可選，但**至少要有一欄**：空的 PATCH 會把 `version` 加一、寫一筆
+ * 動態紀錄，然後什麼都沒改。
+ *
+ * 不沿用 `shotSchema.partial()`：那一份的欄位都有 `.default()`，partial 之後
+ * 預設值還在，於是「只改秒數」的請求會順手把景別重設成 MS。
+ */
+export const shotPatchSchema = z
+  .object({
+    sceneCode: z.string().trim().max(20).optional(),
+    durationSec: z.coerce
+      .number()
+      .int()
+      .min(1, '鏡頭長度至少 1 秒')
+      .max(120, '單一鏡頭不可超過 120 秒')
+      .optional(),
+    shotSize: z.enum(SHOT_SIZES).optional(),
+    camera: z.enum(CAMERA_MOVES).optional(),
+    location: z.string().trim().max(120).optional(),
+    timeOfDay: z.string().trim().max(40).optional(),
+    action: z.string().trim().max(3000).optional(),
+    dialogue: z.string().trim().max(3000).optional(),
+    speakerId: uuid.nullable().optional(),
+    prompt: z.string().trim().max(4000).optional(),
+    negativePrompt: z.string().trim().max(2000).optional(),
+    status: z.enum(SHOT_STATUSES).optional(),
+    notes: z.string().trim().max(2000).optional(),
+  })
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+    message: '沒有任何要修改的欄位',
+  })
+
+/** 往前或往後挪一格。不是給座標，是給方向——座標要處理序號重排。 */
+export const shotMoveSchema = z.object({
+  direction: z.enum(['up', 'down']),
+})
+
 export const shotReorderSchema = z.object({
   episodeId: uuid,
   /** Shot ids in their new order; index + 1 becomes `order`. */

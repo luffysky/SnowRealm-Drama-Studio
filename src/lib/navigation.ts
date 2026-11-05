@@ -212,7 +212,8 @@ export const PROJECT_TABS: ProjectTab[] = [
   { key: 'scripts', label: '劇本工坊', segment: 'scripts', ready: true, design: 7 },
   { key: 'world', label: '世界觀', segment: 'world', ready: true, design: 9 },
   { key: 'characters', label: '角色設定', segment: 'characters', ready: true, design: 10 },
-  { key: 'storyboard', label: '分鏡工作台', segment: 'storyboard', ready: false, milestone: 'M3', design: 12 },
+  // Z39/Z40/Z71：鏡頭表、總長校驗、AI 分鏡生成都做出來了。
+  { key: 'storyboard', label: '分鏡工作台', segment: 'storyboard', ready: true, design: 12 },
   { key: 'assets', label: '素材資產中心', segment: 'assets', ready: true, design: 81 },
   { key: 'production', label: '製作流程', segment: 'production', ready: true, design: 17 },
   { key: 'reviews', label: '審核發布', segment: 'reviews', ready: false, milestone: 'M4', design: 58 },

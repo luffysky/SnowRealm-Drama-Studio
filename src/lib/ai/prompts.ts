@@ -71,8 +71,31 @@ const TASK_INSTRUCTIONS: Record<AiTaskKind, string> = {
     'appearance（外型、服裝、髮型，中文敘述）、visualPrompt（定妝提示詞）、' +
     'negativePrompt（負面提示詞）、voiceNote（聲線建議）。' +
     '沒有把握的欄位給空字串，不要編。',
+  /*
+   * 改成結構化輸出 (Z39).
+   *
+   * 本來要的是一張「鏡頭表」，沒有說形狀，所以回來的是一段 Markdown 表格或
+   * 一串編號段落——而 `shots` 那張表有十幾個欄位，沒有人分得出哪一段該進
+   * `action`、哪一段該進 `prompt`。於是這個任務產出之後**沒有任何地方能套用
+   * 它**：跟 Z70 角色設計、Z153 任務建議同一個病。
+   *
+   * 景別與運鏡用列舉值而不是中文，因為它們進的是 pg enum。讓模型寫「中景」
+   * 再在這邊猜它是不是 `MS`，就是把一個會錯的翻譯塞進寫入路徑。
+   */
   STORYBOARD_GENERATE:
-    '依劇本產生分鏡鏡頭表。每個鏡頭需包含：場次、秒數、景別、運鏡、畫面描述、台詞、生圖提示詞。所有鏡頭秒數加總必須落在目標片長範圍內。',
+    '依劇本產生分鏡鏡頭表。' +
+    '只回一個 JSON 陣列，每筆 {sceneCode, durationSec, shotSize, camera, location, timeOfDay, action, dialogue, speaker, prompt, negativePrompt}：' +
+    'sceneCode 是場次代號，例如 S03；' +
+    'durationSec 是這個鏡頭幾秒，正整數；' +
+    'shotSize 只能是 EWS、WS、FS、MS、MCU、CU、ECU、INSERT 其中一個；' +
+    'camera 只能是 STATIC、PAN、TILT、DOLLY_IN、DOLLY_OUT、TRACKING、CRANE、HANDHELD、ZOOM 其中一個；' +
+    'location 與 timeOfDay 是地點與時間（日／夜／黃昏）；' +
+    'action 是畫面描述；dialogue 是這個鏡頭的台詞或旁白，沒有就填空字串；' +
+    'speaker 是說這句話的角色名稱，必須是角色名單上的名字，沒有台詞或判斷不出來就填 null；' +
+    'prompt 是可直接拿去生圖的提示詞，negativePrompt 是負面提示詞。' +
+    '**所有鏡頭的 durationSec 加總必須落在目標片長的正負一成之內**，' +
+    '算完請自己核對一次再輸出。' +
+    '不要改動劇本的劇情。不要輸出 JSON 以外的任何文字。',
   ASSET_GENERATE: '依需求撰寫素材生成提示詞，包含正向提示詞與負向提示詞。',
   DIALOGUE_ATTRIBUTE:
     '判斷每一句對白是誰說的。輸入是編號過的正文，以及要判斷的段號清單。'+
