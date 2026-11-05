@@ -1616,6 +1616,63 @@ select 它，畫面上沒有任何地方看得到——「收下、回報成功�
 
 `tests/character-portraits.test.ts` 六條；把實作拆掉之後五條變紅，驗過了。~~
 
+### ~~Z168　子代理審第四批（Z167 角色多圖）~~　✅ `M1`
+~~七條加三個測試漏洞，全部查證屬實。
+
+**我寫錯了一句話，而且寫在五個地方。** 註解、提示文案與吐司都說「分鏡與 AI 生
+圖讀的就是 `key_visual_asset_id`」——**那不是事實**。全專案 grep 過：AI 拿角
+色的是 `name`/`tier`/`appearance`/`personality` 四個**文字**欄位
+（`ai/jobs.ts`），`CHARACTER_DESIGN` 也只寫文字欄位；分鏡的參考圖是
+`shots.ref_asset_id`，由使用者自己挑，沒有任何地方從定妝照帶過去。唯一讀它的
+是角色列表與角色面板的 `Portrait`。遞補這個行為本身還是對的（那兩個地方真的會
+變），但理由錯了，而錯的理由會讓下一個人照它去推論別的設計。等 Z154 接上圖片
+生成，那裡才是該把定妝照接進去的地方。
+
+**軟刪角色之後，它的圖變成永遠刪不掉。** `removeCharacter` 只寫
+`deleted_at`，不碰 `asset_links`；`deleteAsset` 看到任何連結就 409；而
+`unlinkCharacterPortrait` 要求角色沒被軟刪，全專案又沒有角色還原路徑——那張圖
+卡死。修在 `findAssetReferences`：連到已軟刪角色的連結不算引用。留著連結列而
+不是在軟刪時一併刪，是為了讓「角色回來時圖庫也回來」還有機會成立。
+
+**`router.refresh()` 沒有回 Promise，而 `busy` 在 `finally` 就放掉了。** 移除
+一張圖之後 RSC 還在路上，縮圖列上它還在、按鈕也能按——點它就會 PATCH
+`keyVisualAssetId` 指向它，而 `onConflictDoNothing` 把連結**重新插回去**：剛做
+的移除被無聲還原，那張圖還變成了定妝照。改用 `useTransition`，`pending` 撐到
+RSC 落地。
+
+**`assertAssetUsable` 不看 `deleted_at`**，而圖庫查詢看——條件落差就是不變式
+二的繞道：`key_visual_asset_id` 可以指著一張已經軟刪的圖（對話附件「收回」就
+會軟刪），畫面上是大預覽破圖、縮圖列裡沒有任何一張帶「定妝」徽章。
+
+**圖庫查詢沒限 `assets.projectId`**，只靠「相信 `asset_links` 每一列都是乾淨
+的」。而 `beginUpload` 驗了 `episodeId` 屬於本專案，**沒驗** `linkTo.entityId`
+——見 Z169。查詢這邊加一條就不必相信它。
+
+**按鈕寫「更換角色圖」而它做的是新增**，正好是這個功能要修掉的誤解。
+`ImagePicker` 多一個 `uploadLabel`。
+
+**`key={portraits.length}` 的理由是錯的**：`ImagePicker` 沒有「內部留著剛傳完
+那一筆的預覽」這種狀態。而重掛真正丟掉的是「不是圖片檔」「請小於 12 MB」那些
+訊息與上傳失敗的「重試」按鈕。key 拿掉。
+
+**三條漏測補上：** 前面六條把查詢的三組條件拆掉之後仍然全綠（三張測試素材都是
+COMPLETED 且沒軟刪、從來沒建過別的 slot 的連結、沒測跨專案的 characterId）。
+現在十條，四組破壞實驗各自變紅都驗過。~~
+
+### Z169　上傳沒有驗 `linkTo` 的歸屬　`M2`
+`beginUpload`（`assets.ts`）驗了 `episodeId` 屬於本專案，但 `linkTo.entityId`
+完全沒驗。手動發一個 `projectId` 填 A、`linkTo` 指向 B 作品某個角色的上傳請
+求，那一列 `asset_links` 就建起來了。
+
+Z168 已經讓角色圖庫查詢自己加上 `assets.projectId` 條件，所以顯示那條路堵住
+了；但那張表還有 `shot`／`task`／`world_entry`／`document`／`expense` 五種
+entity，每一種都得自己防。
+
+**現在不是權限漏洞**：這個 schema 沒有 per-project 成員（`visibleProjects()`
+說兩個人都看得到每一部作品），所以跨專案不是權限邊界，只是資料完整性。等
+membership 真的出現，這條要先補——修法是在 `beginUpload` 依 `entityType` 查一
+次歸屬，而不是讓六個讀取端各自防一次。
+
 ### Z154　素材生成要等圖片 adapter　`M3`
 `ASSET_GENERATE` 現在寫的是**提示詞**，不是圖——`adapterFor()` 對 IMAGE 類一律
 回 null。按鈕上照這個事實寫（「AI 寫提示詞」），不要讓人以為按下去會跑出一張圖。
@@ -1637,11 +1694,11 @@ Z71 做了鏡頭編輯器與 AI 分鏡生成，第三張「分鏡比較」沒做
 | 里程碑 | 完成 | 合計 | 還沒做的 |
 |---|---|---|---|
 | **M0** | 5 | 6 | Z81 |
-| **M1** | 41 | 43 | Z34、Z51 |
-| **M2** | 54 | 60 | Z28、Z29、Z30、Z141、Z142、Z147 |
+| **M1** | 42 | 44 | Z34、Z51 |
+| **M2** | 54 | 61 | Z28、Z29、Z30、Z141、Z142、Z147、Z169 |
 | **M3** | 20 | 39 | Z8、Z9、Z10、Z11、Z12、Z13、Z14、Z16、Z17、Z18、Z19、Z53、Z72、Z102、Z104、Z143、Z145、Z154、Z155 |
 | **M4** | 3 | 16 | Z47、Z48、Z49、Z68、Z73、Z74、Z75、Z76、Z77、Z78、Z79、Z80、Z105 |
-| | **123** | **164** | |
+| | **124** | **166** | |
 
 ---
 

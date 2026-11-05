@@ -4,6 +4,7 @@ import {
   assetLinks,
   assets,
   assetVariants,
+  characters,
   episodes,
   projects,
   shots,
@@ -529,7 +530,23 @@ export async function findAssetReferences(assetId: string): Promise<AssetReferen
       slot: assetLinks.slot,
     })
     .from(assetLinks)
-    .where(eq(assetLinks.assetId, assetId))
+    /*
+     * 連到**已經被軟刪的角色**的那一列不算引用 (Z168).
+     *
+     * 不這樣過濾的話會出現一條死路：角色上傳了一張圖 → 角色被軟刪 → 去素材
+     * 中心刪那張圖 → 409「仍被 1 處引用（character(key_visual)）」。而那個
+     * 角色已經從角色頁消失，沒有任何介面能解除那個連結，直接打
+     * `unlinkCharacterPortrait` 也不行（它要求角色沒被軟刪），而全專案沒有
+     * 任何角色還原路徑。那張圖就永遠刪不掉。
+     *
+     * 留著連結列而不是在軟刪時一併刪掉，是為了讓「角色回來時圖庫也回來」還
+     * 有機會成立——軟刪的意思就是還能回來。
+     */
+    .leftJoin(
+      characters,
+      and(eq(assetLinks.entityType, 'character'), eq(characters.id, assetLinks.entityId))
+    )
+    .where(and(eq(assetLinks.assetId, assetId), isNull(characters.deletedAt)))
 
   const versions = await db
     .select({ id: assets.id })

@@ -30,6 +30,7 @@ export function ImagePicker({
   shape = 'wide',
   label = '圖片',
   hint,
+  uploadLabel,
   linkTo,
   disabled,
 }: {
@@ -40,6 +41,14 @@ export function ImagePicker({
   shape?: 'wide' | 'portrait' | 'square'
   label?: string
   hint?: string
+  /**
+   * 上傳按鈕的字 (Z168).
+   *
+   * 預設是「更換{label}」／「上傳{label}」，而那假設了上傳會頂掉現在這一
+   * 張。角色圖庫不是那樣：上傳是**新增**一張。按鈕寫「更換角色圖」而按下去
+   * 跳「已加入圖庫」，正好是那個功能要修掉的誤解。
+   */
+  uploadLabel?: string
   /** Attaches the finished asset to a character, shot, etc. */
   linkTo?: { entityType: string; entityId: string; slot?: string }
   disabled?: boolean
@@ -185,7 +194,7 @@ export function ImagePicker({
               className="inline-flex items-center gap-1.5 rounded-lg bg-stage-800 px-2.5 py-1.5 text-[11px] text-ink-200 transition-colors hover:bg-stage-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ImageUp aria-hidden className="size-3.5" />
-              {assetId ? `更換${label}` : `上傳${label}`}
+              {uploadLabel ?? (assetId ? `更換${label}` : `上傳${label}`)}
             </button>
 
             {assetId && (

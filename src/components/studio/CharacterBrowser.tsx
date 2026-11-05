@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ImagePicker } from '@/components/studio/ImagePicker'
 import { VoicePicker } from '@/components/studio/VoicePicker'
@@ -1026,6 +1026,13 @@ function CreateDialog({
  *
  * 存檔是立刻的，不是按一顆「儲存」：這個面板其他欄位都是失焦即存，而一張上
  * 傳完才等按鈕的圖，是一張所有人都以為已經存好的圖。
+ *
+ * ## 定妝照目前只有畫面在讀
+ *
+ * 更正一句我自己寫錯的理由：`key_visual_asset_id` 沒有下游消費者。AI 拿角色
+ * 的是 `appearance`/`personality` 那幾個**文字**欄位，分鏡的參考圖是
+ * `shots.ref_asset_id` 由使用者自己挑。唯一讀它的就是角色列表與這一欄的
+ * `Portrait`。所以文案只說它會顯示在哪裡，不要說 AI 會拿它當參考。
  */
 function PortraitGallery({
   projectId,
@@ -1038,7 +1045,22 @@ function PortraitGallery({
 }) {
   const router = useRouter()
   const toast = useToast()
-  const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
+  /*
+   * `router.refresh()` 沒有回 Promise，所以「請求回來了」不等於「畫面上的資
+   * 料換新了」(Z168).
+   *
+   * 本來 `setBusy(false)` 在 `finally` 就跑，而 RSC 還在路上——那個空窗裡縮
+   * 圖列上還是舊的，按鈕也已經能按。點剛剛移除掉的那一張就會 PATCH
+   * `keyVisualAssetId` 指向它，而 `updateCharacter` 的 `onConflictDoNothing`
+   * 會把連結**重新插回去**：使用者剛做的移除被無聲還原，而且那張圖還變成了
+   * 定妝照。
+   *
+   * `useTransition` 的 `pending` 會撐到 RSC 落地才放掉，所以把它一起算進
+   * busy。
+   */
+  const [refreshing, startRefresh] = useTransition()
+  const busy = saving || refreshing
 
   const primary = character.keyVisualAssetId
   const portraits = character.portraits
@@ -1057,17 +1079,17 @@ function PortraitGallery({
     said: (body: unknown) => string
   ) {
     if (busy) return
-    setBusy(true)
+    setSaving(true)
     try {
       const response = await call()
       if (!response.ok) throw new Error(await readApiError(response))
       const body: unknown = await response.json().catch(() => null)
       toast.success(said(body))
-      router.refresh()
+      startRefresh(() => router.refresh())
     } catch (error) {
       toast.error(failed, error instanceof Error ? error.message : undefined)
     } finally {
-      setBusy(false)
+      setSaving(false)
     }
   }
 
@@ -1106,7 +1128,7 @@ function PortraitGallery({
         const promoted = typeof info.promotedTo === 'string' ? info.promotedTo : null
 
         if (!wasPrimary) return name ? `已移除「${name}」` : '已從這個角色移除'
-        if (!promoted) return '定妝照已移除——這個角色現在沒有樣貌參考了'
+        if (!promoted) return '移除了最後一張，這個角色現在沒有定妝照'
         const next = portraits.find((item) => item.assetId === promoted)?.label
         return next ? `已移除，定妝照改用「${next}」` : '已移除，定妝照由另一張遞補'
       }
@@ -1183,11 +1205,13 @@ function PortraitGallery({
       {/*
         大預覽就是定妝照，而上傳是**新增**一張，不是換掉這一張。
 
-        `key` 帶張數：上傳完成後這個元件要重掛，不然 `ImagePicker` 內部還留著
-        剛傳完那一筆的預覽，看起來像是「換掉了」。
+        這裡本來掛了 `key={portraits.length}` 讓它重掛，理由寫的是
+        「`ImagePicker` 內部還留著剛傳完那一筆的預覽」——那不是事實：大預覽直
+        接 render `assetId` prop，上傳中的覆蓋層綁在 `active` 上，傳完就消
+        失。而重掛真正丟掉的是「不是圖片檔」「請小於 12 MB」那些訊息，以及上
+        傳失敗時的「重試」按鈕。所以 key 拿掉 (Z168)。
       */}
       <ImagePicker
-        key={portraits.length}
         projectId={projectId}
         assetId={primary}
         onChange={(assetId) => {
@@ -1212,7 +1236,8 @@ function PortraitGallery({
         }}
         shape="portrait"
         label="角色圖"
-        hint="一個角色可以放多張；其中一張設為定妝照——分鏡與 AI 生圖讀的就是那一張。直式、臉部清楚最好。"
+        uploadLabel="新增角色圖"
+        hint="一個角色可以放多張；其中一張設為定妝照，角色列表與這一欄顯示的就是那一張。直式、臉部清楚最好。"
         linkTo={{
           entityType: 'character',
           entityId: character.id,

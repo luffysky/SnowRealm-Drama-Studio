@@ -200,6 +200,17 @@ export async function getCharacters(
               eq(assetLinks.entityType, 'character'),
               inArray(assetLinks.entityId, ids),
               eq(assetLinks.slot, CHARACTER_PORTRAIT_SLOT),
+              /*
+               * 素材也要屬於這個專案 (Z168).
+               *
+               * 本來只靠 `entityId` 間接限定——也就是「相信 asset_links 的每
+               * 一列都是乾淨的」。而建立那些列的 `beginUpload` 驗了
+               * `episodeId` 屬於本專案，**沒有驗** `linkTo.entityId`：手動發
+               * 一個 projectId 填 A、linkTo 指向 B 作品角色的上傳請求，那張
+               * 圖就會出現在 B 的角色頁（而且因為檔案存取檢查會擋，看到的是
+               * 破圖）。多這一條就不必相信它。
+               */
+              eq(assets.projectId, projectId),
               eq(assets.uploadStatus, 'COMPLETED'),
               isNull(assets.deletedAt)
             )
@@ -408,9 +419,20 @@ export async function updateCharacter(input: {
  * 地方引用（分鏡的參考圖、對話附件），而「從這個角色移除」不該連帶把別人正
  * 在用的檔案刪掉。要真的刪檔案有素材中心那條路，它會先檢查引用。
  *
- * 移掉的剛好是定妝照的時候，把最早的那一張遞補上去，並回報遞補到哪一張。
- * 留一個「有圖但沒有定妝照」的角色更糟：分鏡與 AI 生圖讀的就是定妝照，那會
- * 安靜地變成沒有樣貌參考。
+ * 移掉的剛好是定妝照的時候，把最早的那一張遞補上去，並回報遞補到哪一張，好
+ * 讓介面說出來——使用者只知道自己刪了一張圖，不會自己想到角色列表上那張臉換
+ * 人了。
+ *
+ * ## 定妝照目前只有畫面在讀
+ *
+ * 先更正一句寫錯的理由：`key_visual_asset_id` 現在**沒有**下游消費者。AI 拿
+ * 角色的是 `name`/`tier`/`appearance`/`personality` 四個文字欄位
+ * （`ai/jobs.ts`），`CHARACTER_DESIGN` 也只寫文字欄位；分鏡的參考圖是
+ * `shots.ref_asset_id`，由使用者自己挑，沒有任何地方從定妝照帶過去。
+ *
+ * 唯一的讀取端是角色列表與角色面板的那張 `Portrait`。遞補這件事本身還是對
+ * 的（那兩個地方真的會變），但它不是「AI 會失去樣貌參考」。等 Z154 接上圖片
+ * 生成，這裡就是該把它接進去的地方。
  */
 export async function unlinkCharacterPortrait(input: {
   projectId: string
@@ -577,7 +599,12 @@ async function assertAssetUsable(
   if (!assetId) return
 
   const [asset] = await db
-    .select({ id: assets.id, kind: assets.kind, status: assets.uploadStatus })
+    .select({
+      id: assets.id,
+      kind: assets.kind,
+      status: assets.uploadStatus,
+      deletedAt: assets.deletedAt,
+    })
     .from(assets)
     .where(and(eq(assets.id, assetId), eq(assets.projectId, projectId)))
     .limit(1)
@@ -587,6 +614,19 @@ async function assertAssetUsable(
   }
   if (asset.status !== 'COMPLETED') {
     throw new ApiError(409, '這個檔案還沒上傳完成', 'asset_incomplete')
+  }
+  /*
+   * 軟刪掉的檔案也要擋 (Z168).
+   *
+   * 不擋的話「定妝照一定在圖庫裡」這個不變式有一條繞道：圖庫查詢濾掉軟刪的
+   * 素材，而這裡不濾——於是 `key_visual_asset_id` 可以指著一張已經刪掉的
+   * 圖，畫面上是大預覽破圖、而縮圖列裡沒有任何一張帶「定妝」徽章。
+   *
+   * 對話附件被「收回」時就會軟刪（`chat.ts` 的 `origin='CHAT'`），所以這不
+   * 是假想情況。
+   */
+  if (asset.deletedAt) {
+    throw new ApiError(409, '這個檔案已經被刪掉了', 'asset_deleted')
   }
 
   const ok =
