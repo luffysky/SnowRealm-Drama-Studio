@@ -5,7 +5,6 @@ import { useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import type { HealthReport } from '@/lib/health'
-import { cn } from '@/lib/utils'
 
 /**
  * 系統健康，隨時看得到 (Z161).

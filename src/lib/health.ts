@@ -14,11 +14,16 @@ import { getFxRates } from '@/lib/settings'
  * 這裡**只讀不寫**。它回報狀態，不替任何人決定要怎麼辦。
  */
 
+/*
+ * 門檻值不對外匯出——沒有人用（`check:dead` 在我寫完這支的一小時內就抓到
+ * 了）。要讓介面顯示「超過幾天」的時候再匯出，不要先匯出等著。
+ */
+
 /** 幾天沒更新就算舊。匯率每天抓，兩天沒動就是排程沒在跑。 */
-export const FX_STALE_DAYS = 2
+const FX_STALE_DAYS = 2
 
 /** 一份內容被鎖多久算「忘了解鎖」。 */
-export const LOCK_STALE_DAYS = 7
+const LOCK_STALE_DAYS = 7
 
 /**
  * 卡在「執行中」多久算死的。
@@ -26,7 +31,7 @@ export const LOCK_STALE_DAYS = 7
  * worker 的 `maxDuration` 是 60 秒，所以超過一小時還在 RUNNING 一定是進程
  * 被砍掉、鎖沒有釋放——它會一直看起來很忙。
  */
-export const STUCK_HOURS = 1
+const STUCK_HOURS = 1
 
 export type HealthReport = {
   /** 看的是哪一個資料庫。少了這個，本機跑出來的結論會被當成線上的。 */
