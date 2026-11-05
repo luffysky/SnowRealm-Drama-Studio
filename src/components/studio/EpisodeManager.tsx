@@ -195,16 +195,6 @@ export function EpisodeManager({
           })}
         </div>
 
-        {/* 批次建立集數 (Z66)。驗證器寫好很久、一直沒有介面。 */}
-        {canWrite && arcs.length > 0 && (
-          <EpisodeBatchCreate
-            projectId={projectId}
-            arcs={arcs.map((arc) => ({ id: arc.id, title: arc.title }))}
-            defaultTargetSec={defaultTargetSec}
-            existingNumbers={existingNumbers}
-          />
-        )}
-
         <span className="ml-auto text-[11px] text-ink-500">
           顯示：第 {page} / {pageCount} 頁
           {matched !== stats.total && `（篩選後 ${matched} 集）`}
@@ -291,8 +281,22 @@ export function EpisodeManager({
           options={EPISODE_SORTS.map((s) => ({ value: s, label: EPISODE_SORT_LABEL[s] }))}
         />
 
-        <Gated label="批次操作" milestone="M1" />
-        <Gated label="新增集數" milestone="M1" primary />
+        {/*
+          這裡本來是兩顆標著 M1 的佔位鈕：「批次操作」與「新增集數」——正好
+          是 Z67 與 Z66 (Z66/Z67)。做出來之後佔位要拿掉，不然畫面上同時有一
+          顆能按的和一顆灰的，而灰的那顆還掛著一個已經過去的里程碑。
+
+          「批次操作」不需要自己的按鈕：勾選集數之後上面那條批次列就會出現，
+          而一顆「請先勾選」的按鈕只是多一次點擊換一句廢話。
+        */}
+        {canWrite && arcs.length > 0 && (
+          <EpisodeBatchCreate
+            projectId={projectId}
+            arcs={arcs.map((arc) => ({ id: arc.id, title: arc.title }))}
+            defaultTargetSec={defaultTargetSec}
+            existingNumbers={existingNumbers}
+          />
+        )}
       </div>
 
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
@@ -933,32 +937,6 @@ function Select({
         ))}
       </select>
     </label>
-  )
-}
-
-function Gated({
-  label,
-  milestone,
-  primary,
-}: {
-  label: string
-  milestone: string
-  primary?: boolean
-}) {
-  return (
-    <span
-      aria-disabled="true"
-      title={`「${label}」尚未實作，預計於 ${milestone} 階段交付`}
-      className={cn(
-        'inline-flex h-9 cursor-default items-center gap-1.5 rounded-lg px-3 text-xs font-medium ring-1 ring-inset select-none',
-        primary
-          ? 'bg-stage-800 text-ink-500 ring-stage-700'
-          : 'bg-stage-900 text-ink-500 ring-stage-700'
-      )}
-    >
-      {label}
-      <span className="rounded bg-stage-850 px-1 text-[10px] text-ink-600">{milestone}</span>
-    </span>
   )
 }
 
