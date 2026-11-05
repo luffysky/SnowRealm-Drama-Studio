@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { buildUserMessage, STRUCTURED_TASKS, SYSTEM_PROMPT, TASK_EFFORT } from './prompts'
+import { resolveEffort, resolveMaxTokens } from './budget'
+import { buildUserMessage, STRUCTURED_TASKS, SYSTEM_PROMPT } from './prompts'
 import {
   AiAdapterError,
   type AiAdapter,
@@ -92,7 +93,10 @@ export type AnthropicAdapterConfig = {
    * adapter stays synchronous and free of database imports.
    */
   pricing?: Record<string, { input: number; output: number; cacheRead: number }>
-  taskProfiles?: Record<string, { model?: string; effort: 'low' | 'medium' | 'high' }>
+  taskProfiles?: Record<
+    string,
+    { model?: string; effort: 'low' | 'medium' | 'high'; maxTokens?: number }
+  >
 }
 
 /** The built-in table, exported so the settings layer can merge over it. */
@@ -203,7 +207,17 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
       const client = clientOrThrow()
       const modelId = request.model || model
       const candidateCount = Math.min(Math.max(request.candidates ?? 1, 1), 3)
-      const maxTokens = request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+      /*
+       * 額度與思考程度都走同一條優先序 (Z157)：這一次指定的 → 系統設定 →
+       * 每個任務的內建判斷 → 全域預設。寫成純函式是因為這條鏈斷過一次，而
+       * 斷掉的時候不會報錯，只會讓一張表安靜地失效。
+       */
+      const maxTokens = resolveMaxTokens({
+        task: request.task,
+        requested: request.maxTokens ?? null,
+        profile: taskProfiles[request.task]?.maxTokens ?? null,
+        fallback: DEFAULT_MAX_OUTPUT_TOKENS,
+      })
 
       const userMessage = buildUserMessage(request.task, request.context)
       const wantsJson = STRUCTURED_TASKS.has(request.task)
@@ -236,10 +250,11 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
              * caller can still override.
              */
             output_config: {
-              // Explicit request wins, then the configured profile, then the
-              // built-in judgement call.
-              effort:
-                request.effort ?? taskProfiles[request.task]?.effort ?? TASK_EFFORT[request.task] ?? 'high',
+              effort: resolveEffort({
+                task: request.task,
+                requested: request.effort ?? null,
+                profile: taskProfiles[request.task]?.effort ?? null,
+              }),
             },
             messages: [
               {
@@ -311,10 +326,25 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
          */
         const starved = emptyReasons.some((reason) => reason.includes('stop_reason=max_tokens'))
 
+        /*
+         * 把實際用的那組設定寫進訊息裡 (Z157).
+         *
+         * 訊息本來說「在系統設定把輸出上限調高」，而系統設定裡**沒有那一
+         * 欄**（只有思考程度），所以照著做的人會以為是自己找不到。現在那一
+         * 欄做出來了，而訊息也直接說出這一次用的是哪個程度、多少額度——
+         * 「調低」要先知道現在是多少。
+         */
+        const usedEffort = resolveEffort({
+          task: request.task,
+          requested: request.effort ?? null,
+          profile: taskProfiles[request.task]?.effort ?? null,
+        })
+
         throw new AiAdapterError(
           starved
             ? `模型把輸出額度用在思考上，沒有留下內容（${emptyReasons[0]}）。` +
-              '在系統設定把這個任務的思考程度調低，或把輸出上限調高。'
+              `這一次用的是「${usedEffort}」思考、上限 ${maxTokens} token。` +
+              '到「系統設定 → AI 任務設定」把這個任務的思考程度調低，或把輸出上限調高。'
             : `模型沒有產出任何內容（${emptyReasons.join('；') || '沒有更多資訊'}）。`,
           'empty_result',
           // Retrying a starved request just spends the money again.

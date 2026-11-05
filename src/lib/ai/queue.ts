@@ -152,7 +152,21 @@ export async function enqueueJob(raw: EnqueueInput): Promise<{
         task: input.task,
         context: input.context,
         candidates: input.candidates ?? 1,
-        effort: input.effort ?? 'high',
+        /*
+         * 沒指定就存 null，**不要替它決定** (Z157).
+         *
+         * 這裡本來寫 `input.effort ?? 'high'`，而介面從來不送 effort——所以
+         * 每一個進佇列的任務都被蓋上 `'high'`。而 `request.effort` 在適配器
+         * 的優先序裡排第一，於是 Z22 做的 `TASK_EFFORT`（潤稿用 low、大綱用
+         * medium）跟系統設定裡那張任務設定表，**兩個都從來沒有被讀到過**。
+         *
+         * 症狀是「小說轉劇本每次都失敗」：被強制在 high 思考，而 max_tokens
+         * 在 adaptive thinking 底下是思考加正文的總額，8000 全花在思考上，
+         * 一個字都沒寫出來——照樣收錢。
+         *
+         * 存 null 的意思是「這一次沒有特別指定」，讓後面的優先序去回答。
+         */
+        effort: input.effort ?? null,
         maxTokens: input.maxTokens ?? null,
       },
       targetType: input.targetType ?? '',

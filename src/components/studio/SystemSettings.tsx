@@ -530,9 +530,31 @@ function TasksSection({
   const [draft, setDraft] = useState<TaskProfiles>(profiles)
   const dirty = JSON.stringify(draft) !== JSON.stringify(profiles)
 
-  function set(kind: string, patch: Partial<{ effort: AiEffort; model: string }>) {
+  function set(
+    kind: string,
+    patch: Partial<{ effort: AiEffort; model: string; maxTokens: string }>
+  ) {
     const current = draft[kind] ?? { effort: 'medium' as AiEffort }
-    const next = { ...current, ...patch }
+    const next: TaskProfiles[string] = { ...current }
+
+    if (patch.effort) next.effort = patch.effort
+    if (patch.model !== undefined) next.model = patch.model
+
+    /*
+     * 空白代表「用預設」，不是 0 (Z157).
+     *
+     * 存成 0 的話每一次呼叫都會立刻失敗，而那個 0 在這一欄看起來只是一個
+     * 數字。所以清空就是把這個欄位拿掉。
+     */
+    if (patch.maxTokens !== undefined) {
+      const parsed = Number(patch.maxTokens)
+      if (patch.maxTokens.trim() && Number.isFinite(parsed) && parsed > 0) {
+        next.maxTokens = Math.floor(parsed)
+      } else {
+        delete next.maxTokens
+      }
+    }
+
     if (!next.model?.trim()) delete next.model
     setDraft({ ...draft, [kind]: next })
   }
@@ -540,7 +562,7 @@ function TasksSection({
   return (
     <Section
       title="AI 任務設定"
-      why="每個任務用哪個模型、想多久。內建值是還沒有任何用量可以判斷之前訂的，所以本來就該能改。留白就是用預設模型。"
+      why="每個任務用哪個模型、想多久、最多寫多長。輸出上限是**思考加正文的總額**——給太小的話，模型會把額度全部花在思考上然後一個字都沒寫（Z157 就是這樣壞的）。留白就是用內建值。"
       canEdit={canEdit}
       dirty={dirty}
       onSave={() => put('/api/settings/tasks', { profiles: draft }, 'AI 任務設定')}
@@ -551,7 +573,7 @@ function TasksSection({
           return (
             <div
               key={kind}
-              className="grid grid-cols-[1fr_auto] items-center gap-2 border-t border-stage-800 py-1.5 first:border-0 sm:grid-cols-[1fr_8rem_10rem]"
+              className="grid grid-cols-[1fr_auto] items-center gap-2 border-t border-stage-800 py-1.5 first:border-0 sm:grid-cols-[1fr_7rem_6rem_9rem]"
             >
               <span className="min-w-0 truncate text-[11px] text-ink-300">{label}</span>
 
@@ -568,6 +590,24 @@ function TasksSection({
                   </option>
                 ))}
               </select>
+
+              {/*
+                輸出上限 (Z157)。錯誤訊息一直叫人「在系統設定把輸出上限調
+                高」，而這一欄在今天之前**不存在**——只有思考程度。一個指著
+                不存在的控制項的錯誤訊息，比沒有建議更糟。
+              */}
+              <input
+                type="number"
+                min={256}
+                max={64000}
+                step={1000}
+                value={row?.maxTokens ?? ''}
+                disabled={!canEdit}
+                aria-label={`${label} 的輸出上限`}
+                placeholder="預設"
+                onChange={(e) => set(kind, { maxTokens: e.target.value })}
+                className={cn(inputClass, 'text-[10px] tabular-nums')}
+              />
 
               <input
                 value={row?.model ?? ''}

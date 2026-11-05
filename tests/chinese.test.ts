@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isSkippedTag } from '@/lib/use-script-conversion'
 import {
   convertParagraphs,
   convertScript,
@@ -105,5 +106,38 @@ describe('來回一趟', () => {
     // 而這一組就回不來了。
     const lossy = toTraditional(toSimplified('頭髮'))
     expect(lossy).toBe('頭髮')
+  })
+})
+
+describe('哪些標籤不轉（Z156）', () => {
+  /*
+   * 下拉選單要跟著設定走：繁體拉下來是繁體，簡體拉下來是簡體。
+   *
+   * `SELECT` 本來跟 `INPUT`／`TEXTAREA` 一起被跳過，但那三個不是同一回事
+   * ——輸入框裡是使用者正在打的字，`<option>` 的文字是我們寫死的標籤。結果
+   * 是整頁簡體中間插著一個繁體的下拉（分鏡工作台一頁有七個）。
+   *
+   * 這條測試盯的是它不要被加回去。那種錯沒有人會回報，只會覺得粗糙。
+   */
+  it('下拉選單的文字要轉', () => {
+    expect(isSkippedTag('SELECT')).toBe(false)
+    expect(isSkippedTag('OPTION')).toBe(false)
+  })
+
+  it('使用者正在打字的地方不要碰', () => {
+    expect(isSkippedTag('INPUT')).toBe(true)
+    expect(isSkippedTag('TEXTAREA')).toBe(true)
+  })
+
+  it('不是文章的東西不要碰', () => {
+    expect(isSkippedTag('SCRIPT')).toBe(true)
+    expect(isSkippedTag('STYLE')).toBe(true)
+    expect(isSkippedTag('CODE')).toBe(true)
+    expect(isSkippedTag('PRE')).toBe(true)
+  })
+
+  it('比對不分大小寫——`tagName` 是大寫，但呼叫端不該需要知道', () => {
+    expect(isSkippedTag('input')).toBe(true)
+    expect(isSkippedTag('select')).toBe(false)
   })
 })

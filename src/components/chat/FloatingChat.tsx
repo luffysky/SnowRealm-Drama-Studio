@@ -46,8 +46,35 @@ const STORAGE_KEY = 'srds.floatingChat.v1'
  * root element (`useBottomDock`), and the widget rides above it. Pages that do
  * not set it are unaffected: the fallback is 0.
  */
+const bottomExpr = (gap: string, obscured: number) =>
+  `(var(--dock-height, 0px) + var(--safe-bottom, 0px) + ${obscured}px + ${gap})`
+
 const clearance = (gap: string, obscured = 0) => ({
-  bottom: `calc(var(--dock-height, 0px) + var(--safe-bottom, 0px) + ${obscured}px + ${gap})`,
+  bottom: `calc${bottomExpr(gap, obscured)}`,
+})
+
+/** The tallest the panel may be, as a Tailwind-free max-height. */
+const PANEL_MAX_HEIGHT = '32rem'
+
+/**
+ * 對話框不可以超出視口 (Z158).
+ *
+ * 高度和它被頂高多少**必須從同一個算式來**。這裡本來不是：`bottom` 是
+ * 動態的（`--dock-height` + 安全區 + 鍵盤遮住的高度），而 `max-height` 寫死
+ * 成 `calc(100dvh - 5rem)`——那個 5rem 跟它實際被頂高多少沒有任何關係。
+ *
+ * 所以只要下方的工具列加上鍵盤超過 5rem，面板的**上緣就跑到畫面外**：標題
+ * 列、關閉鈕、通話鈕全部在視口上面，而且捲不到——`fixed` 的東西不在捲動流
+ * 裡。手機上打字的時候最容易遇到，因為那正是 `obscured` 最大的時候。
+ *
+ * 兩個值共用 `bottomExpr`，所以它們不可能再各說各話。這跟估價那個
+ * `{ estimate }` 的形狀是同一類錯：兩邊各自寫一次，然後安靜地對不起來。
+ */
+const panelBox = (gap: string, obscured = 0) => ({
+  bottom: `calc${bottomExpr(gap, obscured)}`,
+  maxHeight:
+    `min(${PANEL_MAX_HEIGHT}, ` +
+    `calc(100dvh - ${bottomExpr(gap, obscured)} - var(--safe-top, 0px) - ${gap}))`,
 })
 
 
@@ -345,8 +372,12 @@ export function FloatingChat({
 
   return (
     <div
-      style={clearance('0.5rem', viewport.obscured)}
-      className="panel fixed right-2 bottom-2 z-40 flex max-h-[min(32rem,calc(100dvh-5rem))] w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl bg-stage-850 ring-1 shadow-2xl ring-stage-700"
+      /*
+       * 高度跟著它被頂高多少一起算 (Z158)。`max-h` 的 class 拿掉了——留著會
+       * 跟這個 style 說兩件不一樣的事，而贏的是 style，看程式的人會被騙。
+       */
+      style={panelBox('0.5rem', viewport.obscured)}
+      className="panel fixed right-2 bottom-2 z-40 flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl bg-stage-850 ring-1 shadow-2xl ring-stage-700"
       role="dialog"
       aria-label="對話"
     >

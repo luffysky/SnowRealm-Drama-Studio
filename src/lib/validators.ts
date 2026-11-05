@@ -915,6 +915,14 @@ export const taskProfilesSchema = z.object({
     z.object({
       effort: z.enum(AI_EFFORTS),
       model: z.string().trim().max(120).optional(),
+      /**
+       * 這個任務的輸出上限 (Z157).
+       *
+       * 下界 256：再低連一句話都寫不完。上界 64000：再高只是讓 60 秒的
+       * worker 更容易超時，而超時的請求是「已經付錢但拿不到東西」——跟它要
+       * 修的那個 bug 同一種結果，只是換一個原因。
+       */
+      maxTokens: z.coerce.number().int().min(256).max(64_000).optional(),
     })
   ),
 })

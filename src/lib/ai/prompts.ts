@@ -234,6 +234,45 @@ export const TASK_EFFORT: Record<AiTaskKind, 'low' | 'medium' | 'high'> = {
  * 出。Claude 那邊只是多試一次 parse、失敗就算了，看不出差別；接上 GPT／
  * DeepSeek 這些相容端點之後才會現形。
  */
+/**
+ * 每個任務的輸出上限 (Z157).
+ *
+ * `max_tokens` 在 adaptive thinking 底下是**思考加正文的總額**，不是正文的
+ * 額度。所以一個會寫出整份文件的任務配一個全域 8000，實際發生的事是：模型
+ * 把 8000 全部花在思考上，然後因為 `stop_reason=max_tokens` 停下來，一個字
+ * 都沒寫。實測「小說轉劇本」三次全軍覆沒，in 4810 / out 8000、零內容、照樣
+ * 收錢。
+ *
+ * 所以上限要照**這個任務要寫多長**來給，而不是一個數字套用到十七種任務。
+ * 潤一段話跟改編一整集小說需要的空間差十倍。
+ *
+ * 沒列在這裡的吃 `DEFAULT_MAX_OUTPUT_TOKENS`。
+ *
+ * ## 為什麼不乾脆全部調高
+ *
+ * 60 秒。worker 的 `maxDuration = 60`，而超時的請求不是「比較慢」，是**已經
+ * 付錢但拿不到東西**的那種失敗——跟現在這個 bug 同一種結果，只是換一個原因。
+ * 所以只有真的要寫長文的那幾種調高。
+ */
+export const TASK_MAX_TOKENS: Partial<Record<AiTaskKind, number>> = {
+  // 會寫出一整份文件的：正文本身就要好幾千 token，思考還要另外算。
+  NOVEL_TO_SCRIPT: 16_000,
+  NOVEL_CONTINUE: 16_000,
+  STORYBOARD_GENERATE: 16_000,
+  PROJECT_PLAN: 12_000,
+  OUTLINE_GENERATE: 12_000,
+  /*
+   * 一整集的對白歸屬是三百筆 JSON。這一種特別容易被低估，因為每一筆都很
+   * 短——短的是每一筆，不是總量。
+   */
+  DIALOGUE_ATTRIBUTE: 16_000,
+  // 審稿類寫的是報告，不是正文，但逐條附引文也不短。
+  NOVEL_REVIEW: 12_000,
+  OUTLINE_REVIEW: 12_000,
+  SCRIPT_ANALYZE: 12_000,
+  WORLD_CONSISTENCY: 12_000,
+}
+
 export const STRUCTURED_TASKS: ReadonlySet<AiTaskKind> = new Set<AiTaskKind>([
   'CHARACTER_DESIGN',
   'DIALOGUE_ATTRIBUTE',

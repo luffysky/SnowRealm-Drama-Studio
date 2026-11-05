@@ -242,9 +242,21 @@ function parseTaskProfiles(value: unknown): TaskProfiles | null {
 
     if (!AI_EFFORTS.includes(p.effort as AiEffort)) continue
 
+    /*
+     * 上限要是正整數才收 (Z157).
+     *
+     * 存成 0 或負數的話，每一次呼叫都會立刻失敗——而那個 0 在設定頁上看起來
+     * 只是一個數字。上界擋在 64k：再高也只是讓 60 秒的 worker 更容易超時，
+     * 而超時的請求是「已經付錢但拿不到東西」。
+     */
+    const rawMax = Number(p.maxTokens)
+    const maxTokens =
+      Number.isInteger(rawMax) && rawMax >= 256 && rawMax <= 64_000 ? rawMax : undefined
+
     out[task.trim()] = {
       effort: p.effort as AiEffort,
       ...(typeof p.model === 'string' && p.model.trim() ? { model: p.model.trim() } : {}),
+      ...(maxTokens ? { maxTokens } : {}),
     }
   }
 

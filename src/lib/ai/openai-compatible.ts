@@ -1,3 +1,4 @@
+import { resolveMaxTokens } from './budget'
 import { buildUserMessage, STRUCTURED_TASKS, SYSTEM_PROMPT } from './prompts'
 import {
   AiAdapterError,
@@ -253,7 +254,19 @@ export function createOpenAiCompatibleAdapter(config: OpenAiCompatibleConfig): A
 
       const user = buildUserMessage(request.task, request.context)
       const wantsJson = STRUCTURED_TASKS.has(request.task)
-      const maxTokens = request.maxTokens ?? 8000
+      /*
+       * 七家也走同一條優先序 (Z157)。
+       *
+       * 它們多半不是 adaptive thinking，所以不會有「額度全花在思考上」那個
+       * 症狀；但「一份劇本寫到一半被截斷」是同一個太小的數字造成的，只是比
+       * 較不容易看出來——截斷的輸出看起來就像模型寫得比較短。
+       */
+      const maxTokens = resolveMaxTokens({
+        task: request.task,
+        requested: request.maxTokens ?? null,
+        profile: null,
+        fallback: 8000,
+      })
       const want = Math.min(Math.max(request.candidates ?? 1, 1), 3)
 
       const candidates: AiRunResult['candidates'] = []
