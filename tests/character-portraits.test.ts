@@ -11,7 +11,8 @@ import { testDatabaseReady } from './helpers/database'
  *     材庫裡既有的一張設成定妝照」這條路不會——少了那一步，那張圖會是定妝照
  *     卻不出現在縮圖列，於是沒有任何辦法把它換掉。
  *  3. **移掉定妝照要有人遞補。** 留一個「有圖但沒有定妝照」的角色，等於安靜
- *     地讓分鏡與 AI 生圖失去樣貌參考——它們讀的就是 `key_visual_asset_id`。
+ *     地讓角色列表與角色面板的 `Portrait` 失去頭像。那兩個地方是
+ *     `key_visual_asset_id` 的**唯一**讀取端——AI 與分鏡都不讀它（見 Z168）。
  */
 const hasDb = testDatabaseReady()
 

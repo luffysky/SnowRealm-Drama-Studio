@@ -11,8 +11,9 @@ export const runtime = 'nodejs'
  * 檢查還有誰在引用它。
  *
  * 移掉的剛好是定妝照時，`unlinkCharacterPortrait` 會把最早的那一張遞補上
- * 去，並回報遞補到哪一張，好讓介面說出來：定妝照是分鏡與 AI 生圖讀的那一
- * 張，安靜地換掉它不行。
+ * 去，並回報遞補到哪一張，好讓介面說出來：角色列表與角色面板的頭像就是這一
+ * 張（`key_visual_asset_id` 的唯一讀取端，見 Z168——AI 與分鏡都不讀它），
+ * 安靜地換掉它不行。
  */
 export const DELETE = handle(
   async (
