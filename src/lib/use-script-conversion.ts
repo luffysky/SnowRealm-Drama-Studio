@@ -84,6 +84,37 @@ function convertible(node: Node, stopAt: Node): boolean {
   return true
 }
 
+/**
+ * `<optgroup label>` 是屬性，不是文字節點 (Z160).
+ *
+ * 這支程式從頭到尾只碰 `nodeValue`，所以 Z156 讓 `<option>` 的文字跟著設定
+ * 走之後，群組標題還是繁體——簡體模式下那個下拉會變成「群組標題繁體、裡面
+ * 的選項簡體」，正好是 Z156 要消滅的那種畫面，只是搬到了標題上。
+ *
+ * 只處理 `label`：其他屬性（`title`、`placeholder`、`aria-label`）也是同一
+ * 類問題，但它們沒有 `<optgroup>` 這種「同一個下拉裡一半轉一半不轉」的刺眼
+ * 程度，而且數量大得多。要做就另外做，不要順手塞進來。
+ */
+function convertLabels(node: Node, root: Node, convert: (text: string) => string): void {
+  if (!(node instanceof Element) && !(node instanceof Document)) return
+
+  const groups = node.querySelectorAll('optgroup[label]')
+  const all =
+    node instanceof Element && node.matches('optgroup[label]')
+      ? [node, ...groups]
+      : [...groups]
+
+  for (const group of all) {
+    const label = group.getAttribute('label')
+    if (!label || !HAN.test(label)) continue
+    // 從 `<select>` 往上檢查：`data-script-keep` 的子樹一樣不碰。
+    if (!convertible(group, root)) continue
+
+    const next = convert(label)
+    if (next !== label) group.setAttribute('label', next)
+  }
+}
+
 export function useScriptConversion(
   /** Recomputed on every run, so a ref that fills in later still works. */
   getRoot: () => Node | null,
@@ -113,6 +144,8 @@ export function useScriptConversion(
         // observer below is not woken by our own work.
         if (next !== value) text.nodeValue = next
       }
+
+      convertLabels(node, root, convert)
     }
 
     const run = () => {
@@ -120,12 +153,35 @@ export function useScriptConversion(
       if (root) walk(root, root)
     }
 
+    /*
+     * 同一帧的每一筆變動都要處理 (Z160).
+     *
+     * 本來是「已經排程了就直接 return」，而排程裡只 walk 第一筆帶進來的
+     * node——於是一次 MutationObserver callback 帶回 N 筆 record 的時候，
+     * **只有第一筆的子樹會被轉，其餘 N−1 筆永遠不會**。
+     *
+     * 初次掛載有 `run()` 全文掃過所以看不出來；之後新增的內容（對話框、
+     * toast、下一頁清單、用戶端導航換頁）全靠 observer，所以一次掛上好幾塊
+     * 的畫面會轉一塊、留一塊。
+     *
+     * 改成把待處理的節點累積起來，一帧處理完。
+     */
+    const pending = new Set<Node>()
+
     const schedule = (node: Node) => {
+      pending.add(node)
       if (queued) return
+
       queued = window.requestAnimationFrame(() => {
         queued = 0
         const root = getRoot()
-        if (root) walk(node, root)
+        const batch = [...pending]
+        pending.clear()
+        if (!root) return
+        for (const target of batch) {
+          // 期間被移除的節點不用管——轉一個不在畫面上的東西沒有意義。
+          if (target.isConnected) walk(target, root)
+        }
       })
     }
 

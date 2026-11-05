@@ -51,7 +51,17 @@ export async function aiOverrides(): Promise<AiOverrides> {
 
 export type AiOverrides = {
   pricing: Record<string, { input: number; output: number; cacheRead: number }>
-  taskProfiles: Record<string, { model?: string; effort: 'low' | 'medium' | 'high' }>
+  /*
+   * `maxTokens` 本來不在這個型別裡 (Z160)。
+   *
+   * 它是 optional，所以少了它 `tsc` 照樣過——而 runtime 的物件其實一直帶著
+   * 它，anthropic 那支也讀得到。也就是說這個型別唯一的作用是**讓人看不出有
+   * 一支適配器沒收到它**。型別寫得比實際窄，比沒有型別更會騙人。
+   */
+  taskProfiles: Record<
+    string,
+    { model?: string; effort: 'low' | 'medium' | 'high'; maxTokens?: number }
+  >
 }
 
 export function adapterFor(row: ProviderRow, overrides?: AiOverrides): AiAdapter | null {
@@ -82,6 +92,14 @@ export function adapterFor(row: ProviderRow, overrides?: AiOverrides): AiAdapter
         ...(row.defaultModel ? { defaultModel: row.defaultModel } : {}),
         ...(row.envVarName ? { envVarName: row.envVarName } : {}),
         ...(overrides?.pricing ? { pricing: overrides.pricing } : {}),
+        /*
+         * 任務設定也要傳給這七家 (Z160).
+         *
+         * 這一行本來沒有——ANTHROPIC 那一支有傳、這一支沒有，於是使用者在
+         * 「系統設定 → AI 任務設定」填的輸出上限，對 GPT／Gemini／DeepSeek／
+         * Kimi／千問／GLM／OpenRouter **完全沒有作用**，而且沒有任何地方會說。
+         */
+        ...(overrides?.taskProfiles ? { taskProfiles: overrides.taskProfiles } : {}),
       })
     }
 

@@ -21,7 +21,16 @@ export const PUT = handle(async (request: Request) => {
   const user = await requirePermission('ai.provider.manage')
   const input = await parseJson(request, modelAssignmentSchema)
 
-  await setAssignment(input)
+  /*
+   * `nullish()` 讓 zod 收 undefined 也收 null，但存進去的時候兩者是同一件事：
+   * 沒指定 (Z160)。明確轉成 null，不要讓 undefined 一路傳到 drizzle——那會
+   * 變成「這一欄不要動」，而不是「把這一欄清成沒指定」。
+   */
+  await setAssignment({
+    ...input,
+    effort: input.effort ?? null,
+    maxTokens: input.maxTokens ?? null,
+  })
 
   await logActivity({
     user,

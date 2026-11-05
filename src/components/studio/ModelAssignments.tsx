@@ -36,8 +36,8 @@ type Provider = {
 type Assignment = {
   providerId: string
   model: string
-  effort: string
-  maxTokens: number
+  effort: string | null
+  maxTokens: number | null
   candidates: number
   providerLabel: string
   providerEnabled: boolean
@@ -69,7 +69,13 @@ export function ModelAssignments({
       drafts[row.task] ?? {
         providerId: row.assignment?.providerId ?? '',
         model: row.assignment?.model ?? '',
-        effort: row.assignment?.effort ?? 'high',
+        /*
+         * 空字串＝「跟著任務預設」(Z160).
+         *
+         * 本來預設成 `'high'`，於是面板一存就把這個任務釘在 high——而那正是
+         * Z157 修掉的那個 bug 換一扇門走回來。草稿不該替人選。
+         */
+        effort: row.assignment?.effort ?? '',
         candidates: row.assignment?.candidates ?? 1,
       }
     )
@@ -95,7 +101,8 @@ export function ModelAssignments({
           task: row.task,
           providerId: draft.providerId,
           model: draft.model.trim(),
-          effort: draft.effort,
+          // 空字串要送 null，不是送空字串——null 才是「沒指定」。
+          effort: draft.effort || null,
           candidates: draft.candidates,
         }),
       })
@@ -225,6 +232,8 @@ export function ModelAssignments({
                 onChange={(event) => edit(row.task, { effort: event.target.value }, draft)}
                 className="h-7 rounded-lg bg-stage-850 px-1.5 text-[10px] text-ink-100 ring-1 ring-inset ring-stage-700 focus:ring-2 focus:ring-accent-500 focus:outline-none"
               >
+                {/* 第一項是「不指定」，而且是預設——面板不替人決定思考程度。 */}
+                <option value="">跟著任務預設</option>
                 {EFFORTS.map((effort) => (
                   <option key={effort} value={effort}>
                     {effort}

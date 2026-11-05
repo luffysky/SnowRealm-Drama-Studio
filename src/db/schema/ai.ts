@@ -206,9 +206,20 @@ export const modelAssignments = pgTable(
       .notNull()
       .references(() => aiProviders.id, { onDelete: 'cascade' }),
     model: text('model').notNull(),
-    /** Effort level passed to the adapter: low | medium | high | xhigh | max. */
-    effort: text('effort').notNull().default('high'),
-    maxTokens: integer('max_tokens').notNull().default(32000),
+    /**
+     * Effort level passed to the adapter: low | medium | high | xhigh | max.
+     *
+     * **可為 null，而 null 有意義**（Z160）：代表這一列沒有特別指定，交給
+     * `TASK_EFFORT` 與系統設定去回答。
+     *
+     * 本來是 `notNull().default('high')`，而 `applyAssignment` 會把它填進請
+     * 求、請求又在優先序裡排第一——於是指派過一次模型的任務就永遠是 high，
+     * 那張每任務的表又讀不到了。跟 Z157 是同一個 bug 換一扇門：一個預設值
+     * 替人做了決定，而「人沒選」跟「人選了 high」在資料上長得一樣。
+     */
+    effort: text('effort'),
+    /** 同上：null 代表沒指定。舊的 32000 預設值已在 0032 回填成 null。 */
+    maxTokens: integer('max_tokens'),
     /** How many candidates to request by default. */
     candidates: integer('candidates').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

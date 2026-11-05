@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import { TASK_EFFORT } from '@/lib/ai/prompts'
 import { CURRENCIES, CURRENCY_LABEL, type CurrencyValue, type FxRates } from '@/lib/money'
 import { AI_EFFORTS, type AiEffort, type IceServer, type ModelPricing, type StorageCost, type TaskProfiles } from '@/lib/settings-view'
 import { cn } from '@/lib/utils'
@@ -530,11 +531,31 @@ function TasksSection({
   const [draft, setDraft] = useState<TaskProfiles>(profiles)
   const dirty = JSON.stringify(draft) !== JSON.stringify(profiles)
 
+  /**
+   * 這個任務沒設定的時候，實際會用的思考程度。
+   *
+   * 下拉顯示的也是它——顯示 'medium' 而實際跑 high，那個下拉就是在說謊。
+   */
+  function builtInEffort(kind: string): AiEffort {
+    const built = TASK_EFFORT[kind as keyof typeof TASK_EFFORT]
+    return built === 'low' || built === 'medium' || built === 'high' ? built : 'medium'
+  }
+
   function set(
     kind: string,
     patch: Partial<{ effort: AiEffort; model: string; maxTokens: string }>
   ) {
-    const current = draft[kind] ?? { effort: 'medium' as AiEffort }
+    /*
+     * 新建一列的時候用**這個任務自己的內建值**，不是 'medium' (Z160).
+     *
+     * 本來寫死 `{ effort: 'medium' }`，於是一個還沒有設定列的任務，只要你去
+     * 調它的輸出上限，就會順手被寫下 `effort: 'medium'`——而 `PROJECT_PLAN`、
+     * `NOVEL_REVIEW`、`WORLD_CONSISTENCY` 這些內建是 high，`NOVEL_POLISH`、
+     * `ASSET_GENERATE` 內建是 low。**只調上限會悄悄改掉思考程度**。
+     *
+     * 而錯誤訊息正是叫使用者來動這一欄。
+     */
+    const current = draft[kind] ?? { effort: builtInEffort(kind) }
     const next: TaskProfiles[string] = { ...current }
 
     if (patch.effort) next.effort = patch.effort
@@ -578,7 +599,7 @@ function TasksSection({
               <span className="min-w-0 truncate text-[11px] text-ink-300">{label}</span>
 
               <select
-                value={row?.effort ?? 'medium'}
+                value={row?.effort ?? builtInEffort(kind)}
                 disabled={!canEdit}
                 aria-label={`${label} 的思考程度`}
                 onChange={(e) => set(kind, { effort: e.target.value as AiEffort })}

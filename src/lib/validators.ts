@@ -1149,8 +1149,19 @@ export const modelAssignmentSchema = z.object({
   task: z.enum(AI_JOB_KINDS),
   providerId: uuid,
   model: z.string().trim().min(1, '要指定模型').max(120),
-  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional().default('high'),
-  maxTokens: z.coerce.number().int().min(256).max(200_000).optional().default(32_000),
+  /*
+   * null 代表「沒有特別指定」，而且**不給預設值** (Z160).
+   *
+   * 本來是 `.default('high')` 與 `.default(32_000)`，於是面板每存一次就替
+   * 這個任務釘死 high 與 32000——而那兩個值會進 `request`，`request` 在優先
+   * 序裡排第一，`TASK_EFFORT` 跟系統設定就又讀不到了。
+   *
+   * 上界從 200000 收到 64000，跟設定頁與 `parseTaskProfiles` 對齊：三個地方
+   * 各寫一套範圍的時候，寫在註解裡的那個理由（60 秒 worker 會超時）只對其中
+   * 一套成立。
+   */
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).nullish(),
+  maxTokens: z.coerce.number().int().min(256).max(64_000).nullish(),
   candidates: z.coerce.number().int().min(1).max(3).optional().default(1),
 })
 

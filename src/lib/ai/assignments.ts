@@ -31,8 +31,17 @@ export type Assignment = {
   task: AiJobKindValue
   providerId: string
   model: string
-  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-  maxTokens: number
+  /**
+   * null 代表**這一列沒有特別指定** (Z160)。
+   *
+   * 不是「指定成 high」。兩者在資料上長得一樣的時候，`applyAssignment` 會
+   * 把資料庫的預設值當成人的決定填進請求，而請求在優先序裡排第一——於是
+   * 指派過一次模型的任務，`TASK_EFFORT` 跟系統設定就又讀不到了。那正是
+   * Z157 那個 bug 從另一扇門走回來。
+   */
+  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null
+  /** 同上：null 代表沒指定，交給 `TASK_MAX_TOKENS` 與系統設定回答。 */
+  maxTokens: number | null
   candidates: number
 }
 
@@ -63,8 +72,8 @@ export async function assignmentFor(task: AiTaskKind): Promise<Assignment | null
     task: row.task,
     providerId: row.providerId,
     model: row.model,
-    effort: row.effort as Assignment['effort'],
-    maxTokens: row.maxTokens,
+    effort: (row.effort as Assignment['effort']) ?? null,
+    maxTokens: row.maxTokens ?? null,
     candidates: row.candidates,
   }
 }
@@ -198,12 +207,24 @@ export async function applyAssignment<
   const assignment = await assignmentFor(input.task)
   if (!assignment) return input
 
+  /*
+   * 只填**真的有指定**的欄位 (Z160).
+   *
+   * `effort` 與 `maxTokens` 是 nullable，而 null 代表「這一列沒有特別指
+   * 定」。用 `...(x !== null ? { ... } : {})` 而不是 `?? assignment.x`：後者
+   * 會把 null 也填進去，而一個填了 null 的欄位跟沒填不一樣——下游的
+   * `input.effort ?? null` 看不出差別，但型別會。
+   */
   return {
     ...input,
     providerId: assignment.providerId,
     model: input.model || assignment.model,
-    effort: input.effort ?? assignment.effort,
-    maxTokens: input.maxTokens ?? assignment.maxTokens,
+    ...(input.effort === undefined && assignment.effort !== null
+      ? { effort: assignment.effort }
+      : {}),
+    ...(input.maxTokens === undefined && assignment.maxTokens !== null
+      ? { maxTokens: assignment.maxTokens }
+      : {}),
     candidates: input.candidates ?? assignment.candidates,
   }
 }

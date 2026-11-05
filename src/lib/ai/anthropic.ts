@@ -123,6 +123,25 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
   const pricing = { ...PRICING, ...(config.pricing ?? {}) }
   const taskProfiles = config.taskProfiles ?? {}
 
+  /*
+   * 一次呼叫的輸出上限，**只算在這裡** (Z160).
+   *
+   * `estimate()` 跟 `run()` 本來各寫一次。Z157 改了 `run()` 忘了 `estimate()`，
+   * 於是報價用 8000、實跑用 16000——而那個報價會餵給預算閘門，預算上限因此
+   * 被系統性低估。
+   *
+   * 修法不是「記得兩邊一起改」，是讓它只有一個地方可以改。跟 `panelBox` 把
+   * bottom 與 max-height 綁在同一個算式、跟 `AiEstimateResponse` 把回應形狀
+   * 綁成一個型別，是同一招。
+   */
+  const ceilingFor = (request: AiRunRequest): number =>
+    resolveMaxTokens({
+      task: request.task,
+      requested: request.maxTokens ?? null,
+      profile: taskProfiles[request.task]?.maxTokens ?? null,
+      fallback: DEFAULT_MAX_OUTPUT_TOKENS,
+    })
+
   function priceFor(modelId: string) {
     return pricing[modelId] ?? null
   }
@@ -167,7 +186,20 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
 
     async estimate(request: AiRunRequest): Promise<AiEstimate> {
       const modelId = request.model || model
-      const maxOutputTokens = request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
+      /*
+       * 估價要跟實跑用**同一條**優先序 (Z160).
+       *
+       * 這一行本來是 `request.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS`，而
+       * `run()` 底下那一行在 Z157 改成了 `resolveMaxTokens`。兩邊分岔的後果
+       * 不只是報價少一半：`/api/ai/jobs` 會把這個估值交給 `enqueueJob`，而
+       * `enqueueJob` 拿它跑 `assertWithinBudget`——**預算上限會被系統性低
+       * 估，一批任務可以集體超支**。
+       *
+       * `jobs.ts` 的 `estimateJob` 註解自己寫著「估價要用跟實際執行同一組設
+       * 定，不然是跟那張壞掉的匯率表同一類的錯」。Z157 就破在這裡，而且是我
+       * 自己改了一處沒改另一處。
+       */
+      const maxOutputTokens = ceilingFor(request)
 
       if (!resolvedKey) {
         // Without a key we cannot call count_tokens; approximate from characters.
@@ -212,12 +244,7 @@ export function createAnthropicAdapter(config: AnthropicAdapterConfig = {}): AiA
        * 每個任務的內建判斷 → 全域預設。寫成純函式是因為這條鏈斷過一次，而
        * 斷掉的時候不會報錯，只會讓一張表安靜地失效。
        */
-      const maxTokens = resolveMaxTokens({
-        task: request.task,
-        requested: request.maxTokens ?? null,
-        profile: taskProfiles[request.task]?.maxTokens ?? null,
-        fallback: DEFAULT_MAX_OUTPUT_TOKENS,
-      })
+      const maxTokens = ceilingFor(request)
 
       const userMessage = buildUserMessage(request.task, request.context)
       const wantsJson = STRUCTURED_TASKS.has(request.task)

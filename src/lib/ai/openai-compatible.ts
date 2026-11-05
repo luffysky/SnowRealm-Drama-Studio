@@ -81,7 +81,27 @@ export type OpenAiCompatibleConfig = {
   enabled?: boolean
   /** 從系統設定來的模型單價，每百萬 token 美金。 */
   pricing?: Record<string, { input: number; output: number; cacheRead: number }>
+  /**
+   * 「系統設定 → AI 任務設定」那張表 (Z160).
+   *
+   * 這一欄本來不存在，`registry.ts` 也只傳 `pricing` 給這支適配器——於是
+   * 使用者在設定頁填的輸出上限**對這七家完全沒有作用**，只有內建值會生效。
+   * 而那一欄的存在理由，正是錯誤訊息叫使用者去調它。
+   *
+   * `effort` 這支適配器用不到（它不送任何 reasoning 參數），所以只讀
+   * `maxTokens`。
+   */
+  taskProfiles?: Record<string, { model?: string; effort: string; maxTokens?: number }>
 }
+
+/**
+ * 這七家的預設輸出上限。
+ *
+ * 跟 anthropic 的 `DEFAULT_MAX_OUTPUT_TOKENS` 分開，但一樣吃
+ * `AI_MAX_OUTPUT_TOKENS`——本來寫死 8000，意思是那個環境變數對七家無效，
+ * 而沒有任何地方說過這件事。
+ */
+const DEFAULT_COMPAT_MAX_TOKENS = Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 8000)
 
 type ChatResponse = {
   choices?: { message?: { content?: string | null } }[]
@@ -95,6 +115,19 @@ export function createOpenAiCompatibleAdapter(config: OpenAiCompatibleConfig): A
   const model = config.defaultModel || ''
 
   const endpoint = `${baseUrl}/chat/completions`
+
+  /*
+   * 輸出上限只算在這裡 (Z160)。理由同 anthropic：`estimate()` 與 `run()` 各
+   * 寫一次的時候，改了一邊忘了另一邊不會有任何東西報錯——報價只是變成另一
+   * 個數字，而數字看起來都一樣。
+   */
+  const ceilingFor = (request: AiRunRequest): number =>
+    resolveMaxTokens({
+      task: request.task,
+      requested: request.maxTokens ?? null,
+      profile: config.taskProfiles?.[request.task]?.maxTokens ?? null,
+      fallback: DEFAULT_COMPAT_MAX_TOKENS,
+    })
 
   /** 一次請求。`variant` 控制上面那三個相容性退讓。 */
   async function chat(input: {
@@ -236,7 +269,8 @@ export function createOpenAiCompatibleAdapter(config: OpenAiCompatibleConfig): A
       const used = request.model || model
       const user = buildUserMessage(request.task, request.context)
       const inputTokens = approximateTokens(SYSTEM_PROMPT) + approximateTokens(user)
-      const maxOutputTokens = request.maxTokens ?? 8000
+      // 估價跟實跑走同一條優先序 (Z160)，理由同 anthropic 那一支。
+      const maxOutputTokens = ceilingFor(request)
 
       return {
         inputTokens,
@@ -261,12 +295,7 @@ export function createOpenAiCompatibleAdapter(config: OpenAiCompatibleConfig): A
        * 症狀；但「一份劇本寫到一半被截斷」是同一個太小的數字造成的，只是比
        * 較不容易看出來——截斷的輸出看起來就像模型寫得比較短。
        */
-      const maxTokens = resolveMaxTokens({
-        task: request.task,
-        requested: request.maxTokens ?? null,
-        profile: null,
-        fallback: 8000,
-      })
+      const maxTokens = ceilingFor(request)
       const want = Math.min(Math.max(request.candidates ?? 1, 1), 3)
 
       const candidates: AiRunResult['candidates'] = []

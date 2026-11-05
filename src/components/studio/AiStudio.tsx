@@ -4,7 +4,7 @@ import { AlertTriangle, Ban, CheckCircle2, Loader2, Play, RefreshCw, RotateCcw }
 import { useRouter } from 'next/navigation'
 import { AddProvider, FetchModels, TestProvider } from '@/components/studio/ProviderForm'
 import { ModelAssignments } from '@/components/studio/ModelAssignments'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ComponentProps } from 'react'
 import { Tabs } from '@/components/ui/Tabs'
 import { useToast } from '@/components/ui/Toast'
 import { AiBatch, type BatchProject } from '@/components/studio/AiBatch'
@@ -110,23 +110,15 @@ export type AiStudioData = {
    * 分開一個旗標，不跟 `canRun` 共用：跑任務是日常，換金鑰不是。
    */
   canManageProviders: boolean
-  /** 哪個任務用哪個模型 (Z152)。沒指派的任務也在列表裡。 */
-  assignments: {
-    rows: {
-      task: string
-      label: string
-      assignment: {
-        providerId: string
-        model: string
-        effort: string
-        maxTokens: number
-        candidates: number
-        providerLabel: string
-        providerEnabled: boolean
-      } | null
-    }[]
-    providers: { id: string; label: string; kind: string; enabled: boolean; models: string[] }[]
-  }
+  /**
+   * 哪個任務用哪個模型 (Z152)。沒指派的任務也在列表裡。
+   *
+   * 形狀直接取自 `ModelAssignments` 的 props，不在這裡再抄一份（Z160）。
+   * 原本是手抄的第三份，於是 `effort` 改成可為 null 的時候這裡沒跟著改——
+   * 而這種分岔要嘛編不過（這次是），要嘛更糟：編得過，然後兩邊對同一個欄位
+   * 有不同的認知。
+   */
+  assignments: ComponentProps<typeof ModelAssignments>
   /**
    * 可選的模型清單，從伺服器傳下來。
    *
