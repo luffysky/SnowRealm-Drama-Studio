@@ -5,6 +5,7 @@ import { aiJobAttempts, aiJobs, aiOutputs, expenses } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import { assertWithinBudget, recordActual, recordEstimate } from '@/lib/usage'
 import type { SessionUser } from '@/lib/auth/session'
+import { applyAssignment } from './assignments'
 import { adapterFor, envOnlyAnthropicAdapter, loadMediaAdapter } from './registry'
 import { aiProviders } from '@/db/schema'
 import {
@@ -91,11 +92,22 @@ export type EnqueueInput = {
  * Creates a QUEUED job, or returns the existing one when `idempotencyKey`
  * matches — so a double-clicked button or a retried request cannot pay twice.
  */
-export async function enqueueJob(input: EnqueueInput): Promise<{
+export async function enqueueJob(raw: EnqueueInput): Promise<{
   job: AiJobRow
   deduplicated: boolean
   budgetWarning?: string
 }> {
+  /*
+   * 套用「哪個任務用哪個模型」(Z152).
+   *
+   * 在這裡套用而不是執行時套用，是因為下面那一列 `ai_jobs` 會把 providerId、
+   * model、effort 都存下來——成本帳、`ai_outputs.model` 的來源追溯、以及
+   * 「這段是哪個模型寫的」全都讀它。留到執行時才查，這一列會是空的。
+   *
+   * 呼叫端已經指名供應商的話整組不套用：那是人的決定。
+   */
+  const input = await applyAssignment(raw)
+
   // Fail fast when nothing can serve the task, rather than queueing a job that
   // can only ever fail.
   await assertTaskServiceable(input.task, input.providerId ?? null)

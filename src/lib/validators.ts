@@ -5,6 +5,7 @@ import { AI_EFFORTS } from '@/lib/settings-view'
 import { CURRENCIES } from '@/lib/money'
 import { PRODUCTION_STAGE_KEYS, PRODUCTION_STAGE_STATUSES } from '@/lib/production'
 import {
+  AI_JOB_KINDS,
   AI_PROVIDER_KINDS,
   ASSET_KINDS,
   CAMERA_MOVES,
@@ -1005,6 +1006,22 @@ export const voicePreviewSchema = z.object({
   /** Azure 的情緒風格名。音色不支援的話合成端會忽略。 */
   style: z.string().trim().max(60).optional(),
   text: z.string().trim().min(1).max(60).optional(),
+})
+
+/**
+ * 哪個任務用哪個模型 (Z152).
+ *
+ * `maxTokens` 的上限刻意不照某一家的最大值寫死：七家的上限各不相同，而
+ * 寫死最大的那一家會讓別家在執行時才 400。填太大是人的選擇，擋在這裡只會
+ * 擋錯人。
+ */
+export const modelAssignmentSchema = z.object({
+  task: z.enum(AI_JOB_KINDS),
+  providerId: uuid,
+  model: z.string().trim().min(1, '要指定模型').max(120),
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional().default('high'),
+  maxTokens: z.coerce.number().int().min(256).max(200_000).optional().default(32_000),
+  candidates: z.coerce.number().int().min(1).max(3).optional().default(1),
 })
 
 export const promoteSpeakersSchema = z.object({

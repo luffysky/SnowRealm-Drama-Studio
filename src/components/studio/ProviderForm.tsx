@@ -1,6 +1,6 @@
 'use client'
 
-import { Loader2, Plus, Wifi } from 'lucide-react'
+import { ListChecks, Loader2, Plus, Wifi } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
@@ -305,6 +305,64 @@ export function AddProvider({ models }: { models: readonly string[] }) {
         </button>
       </div>
     </form>
+  )
+}
+
+/**
+ * 跟廠商要可用的模型清單 (Z151).
+ *
+ * 沒有這顆鈕，模型指派那一頁的下拉永遠是空的——而寫死一份清單會在某天變成
+ * 「選單裡有、打過去 404」。問廠商拿到的才是**這個帳號當下真的能用的**。
+ *
+ * Gemini 的相容層沒有 `/models`（實測 404）。那不是故障，所以回來的訊息會
+ * 直說要手動填，不是報一個錯。
+ */
+export function FetchModels({ providerId }: { providerId: string }) {
+  const router = useRouter()
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+
+  async function fetchModels() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const response = await apiFetch(`/api/ai/providers/${providerId}/models`, {
+        method: 'POST',
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      const body = (await response.json()) as {
+        data?: { fetched?: boolean; models?: string[]; reason?: string }
+      } & { fetched?: boolean; models?: string[]; reason?: string }
+      const result = body.data ?? body
+
+      if (result.fetched) {
+        toast.success(`抓到 ${result.models?.length ?? 0} 個模型`, '現在可以到「模型」那一頁指派了。')
+        router.refresh()
+      } else {
+        toast.info('沒有抓到清單', result.reason ?? '這一家沒有提供模型清單端點。')
+      }
+    } catch (cause) {
+      toast.error('抓不到', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void fetchModels()}
+      disabled={busy}
+      className="tap inline-flex w-fit items-center gap-1 rounded-lg bg-stage-800 px-2 py-1 text-[10px] text-ink-300 transition-colors hover:text-ink-50 disabled:opacity-40"
+    >
+      {busy ? (
+        <Loader2 aria-hidden className="size-3 animate-spin" />
+      ) : (
+        <ListChecks aria-hidden className="size-3" />
+      )}
+      抓取可用模型
+    </button>
   )
 }
 

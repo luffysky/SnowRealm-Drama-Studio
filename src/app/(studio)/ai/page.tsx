@@ -6,6 +6,7 @@ import { aiProviders } from '@/db/schema'
 import { AiStudio } from '@/components/studio/AiStudio'
 import { adapterFor } from '@/lib/ai/registry'
 import { AVAILABLE_MODELS } from '@/lib/ai/anthropic'
+import { listAssignments } from '@/lib/ai/assignments'
 import { reviewInbox, spendSummary, throughput } from '@/lib/ai/insights'
 import { listQueue, queueCounts } from '@/lib/ai/jobs'
 import { can } from '@/lib/auth/rbac'
@@ -37,8 +38,18 @@ export default async function AiStudioPage() {
 
   const rows = await db.select().from(aiProviders).orderBy(asc(aiProviders.createdAt))
 
-  const [jobs, counts, inbox, spend, capacity, findings, projectList, fx, providers] =
-    await Promise.all([
+  const [
+    jobs,
+    counts,
+    inbox,
+    spend,
+    capacity,
+    findings,
+    projectList,
+    fx,
+    providers,
+    assignments,
+  ] = await Promise.all([
       listQueue({}),
       queueCounts(),
       reviewInbox(),
@@ -75,6 +86,13 @@ export default async function AiStudioPage() {
           }
         })
       ),
+      /*
+       * 哪個任務用哪個模型 (Z152).
+       *
+       * 連**沒有指派的**任務一起列出來——只列已指派的話，一開始畫面是空的，
+       * 而還在自動挑選的那些才是需要看見的。
+       */
+      listAssignments(),
     ])
 
   return (
@@ -107,6 +125,7 @@ export default async function AiStudioPage() {
        * 了 Anthropic SDK，拉進瀏覽器包裡只為了一個字串陣列。
        */
       models={[...AVAILABLE_MODELS]}
+      assignments={assignments}
     />
   )
 }

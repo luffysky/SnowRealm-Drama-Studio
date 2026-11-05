@@ -2,7 +2,8 @@
 
 import { AlertTriangle, Ban, CheckCircle2, Loader2, Play, RefreshCw, RotateCcw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { AddProvider, TestProvider } from '@/components/studio/ProviderForm'
+import { AddProvider, FetchModels, TestProvider } from '@/components/studio/ProviderForm'
+import { ModelAssignments } from '@/components/studio/ModelAssignments'
 import { useEffect, useState } from 'react'
 import { Tabs } from '@/components/ui/Tabs'
 import { useToast } from '@/components/ui/Toast'
@@ -109,6 +110,23 @@ export type AiStudioData = {
    * 分開一個旗標，不跟 `canRun` 共用：跑任務是日常，換金鑰不是。
    */
   canManageProviders: boolean
+  /** 哪個任務用哪個模型 (Z152)。沒指派的任務也在列表裡。 */
+  assignments: {
+    rows: {
+      task: string
+      label: string
+      assignment: {
+        providerId: string
+        model: string
+        effort: string
+        maxTokens: number
+        candidates: number
+        providerLabel: string
+        providerEnabled: boolean
+      } | null
+    }[]
+    providers: { id: string; label: string; kind: string; enabled: boolean; models: string[] }[]
+  }
   /**
    * 可選的模型清單，從伺服器傳下來。
    *
@@ -118,7 +136,7 @@ export type AiStudioData = {
   models: string[]
 }
 
-type PanelId = 'inbox' | 'findings' | 'batch' | 'spend' | 'throughput' | 'queue'
+type PanelId = 'inbox' | 'findings' | 'batch' | 'spend' | 'throughput' | 'queue' | 'models'
 
 export function AiStudio({
   jobs,
@@ -134,6 +152,7 @@ export function AiStudio({
   canRun,
   canManageProviders,
   models,
+  assignments,
 }: AiStudioData) {
   const router = useRouter()
   const toast = useToast()
@@ -151,6 +170,14 @@ export function AiStudio({
   )
 
   const running = jobs.filter((job) => LIVE.includes(job.status)).length
+
+  /*
+   * 徽章顯示**還沒指派**的數量 (Z152).
+   *
+   * 不是已指派的——需要注意的是還在自動挑選的那些，因為自動挑選的意思是
+   * 「挑第一個能用的」，接了七家也只會用到一家。
+   */
+  const unassigned = assignments.rows.filter((row) => !row.assignment).length
 
   /*
    * Polls only while something is actually in flight. `router.refresh()`
@@ -230,8 +257,25 @@ export function AiStudio({
           { id: 'spend', label: '花費' },
           { id: 'throughput', label: '產能' },
           { id: 'queue', label: '佇列', badge: running > 0 ? running : undefined },
+          /*
+           * 「模型」這一頁 (Z152)。徽章顯示**還沒指派**的數量，不是已指派的
+           * ——需要注意的是還在自動挑選的那些。
+           */
+          ...(canManageProviders
+            ? [
+                {
+                  id: 'models',
+                  label: '模型',
+                  badge: unassigned > 0 ? unassigned : undefined,
+                },
+              ]
+            : []),
         ]}
       />
+
+      {panel === 'models' && canManageProviders && (
+        <ModelAssignments rows={assignments.rows} providers={assignments.providers} />
+      )}
 
       {panel === 'inbox' && <AiInbox items={inbox} canRun={canRun} />}
 
@@ -301,7 +345,18 @@ export function AiStudio({
                    * 按得到——所以「這把金鑰到底還能不能用」只能靠排一個真的
                    * 任務下去試。
                    */}
-                  {canManageProviders && <TestProvider providerId={provider.id} />}
+                  {canManageProviders && (
+                    <div className="flex flex-wrap gap-1">
+                      <TestProvider providerId={provider.id} />
+                      {/*
+                       * 只有 OpenAI 相容的那一種列得出模型 (Z151)。Claude 的
+                       * 清單是內建的，另外三種還沒有適配器。
+                       */}
+                      {provider.kind === 'OPENAI_COMPATIBLE' && (
+                        <FetchModels providerId={provider.id} />
+                      )}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

@@ -16,6 +16,7 @@ import {
 import { ApiError, logActivity } from '@/lib/api'
 import { stripHtmlToText } from '@/lib/utils'
 import type { SessionUser } from '@/lib/auth/session'
+import { applyAssignment } from './assignments'
 import { adapterFor, aiOverrides, envOnlyAnthropicAdapter } from './registry'
 import type { AiAdapter, AiContext, AiTaskKind } from './types'
 
@@ -279,7 +280,16 @@ export async function estimateJob(input: {
   maxTokens?: number
   context: AiContext
 }) {
-  const resolved = await adapterForTask(input.task, input.providerId ?? null)
+  /*
+   * 估價要用跟實際執行**同一組**設定 (Z152).
+   *
+   * 不然報的是 A 模型的價、跑的是 B 模型——那是跟那張壞掉的匯率表同一類的
+   * 錯：每個數字看起來都像數字，只是跟事實無關。而這個數字是給人按下「確定
+   * 要花這筆錢」之前看的。
+   */
+  const settled = await applyAssignment(input)
+
+  const resolved = await adapterForTask(settled.task, settled.providerId ?? null)
   if (!resolved) {
     throw ApiError.notConfigured(
       'AI 功能尚未啟用：還沒有可用的 AI 供應商金鑰，無法估算費用。'
@@ -287,11 +297,11 @@ export async function estimateJob(input: {
   }
 
   return resolved.adapter.estimate({
-    task: input.task,
-    context: input.context,
-    ...(input.model ? { model: input.model } : {}),
-    ...(input.candidates ? { candidates: input.candidates } : {}),
-    ...(input.maxTokens ? { maxTokens: input.maxTokens } : {}),
+    task: settled.task,
+    context: settled.context,
+    ...(settled.model ? { model: settled.model } : {}),
+    ...(settled.candidates ? { candidates: settled.candidates } : {}),
+    ...(settled.maxTokens ? { maxTokens: settled.maxTokens } : {}),
   })
 }
 
