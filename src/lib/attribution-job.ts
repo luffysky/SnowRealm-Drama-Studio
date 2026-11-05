@@ -328,35 +328,17 @@ export async function attributionFor(episodeId: string): Promise<{
   return { speakers, genders }
 }
 
-/** How much of an episode has a speaker, for the UI. */
-export async function attributionStatus(episodeIds: string[]): Promise<
-  Map<string, { lines: number; characters: number }>
-> {
-  if (episodeIds.length === 0) return new Map()
-
-  const rows = await db
-    .select({
-      episodeId: episodeLineSpeakers.episodeId,
-      spokenAs: episodeLineSpeakers.spokenAs,
-    })
-    .from(episodeLineSpeakers)
-    .where(inArray(episodeLineSpeakers.episodeId, episodeIds))
-
-  const out = new Map<string, { lines: number; names: Set<string> }>()
-  for (const row of rows) {
-    const entry = out.get(row.episodeId) ?? { lines: 0, names: new Set<string>() }
-    entry.lines += 1
-    if (row.spokenAs) entry.names.add(row.spokenAs)
-    out.set(row.episodeId, entry)
-  }
-
-  return new Map(
-    [...out.entries()].map(([id, entry]) => [
-      id,
-      { lines: entry.lines, characters: entry.names.size },
-    ])
-  )
-}
+/*
+ * 這裡本來有一支 `attributionStatus(episodeIds[])` (Z146).
+ *
+ * 它吃一串集數、回報每一集判了幾句、認出幾個角色——也就是為了一個**跨集
+ * 總覽**設計的，而那個總覽從來沒有做出來。唯一呼叫它的是一支同樣沒人呼叫
+ * 的 GET 端點，所以整條線從頭到尾沒有任何人用過。
+ *
+ * 那個總覽是真的有用的（「現在只有一集有聲音？」問的就是這個），但它需要
+ * 一支吃一串集數的端點加上介面，不是把這個函式留在這裡等。排進待辦
+ * （Z147），要做的時候 git 裡有。
+ */
 
 /* -------------------------------------------------------------------------- */
 

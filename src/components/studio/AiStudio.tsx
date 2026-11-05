@@ -2,6 +2,7 @@
 
 import { AlertTriangle, Ban, CheckCircle2, Loader2, Play, RefreshCw, RotateCcw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { AddProvider, TestProvider } from '@/components/studio/ProviderForm'
 import { useEffect, useState } from 'react'
 import { Tabs } from '@/components/ui/Tabs'
 import { useToast } from '@/components/ui/Toast'
@@ -102,6 +103,19 @@ export type AiStudioData = {
   currency: CurrencyValue
   fx: FxRates
   canRun: boolean
+  /**
+   * 能不能新增／測試供應商 (Z146).
+   *
+   * 分開一個旗標，不跟 `canRun` 共用：跑任務是日常，換金鑰不是。
+   */
+  canManageProviders: boolean
+  /**
+   * 可選的模型清單，從伺服器傳下來。
+   *
+   * 不在用戶端 import `lib/ai/anthropic`——那個檔案在模組層就 import 了
+   * Anthropic SDK，拉進瀏覽器包裡是白白的幾十 KB，而我們只要一個字串陣列。
+   */
+  models: string[]
 }
 
 type PanelId = 'inbox' | 'findings' | 'batch' | 'spend' | 'throughput' | 'queue'
@@ -118,6 +132,8 @@ export function AiStudio({
   currency,
   fx,
   canRun,
+  canManageProviders,
+  models,
 }: AiStudioData) {
   const router = useRouter()
   const toast = useToast()
@@ -241,7 +257,9 @@ export function AiStudio({
             <p className="rounded-lg bg-stage-900 px-3 py-2.5 text-[11px] leading-relaxed text-ink-500 ring-1 ring-stage-700/60">
               還沒有設定任何供應商。目前是用環境變數裡的{' '}
               <span className="font-mono text-ink-400">ANTHROPIC_API_KEY</span> 在跑——
-              能用，但換金鑰要重新部署。
+              {canManageProviders
+                ? '能用，但換金鑰要重新部署。在這裡新增一個就不用了。'
+                : '能用，但換金鑰要重新部署。'}
             </p>
           ) : (
             <ul className="grid gap-2 sm:grid-cols-2">
@@ -277,10 +295,19 @@ export function AiStudio({
                     )}
                     {provider.keyHint && <span className="font-mono">金鑰 ⋯{provider.keyHint}</span>}
                   </p>
+
+                  {/*
+                   * 測試連線 (Z146)。這支端點寫好很久了，介面上一直沒有地方
+                   * 按得到——所以「這把金鑰到底還能不能用」只能靠排一個真的
+                   * 任務下去試。
+                   */}
+                  {canManageProviders && <TestProvider providerId={provider.id} />}
                 </li>
               ))}
             </ul>
           )}
+
+          {canManageProviders && <AddProvider models={models} />}
         </section>
 
         {/* ---- queue ------------------------------------------------------- */}

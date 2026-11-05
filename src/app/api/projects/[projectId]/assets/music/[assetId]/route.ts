@@ -1,26 +1,16 @@
 import { ApiError, handle, jsonOk, logActivity, parseJson, requirePermission } from '@/lib/api'
-import { getMusic, updateMusic } from '@/lib/music'
+import { updateMusic } from '@/lib/music'
 import { requireProjectApi } from '@/lib/project-access'
 import { markSearchDirty } from '@/lib/search'
 import { musicUpdateSchema } from '@/lib/validators'
 
 export const runtime = 'nodejs'
 
-export const GET = handle(
-  async (
-    _request: Request,
-    context: { params: Promise<{ projectId: string; assetId: string }> }
-  ) => {
-    const user = await requirePermission('project.read')
-    const { projectId, assetId } = await context.params
-    await requireProjectApi(projectId, user.id)
-
-    const track = await getMusic(projectId, assetId)
-    if (!track) throw new ApiError(404, '找不到這首音樂', 'music_not_found')
-
-    return jsonOk({ track })
-  }
-)
+/*
+ * **沒有 GET** (Z146)。這首歌的資料由音樂詳情頁與編輯頁在伺服器端呼叫
+ * `getMusic()` 渲染，所以本來那支 GET 沒有任何呼叫端——它只是同一份查詢
+ * 的第二個實作，外加一個要自己維護的授權面。
+ */
 
 export const PATCH = handle(
   async (

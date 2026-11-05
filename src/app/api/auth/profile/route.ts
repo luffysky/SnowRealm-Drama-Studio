@@ -1,14 +1,13 @@
 import { handle, jsonOk, logActivity, parseJson, requirePermission, requireUser } from '@/lib/api'
-import { listMembers, updateProfile } from '@/lib/auth/profile'
+import { updateProfile } from '@/lib/auth/profile'
 import { profileUpdateSchema } from '@/lib/validators'
 
 export const runtime = 'nodejs'
 
-/** 工作室成員，給個人設定與團隊管理兩個畫面共用。 */
-export const GET = handle(async () => {
-  await requireUser()
-  return jsonOk({ members: await listMembers() })
-})
+/*
+ * **只有 PATCH。** 成員清單由 `/settings/profile` 在伺服器端直接呼叫
+ * `listMembers()` 渲染，所以本來那支 GET 沒有任何呼叫端 (Z146)。
+ */
 
 /**
  * 改名字、Email、帳號、職稱、顏色、幣別。

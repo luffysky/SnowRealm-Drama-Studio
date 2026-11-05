@@ -5,6 +5,7 @@ import { db } from '@/db'
 import { aiProviders } from '@/db/schema'
 import { AiStudio } from '@/components/studio/AiStudio'
 import { adapterFor } from '@/lib/ai/registry'
+import { AVAILABLE_MODELS } from '@/lib/ai/anthropic'
 import { reviewInbox, spendSummary, throughput } from '@/lib/ai/insights'
 import { listQueue, queueCounts } from '@/lib/ai/jobs'
 import { can } from '@/lib/auth/rbac'
@@ -98,6 +99,14 @@ export default async function AiStudioPage() {
       currency={user.displayCurrency}
       fx={fx}
       canRun={can(user, 'ai.run')}
+      canManageProviders={can(user, 'ai.provider.manage')}
+      /*
+       * 模型清單從這裡傳下去 (Z146).
+       *
+       * 不讓用戶端自己 import `lib/ai/anthropic`——那個檔案在模組層就 import
+       * 了 Anthropic SDK，拉進瀏覽器包裡只為了一個字串陣列。
+       */
+      models={[...AVAILABLE_MODELS]}
     />
   )
 }

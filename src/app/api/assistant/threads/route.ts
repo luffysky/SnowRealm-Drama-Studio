@@ -1,5 +1,5 @@
 import { handle, jsonOk, parseJson, requireUser } from '@/lib/api'
-import { createThread, listThreads } from '@/lib/assistant/threads'
+import { createThread } from '@/lib/assistant/threads'
 import { assistantThreadCreateSchema } from '@/lib/validators'
 
 export const runtime = 'nodejs'
@@ -10,12 +10,11 @@ export const runtime = 'nodejs'
  * Scoped to the caller by `owner_id`, not by membership: an assistant thread
  * has exactly one member and listing 「我的對話」 is the whole point of the
  * column.
+ *
+ * **只有 POST。** 列清單由 `/assistant` 這一頁在伺服器端直接呼叫
+ * `listThreads()` 渲染，所以這裡本來那支 GET 從來沒有人打過——它只是同一
+ * 份查詢的第二個實作，外加一個要自己維護的授權面。拿掉 (Z146)。
  */
-export const GET = handle(async () => {
-  const user = await requireUser()
-  return jsonOk({ threads: await listThreads(user.id) })
-})
-
 export const POST = handle(async (request: Request) => {
   const user = await requireUser()
   const input = await parseJson(request, assistantThreadCreateSchema)

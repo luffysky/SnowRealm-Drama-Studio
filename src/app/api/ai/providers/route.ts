@@ -1,67 +1,21 @@
-import { asc } from 'drizzle-orm'
 import { db } from '@/db'
 import { aiProviders } from '@/db/schema'
-import { handle, jsonOk, logActivity, parseJson, requirePermission, requireUser } from '@/lib/api'
-import { adapterFor } from '@/lib/ai/registry'
+import { handle, jsonOk, logActivity, parseJson, requirePermission } from '@/lib/api'
 import { AVAILABLE_MODELS, DEFAULT_MODEL } from '@/lib/ai/anthropic'
 import { encryptSecret, last4 } from '@/lib/crypto'
 import { aiProviderSchema } from '@/lib/validators'
 
-/**
- * Lists configured providers with their live availability.
+/*
+ * **只有 POST** (Z146).
  *
- * The API key is never returned — only its last four characters, so the UI can
- * show a masked value (spec 48「金鑰僅後端加密保存，顯示遮罩」).
+ * 本來還有一支 GET 會列出供應商與它們的即時狀態，但 `/ai` 那一頁是伺服器
+ * 元件，它自己查資料庫、自己問適配器——兩邊是同一段邏輯的兩份實作，而只有
+ * 頁面那一份真的被用到。
+ *
+ * 金鑰從來不會回傳，只回後四碼（規格 48「金鑰僅後端加密保存，顯示遮罩」）。
+ * 這件事兩份實作都做對了，但「兩份都要記得做對」本身就是一個遲早會破的
+ * 約定。
  */
-export const GET = handle(async () => {
-  await requireUser()
-
-  const rows = await db.select().from(aiProviders).orderBy(asc(aiProviders.createdAt))
-
-  const providers = await Promise.all(
-    rows.map(async (row) => {
-      const adapter = adapterFor(row)
-      const status = adapter
-        ? await adapter.status()
-        : ({
-            available: false,
-            reason: 'error',
-            detail: '這類供應商尚未實作適配器。',
-          } as const)
-
-      return {
-        id: row.id,
-        kind: row.kind,
-        label: row.label,
-        defaultModel: row.defaultModel,
-        availableModels: row.availableModels,
-        enabled: row.enabled,
-        /** Masked; the plaintext key never leaves the server. */
-        apiKeyMasked: row.apiKeyLast4 ? `••••••••${row.apiKeyLast4}` : '',
-        hasKey: Boolean(row.apiKeyCiphertext) || Boolean(row.envVarName),
-        envVarName: row.envVarName,
-        baseUrl: row.baseUrl,
-        lastTestedAt: row.lastTestedAt,
-        lastTestOk: row.lastTestOk,
-        lastTestMessage: row.lastTestMessage,
-        status,
-        supportedTasks: adapter?.supportedTasks ?? [],
-      }
-    })
-  )
-
-  return jsonOk({
-    providers,
-    /** Shown when no provider row exists yet. */
-    suggested: {
-      kind: 'ANTHROPIC' as const,
-      label: 'Claude（文字）',
-      defaultModel: DEFAULT_MODEL,
-      availableModels: AVAILABLE_MODELS,
-      envVarName: 'ANTHROPIC_API_KEY',
-    },
-  })
-})
 
 /** Creates a provider. The plaintext key is encrypted before it is stored. */
 export const POST = handle(async (request: Request) => {
