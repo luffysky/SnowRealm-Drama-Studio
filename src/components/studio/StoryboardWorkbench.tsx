@@ -16,6 +16,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
+import { applyTargetFor } from '@/lib/ai/apply-targets'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import {
   CAMERA_MOVES,
@@ -238,7 +239,7 @@ export function StoryboardWorkbench({
                * 採用要真的寫進去 (Z71)。沒有 targetType 的話，`applyCandidate`
                * 找不到目標，採用只會把任務標成已採用、一個鏡頭都沒建。
                */
-              targetType="episode_shots"
+              targetType={applyTargetFor('STORYBOARD_GENERATE')}
               scopeLabel={`第 ${episode.number} 集，目標片長 ${episode.targetSec || '未設定'} 秒`}
               currency={currency}
               fx={fx}

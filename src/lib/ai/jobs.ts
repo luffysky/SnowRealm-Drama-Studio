@@ -372,6 +372,43 @@ export async function applyCandidate(input: {
   }
 
   /*
+   * 改編寫的是場次，不是一整塊正文 (Z30).
+   *
+   * 它的目標確實是一份 document，所以沒有這個分支的話它**不會**落到「什麼
+   * 都沒寫」那條路——它會落到更糟的那條：`applyToDocument` 把整段 JSON 塞進
+   * `documents.content`，而劇本實際顯示的是 `scenes` 那張表。畫面上一場都沒
+   * 多，版本紀錄裡卻多了一版內容是 JSON 的劇本。
+   */
+  if (job.targetType === 'episode_scenes') {
+    const { applyScript } = await import('@/lib/script-apply')
+    const applied = await applyScript({
+      jobId: job.id,
+      user: input.user,
+      // 面板有候選選擇器，而寫入是破壞性的——寫死 [0] 等於「選 B 卻套用 A」。
+      candidateIndex: input.candidateIndex,
+    })
+
+    const [done] = await db.select().from(aiJobs).where(eq(aiJobs.id, job.id)).limit(1)
+    return {
+      job: done ?? job,
+      versionId: applied.versionId,
+      wrote:
+        `寫入 ${applied.created} 場，預估 ${Math.round(applied.totalSeconds)} 秒` +
+        (applied.replaced > 0 ? `；原本的 ${applied.replaced} 場存成了版本` : '') +
+        /*
+         * 讀不出來的那幾筆一定要說 (Z30 審出來).
+         *
+         * 採用之前面板誠實地說「15 場，另有 3 筆讀不出來」，採用之後卻只說
+         * 「寫入 12 場」——那三場就這樣從紀錄裡消失，而舊的場次已經被刪掉
+         * 了。片長校驗接著拿一個少了三場的數字去判斷要不要加戲。
+         */
+        (applied.rejected.length > 0
+          ? `；有 ${applied.rejected.length} 筆讀不出來，沒有寫進去`
+          : ''),
+    }
+  }
+
+  /*
    * 分鏡寫的是鏡頭表，不是正文 (Z71).
    *
    * 跟上面兩個分支同一個理由。沒有它的話，採用會走到下面的

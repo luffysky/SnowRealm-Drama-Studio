@@ -10,6 +10,8 @@ import type { AiSelectionAction } from '@/components/editor/AiSelectionMenu'
 import { AiAssistant } from '@/components/studio/AiAssistant'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
+import { applyTargetFor } from '@/lib/ai/apply-targets'
+import { describeScenes } from '@/lib/ai/scene-draft'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import type { AiJobKindValue } from '@/lib/constants'
 import type { EditorModuleId } from '@/lib/editor/modules'
@@ -373,6 +375,22 @@ export function ScriptEditor({
                 setAiScope(null)
                 setAiRequest(null)
                 router.refresh()
+              }}
+              /*
+               * 採用要真的寫成場次 (Z30)。
+               *
+               * 沒有 targetType 的話，`applyCandidate` 找不到目標，採用只會
+               * 把任務標成已採用、一場都沒建，而面板照實說「請自行複製需要
+               * 的段落」——一整集要人自己剪成十幾場貼進去。
+               *
+               * 只給 `NOVEL_TO_SCRIPT`，**不給元件**：旁邊的
+               * `SCRIPT_ANALYZE` 是分析，它不該有任何寫入目標。
+               */
+              applyByTask={{
+                NOVEL_TO_SCRIPT: {
+                  targetType: applyTargetFor('NOVEL_TO_SCRIPT'),
+                  summarize: describeScenes,
+                },
               }}
               tasks={[
                 {

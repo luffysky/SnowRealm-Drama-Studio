@@ -5,6 +5,7 @@ import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import type { DocumentKindValue } from '@/lib/constants'
 import { countRichTextChars } from '@/lib/utils'
+import { estimateSceneSeconds } from '@/lib/writing'
 
 /**
  * 版本紀錄 (design 08).
@@ -305,6 +306,19 @@ export async function restoreVersion(input: {
             location: row.location,
             timeOfDay: row.timeOfDay,
             content: row.content,
+            /*
+             * 還原會把預估片長洗成 0 (Z30).
+             *
+             * 快照裡沒有 `estimatedSec`（上面那段存的時候就沒存），所以這裡
+             * 不給就落在欄位預設值 0——**還原一個劇本版本，每一場的預估片長
+             * 都歸零**。而 `production-findings` 與 `stage-sync` 讀的是
+             * `sum(estimated_sec)`，於是那一集會變成「0 秒，離目標還差很
+             * 遠」，然後體檢照這個數字叫人去加戲。
+             *
+             * 跟上面 chapters 重算 `charCount` 是同一個處理：**衍生欄位從內
+             * 容重算，不要從快照帶**。這樣快照裡存不存它都不影響正確性。
+             */
+            estimatedSec: estimateSceneSeconds(row.content),
           }))
         )
       }

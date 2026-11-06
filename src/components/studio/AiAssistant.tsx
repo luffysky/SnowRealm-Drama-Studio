@@ -38,6 +38,35 @@ export type AiTask = {
   hint: string
 }
 
+/**
+ * 每個任務各自的採用設定 (Z30).
+ *
+ * 為什麼是 record 而不是掛在 `AiTask` 上：`AiTask[]` 是一個 prop 陣列，而
+ * React Compiler 不接受「對 prop 陣列做 `.find()` 再放進 `useCallback` 的
+ * 相依陣列」——它無法證明那個陣列之後不會被改，於是整個元件的最佳化被跳
+ * 過（`react-hooks/preserve-manual-memoization`，而那是 error 不是 warning）。
+ * 用 key 查一個 record 它接受，而這個檔案裡 `sourceTextByTask` 早就是這個
+ * 形狀了——同一個問題的同一個解法，不要在旁邊放第二種。
+ */
+export type TaskApply = {
+  /**
+   * 這一個任務採用時寫到哪裡去。
+   *
+   * 元件層級也有一個 `targetType`，但它對整個面板一視同仁——而一個面板上常
+   * 常是「一個會寫入、一個只是分析」：劇本編輯器同時掛著 `NOVEL_TO_SCRIPT`
+   * （要寫成場次）與 `SCRIPT_ANALYZE`（只該回報，不該碰任何東西）。
+   * 在元件上給一個 targetType 會把分析那一個也標成有寫入目標。
+   */
+  targetType?: string
+  /**
+   * 一句話說出這份候選會變成什麼。
+   *
+   * 結構化輸出的候選內容是一段 JSON，而面板預設是拿它跟目前內容做 diff——
+   * 那個 diff 是純雜訊。有這個函式就印摘要並原樣顯示內容，沒有就照舊 diff。
+   */
+  summarize?: (content: string) => string | null
+}
+
 export type AiAssistantProps = {
   projectId: string
   episodeId?: string | null
@@ -62,6 +91,8 @@ export type AiAssistantProps = {
    */
   novelSources?: { id: string; number: number; title: string; charCount: number }[]
   tasks: AiTask[]
+  /** Per-task adopt settings; see `TaskApply`. */
+  applyByTask?: Partial<Record<AiJobKindValue, TaskApply>>
   currency: CurrencyValue
   fx: FxRates
   /** Called when a candidate is adopted, so the editor can reload. */
@@ -134,6 +165,7 @@ export function AiAssistant({
   sourceTextByTask,
   novelSources,
   tasks,
+  applyByTask,
   currency,
   fx,
   onAdopted,
@@ -175,6 +207,10 @@ export function AiAssistant({
   /** What this task actually reads. */
   const activeSource = sourceTextByTask?.[task] ?? sourceText
 
+  /** This task's adopt settings, if it has any. */
+  const activeApply = applyByTask?.[task]
+  const activeTarget = activeApply?.targetType ?? targetType
+
   const body = useCallback(
     () => ({
       task,
@@ -187,7 +223,7 @@ export function AiAssistant({
       includeWorld: true,
       includeCharacters: true,
       candidates: 1,
-      ...(targetType ? { targetType } : {}),
+      ...(activeTarget ? { targetType: activeTarget } : {}),
       ...(targetId ? { targetId } : {}),
     }),
     [
@@ -198,7 +234,7 @@ export function AiAssistant({
       instruction,
       readsNovel,
       novelFrom,
-      targetType,
+      activeTarget,
       targetId,
     ]
   )
@@ -413,7 +449,19 @@ export function AiAssistant({
       const response = await apiFetch(`/api/ai/jobs/${job.id}/apply`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ candidateIndex: chosen }),
+        /*
+         * `acknowledge` 是必填的 (Z30 審出來).
+         *
+         * `aiApplySchema` 有 `acknowledge: z.literal(true)`，而這裡從來沒送
+         * ——所以這顆「採用這份」**一直回 400**，錯誤訊息是「必須確認才能套
+         * 用 AI 產出」。分鏡的採用走同一支，所以它也一樣壞著。
+         *
+         * 測試全綠是因為它們直接呼叫 `applyScript`，沒有經過這條路由。
+         *
+         * 送 true 是誠實的：這顆按鈕只在 `phase === 'review'` 出現，而上面就
+         * 是完整的候選內容——不是替人勾一個他沒看過的框。
+         */
+        body: JSON.stringify({ candidateIndex: chosen, acknowledge: true }),
       })
       if (!response.ok) throw new Error(await readApiError(response))
 
@@ -470,6 +518,17 @@ export function AiAssistant({
   }
 
   const candidates = job?.result?.candidates ?? []
+
+  /*
+   * 這份候選採用之後會變成什麼，一句話。
+   *
+   * `summarize` 回 null 代表這段讀不出結構（模型沒照格式回，或整段是散
+   * 文）——那就不要印一句騙人的摘要，讓下面照舊顯示原文。採用時伺服器會再
+   * 解析一次並擋下來，兩邊用的是同一支 parser。
+   */
+  const summary = activeApply?.summarize
+    ? (activeApply.summarize(candidates[chosen]?.content ?? '') ?? null)
+    : null
 
   return (
     <div className="flex flex-col gap-3">
@@ -720,14 +779,33 @@ export function AiAssistant({
             </div>
           )}
 
+          {summary && (
+            <p className="rounded-lg bg-accent-600/10 px-2.5 py-2 text-[11px] leading-relaxed text-accent-200 ring-1 ring-inset ring-accent-500/30">
+              採用會寫入：{summary}
+            </p>
+          )}
+
           <div className="max-h-80 overflow-y-auto rounded-lg bg-stage-850 p-2 ring-1 ring-inset ring-stage-700">
-            <DiffViewer
-              before={activeSource}
-              after={candidates[chosen]?.content ?? ''}
-              beforeLabel="目前內容"
-              afterLabel={candidates[chosen]?.label ?? '候選'}
-              mode="unified"
-            />
+            {summary ? (
+              /*
+               * 結構化的候選不要做 diff。
+               *
+               * 左邊是目前這一場的正文、右邊是一整集的 JSON，逐行比對出來的
+               * 東西沒有一行是有意義的——而一個看起來像壞掉的預覽，會讓人不
+               * 敢按採用，或是更糟，養成不看就按的習慣。
+               */
+              <pre className="whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-ink-400">
+                {candidates[chosen]?.content ?? ''}
+              </pre>
+            ) : (
+              <DiffViewer
+                before={activeSource}
+                after={candidates[chosen]?.content ?? ''}
+                beforeLabel="目前內容"
+                afterLabel={candidates[chosen]?.label ?? '候選'}
+                mode="unified"
+              />
+            )}
           </div>
 
           {job?.actualCost && (
@@ -801,13 +879,20 @@ export function AiAssistant({
             </button>
           </div>
 
+          {/*
+            這一段本來是無條件印的 (Z30 審出來).
+
+            The old text promised a rollback that did not exist. Until the
+            chapter-level write is wired (Z122), say what actually happens.
+
+            ——而「會寫入」的那條路接上之後，它就跟上面那句「採用會寫入：12
+            場、共 8,431 字」同時出現在一個畫面裡，而且說的是相反的事。兩句
+            裡假的那一句，正好是「那件會毀資料的事不會發生」。
+          */}
           <p className="text-[10px] text-ink-700">
-            {/*
-              The old text promised a rollback that did not exist. Until the
-              chapter-level write is wired (Z122), say what actually happens.
-            */}
-            這份產出目前不會自動覆蓋正文——請自行複製要用的段落。
-            之後接上自動寫回時，會先把原本的內容存成版本再寫。
+            {activeTarget
+              ? '採用會把上面這份寫進去，並把原本的內容存成版本——可以從版本紀錄還原。'
+              : '這份產出目前不會自動覆蓋正文——請自行複製要用的段落。'}
           </p>
         </div>
       )}

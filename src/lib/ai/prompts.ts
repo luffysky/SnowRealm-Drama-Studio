@@ -51,8 +51,44 @@ const TASK_INSTRUCTIONS: Record<AiTaskKind, string> = {
   NOVEL_POLISH: '潤飾文字：修正語病、統一用詞、加強畫面感。不得改動劇情事實與角色決定。',
   NOVEL_REVIEW:
     '以審稿人身分評估這段小說：指出節奏問題、角色動機不足之處、與世界觀矛盾的地方。逐條列出，附上出處引文。不要直接改寫。',
+  /*
+   * 改成結構化輸出 (Z30).
+   *
+   * 本來回散文，而散文沒有地方可以去：`scenes` 那張表有 heading／location／
+   * timeOfDay／content 四欄，沒有人分得出一段改編稿裡哪一句是地點、哪一段是
+   * 這一場的內容。於是這個任務產出之後**沒有任何地方能套用它**——採用只會把
+   * 任務標成已採用，然後請人自己把一整集剪成十幾場貼進去。
+   * Z70 角色設計、Z71 分鏡、Z153 任務建議的同一個病，第四次。
+   *
+   * **不要 code。** 場次代號由位置算（`sceneCodeFor`），跟 `createScene` 共
+   * 用一個算式——讓模型也寫一個，重新排序之後兩邊就對不起來。
+   *
+   * **不要秒數。** 片長由 `estimateSceneSeconds` 算，那是一個定義好的算式；
+   * 模型給的是它猜的。兩個都存，畫面上的「預估片長 vs 目標區間」就不知道該
+   * 信哪一個。但算式本身要告訴模型，它才控得了節奏。
+   */
+  /*
+   * 要物件不要裸陣列 (Z30 審出來).
+   *
+   * 進了 `STRUCTURED_TASKS` 就會送 `response_format: json_object`，而那個模
+   * 式的契約就是**最上層一定是物件**。再叫模型「只回一個 JSON 陣列」，它只
+   * 能自己發明一個包裝鍵——而包成 `{"scenes":[...],"notes":[]}` 這種有兩個
+   * 陣列的物件時，`arrayIn` 會整份退回。一整集的改編錢付了，東西拿不到。
+   */
   NOVEL_TO_SCRIPT:
-    '將小說改編為劇本。輸出場次（場景標題、地點、時間）、動作描述與對白。計算片長時必須把動作與停頓算進去，不只算台詞字數。不要改動原著劇情。',
+    '將小說改編為劇本，拆成場次。' +
+    '只回一個 JSON 物件，形如 {"scenes": [...]}，' +
+    'scenes 陣列的每一筆是 {heading, location, timeOfDay, content}：' +
+    'heading 是這一場的標題，十五字以內；' +
+    'location 是地點（例如「小灶房」）；timeOfDay 是時間（日／夜／黃昏／清晨）；' +
+    'content 是這一場的內容，用 HTML 段落：動作與場景描述用 <p>，' +
+    '對白也用 <p>，並把台詞放進「」裡——' +
+    '**「」是片長估算用來分辨對白與動作的唯一依據**，漏了會把對白當動作算。' +
+    '不要在 content 裡重複寫場次代號或標題。' +
+    '片長這樣估：「」裡的字每 5 個字 1 秒，其餘的字每 15 個字 1 秒。' +
+    '用這個算式控制節奏，讓全部場次加起來落在目標片長的正負一成之內，' +
+    '算完請自己核對一次再輸出。' +
+    '不要改動原著劇情。不要輸出 JSON 以外的任何文字。',
   SCRIPT_ANALYZE:
     '分析這份劇本：估算片長（含動作與停頓）、指出對白過長或資訊量不足的場次、標出可刪減處。',
   WORLD_GENERATE: '依分類擴寫世界觀設定條目，內容需與既有設定相容，並標示與哪些既有條目相關。',
@@ -276,6 +312,7 @@ export const TASK_MAX_TOKENS: Partial<Record<AiTaskKind, number>> = {
 export const STRUCTURED_TASKS: ReadonlySet<AiTaskKind> = new Set<AiTaskKind>([
   'CHARACTER_DESIGN',
   'DIALOGUE_ATTRIBUTE',
+  'NOVEL_TO_SCRIPT',
   'STORYBOARD_GENERATE',
   'TASK_SUGGEST',
 ])

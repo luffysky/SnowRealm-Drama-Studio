@@ -4,6 +4,7 @@ import { aiJobs, episodes, projects } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import { buildContext, estimateJob } from './jobs'
+import { applyTargetFor } from './apply-targets'
 import { enqueueJob } from './queue'
 import {
   BATCH_TASKS,
@@ -334,12 +335,17 @@ export async function enqueueBatch(input: {
         ...(input.model ? { model: input.model } : {}),
         candidates: 1,
         /*
-         * No target. Nothing in this app writes AI output into a document
-         * without somebody looking at it first (Z123), and a batch of fifteen
-         * is the last place to start — each one lands in 待確認 and is
-         * accepted from the editor, where the diff is visible.
+         * 目標跟編輯器用同一張表 (Z30).
+         *
+         * 這裡本來寫死 `''`，理由是「不讓 AI 的產出未經人看過就寫進文件」
+         * ——但 `targetType` 不會讓任何東西自動寫入，它只說人按下採用之後要
+         * 寫到哪。任務照樣停在 `AWAITING_REVIEW`，收件匣照樣要求先看過全文。
+         *
+         * 空字串換來的不是安全，是**批次產出的東西一樣都套用不了**：十五集
+         * 的改編跑完，每一集還是得回編輯器重跑一次——而批次存在的理由正是不
+         * 要這樣。分鏡也在 `BATCH_TASKS` 裡，所以它一直有同一個問題。
          */
-        targetType: '',
+        targetType: applyTargetFor(input.task),
         targetId: null,
         idempotencyKey: crypto.randomUUID(),
         estimatedCostUsd,

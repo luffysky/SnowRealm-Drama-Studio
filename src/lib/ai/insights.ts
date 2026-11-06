@@ -358,6 +358,14 @@ export type InboxItem = {
   preview: string
   chars: number
   /** Whether 採用 writes the content, or only marks the job accepted. */
+  /**
+   * 採用之後會不會真的寫到某個地方去。
+   *
+   * 本來是 `row.target_type === 'document'`，而那在
+   * `episode_scenes`／`episode_shots`／`character`／`episode_speakers` 四種
+   * 目標上都是錯的——收件匣因此在**換掉一整集的場次之後**跳「這類產出不會自
+   * 動寫回正文」。改成問那張共用的表，第五種目標就不會再分岔一次。
+   */
   writesTo: 'document' | null
   href: string | null
 }
@@ -427,7 +435,7 @@ export async function reviewInbox(limit = 30): Promise<InboxItem[]> {
     candidates: Number(row.candidates),
     preview: (row.preview ?? '').trim(),
     chars: row.chars === null ? 0 : Number(row.chars),
-    writesTo: row.target_type === 'document' ? 'document' : null,
+    writesTo: row.target_type ? 'document' : null,
     href: hrefFor(row.kind, row.project_id, row.episode_id),
   }))
 }
