@@ -461,3 +461,250 @@ describe.skipIf(!hasDb)('music library', () => {
     await db.delete(schema.assets).where(eq(schema.assets.id, pending!.id))
   })
 })
+
+describe.skipIf(!hasDb)('上傳時 linkTo 的歸屬（Z169）', () => {
+  /*
+   * `beginUpload` 驗了 `episodeId` 屬於本作品，但 `linkTo.entityId` 完全沒
+   * 驗：手動發一個 `projectId` 填 A、`linkTo` 指向 B 作品某個角色的請求，那一
+   * 列 `asset_links` 就建起來了。
+   *
+   * 今天這不是權限漏洞（這個 schema 沒有 per-project 成員），是資料完整性。
+   * 測在**寫入端**：六個讀取端各防一次的話，六處裡忘一處洞就還在。
+   *
+   * ## 這一組自己建 fixture
+   *
+   * 第一版是去撈現成的資料（`select … limit 1`），抓不到就 `return`。而本地
+   * 測試庫裡**一個角色都沒有**（`TEST_DATABASE_URL` 指的是本機那一座，跟應
+   * 用程式用的 Neon 不是同一個），所以四條全部提早返回、全部是綠的、每一條
+   * 0ms。這一段測的是「別的作品的東西掛不上來」，而它當時什麼都沒測。
+   */
+  let beginUpload: typeof import('@/lib/assets').beginUpload
+  let ownerProjectId = ''
+  let strangerProjectId = ''
+  let ownedCharacterId = ''
+  /** `entityType` → 那個作品裡真的存在的一個 id。 */
+  const owned = new Map<string, string>()
+  /*
+   * 真的存在的使用者，不是檔案頂端那個寫死的 USER。
+   *
+   * `assets.uploaded_by_id` 有外鍵，而那個寫死的 id 在本機測試庫裡不存在，
+   * 所以「掛得上去」那一條會死在外鍵上——而死在外鍵上跟「歸屬檢查擋下來」
+   * 是兩回事，混在一起就分不出測到了沒有。
+   *
+   * fixture 自己插一個，不是去撈現成的：撈現成的等於宣告「這個庫裡至少有一
+   * 個使用者」，而剛重置、還沒 seed 的叢集上那一條會紅，訊息還不會說原因。
+   */
+  let uploader = USER
+
+  beforeAll(async () => {
+    if (!hasDb) return
+    ;({ beginUpload } = await import('@/lib/assets'))
+
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const stamp = Date.now()
+
+    const made = await db
+      .insert(schema.projects)
+      .values([
+        { title: 'Z169 甲', slug: `z169-a-${stamp}` },
+        { title: 'Z169 乙', slug: `z169-b-${stamp}` },
+      ])
+      .returning({ id: schema.projects.id })
+
+    ownerProjectId = made[0]?.id ?? ''
+    strangerProjectId = made[1]?.id ?? ''
+
+    const [person] = await db
+      .insert(schema.users)
+      .values({
+        email: `z169-${stamp}@example.test`,
+        name: 'Z169 上傳者',
+        passwordHash: 'x',
+      })
+      .returning({ id: schema.users.id })
+    if (person) uploader = { ...USER, id: person.id }
+
+    /*
+     * 六種 entity 各建一個，因為 `ownerOfLinkTarget` 是六條各自的查詢。
+     * 只測 character 的話，另外五條 join 接錯表、或軟刪除漏濾，全都看不出來。
+     */
+    const [character] = await db
+      .insert(schema.characters)
+      .values({ projectId: ownerProjectId, name: 'Z169 角色' })
+      .returning({ id: schema.characters.id })
+    ownedCharacterId = character?.id ?? ''
+    owned.set('character', ownedCharacterId)
+
+    const [entry] = await db
+      .insert(schema.worldEntries)
+      .values({ projectId: ownerProjectId, title: 'Z169 條目' })
+      .returning({ id: schema.worldEntries.id })
+    owned.set('world_entry', entry?.id ?? '')
+
+    const [task] = await db
+      .insert(schema.tasks)
+      .values({ projectId: ownerProjectId, title: 'Z169 任務' })
+      .returning({ id: schema.tasks.id })
+    owned.set('task', task?.id ?? '')
+
+    const [expense] = await db
+      .insert(schema.expenses)
+      .values({ projectId: ownerProjectId, description: 'Z169 支出', amount: '1.0000' })
+      .returning({ id: schema.expenses.id })
+    owned.set('expense', expense?.id ?? '')
+
+    // shot 與 document 自己沒有 project_id，掛在集數底下。
+    const [arc] = await db
+      .insert(schema.arcs)
+      .values({ projectId: ownerProjectId, index: 1, title: 'Z169 卷一' })
+      .returning({ id: schema.arcs.id })
+    const [episode] = await db
+      .insert(schema.episodes)
+      .values({ projectId: ownerProjectId, arcId: arc!.id, number: 1, title: 'Z169 第一集' })
+      .returning({ id: schema.episodes.id })
+
+    const [shot] = await db
+      .insert(schema.shots)
+      .values({ episodeId: episode!.id, order: 1 })
+      .returning({ id: schema.shots.id })
+    owned.set('shot', shot?.id ?? '')
+
+    const [document] = await db
+      .insert(schema.documents)
+      .values({ episodeId: episode!.id, kind: 'NOVEL' })
+      .returning({ id: schema.documents.id })
+    owned.set('document', document?.id ?? '')
+  })
+
+  afterAll(async () => {
+    if (!hasDb) return
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { inArray } = await import('drizzle-orm')
+
+    const ids = [ownerProjectId, strangerProjectId].filter(Boolean)
+    // 角色、素材、連結都掛 `on delete cascade`，所以刪作品就乾淨了。
+    if (ids.length > 0) {
+      await db.delete(schema.projects).where(inArray(schema.projects.id, ids))
+    }
+    if (uploader.id !== USER.id) {
+      const { eq } = await import('drizzle-orm')
+      await db.delete(schema.users).where(eq(schema.users.id, uploader.id))
+    }
+  })
+
+  const upload = (projectId: string, linkTo: { entityType: string; entityId: string }) =>
+    beginUpload({
+      user: uploader,
+      projectId,
+      kind: 'IMAGE',
+      filename: 'z169.png',
+      contentType: 'image/png',
+      sizeBytes: 2048,
+      linkTo,
+    })
+
+  it('fixture 真的建起來了', () => {
+    // 這一條守的是上面那段註解：fixture 沒建成就該紅，不是讓其餘三條變空的。
+    expect(ownerProjectId).not.toBe('')
+    expect(strangerProjectId).not.toBe('')
+    expect(ownedCharacterId).not.toBe('')
+    expect(ownerProjectId).not.toBe(strangerProjectId)
+    expect(uploader.id).not.toBe(USER.id)
+    // 六種都要有，否則下面那一輪會變成「測了幾種算幾種」。
+    expect([...owned.keys()].sort()).toEqual([
+      'character',
+      'document',
+      'expense',
+      'shot',
+      'task',
+      'world_entry',
+    ])
+    expect([...owned.values()].every(Boolean)).toBe(true)
+  })
+
+  it('拒絕掛到別的作品的角色身上', async () => {
+    await expect(
+      upload(strangerProjectId, { entityType: 'character', entityId: ownedCharacterId })
+    ).rejects.toThrow('要掛上去的對象不屬於這個作品')
+  })
+
+  it('拒絕不存在的對象', async () => {
+    await expect(
+      upload(ownerProjectId, {
+        entityType: 'character',
+        entityId: '00000000-0000-4000-8000-0000000000ff',
+      })
+    ).rejects.toThrow('要掛上去的對象不屬於這個作品')
+  })
+
+  it('拒絕已經軟刪除的角色——那一列建了也沒有人讀得到', async () => {
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { eq } = await import('drizzle-orm')
+
+    const [gone] = await db
+      .insert(schema.characters)
+      .values({ projectId: ownerProjectId, name: 'Z169 刪掉的', deletedAt: new Date() })
+      .returning({ id: schema.characters.id })
+
+    await expect(
+      upload(ownerProjectId, { entityType: 'character', entityId: gone!.id })
+    ).rejects.toThrow('要掛上去的對象不屬於這個作品')
+
+    await db.delete(schema.characters).where(eq(schema.characters.id, gone!.id))
+  })
+
+  it('拒絕沒聽過的 entityType', async () => {
+    /*
+     * 驗證器已經把它限成六種，而這裡再擋一次是因為**新增第七種的時候會先忘
+     * 記改 `ownerOfLinkTarget`**——那時候該發生的是上傳被拒絕，不是悄悄建一
+     * 列沒人驗過的連結。
+     */
+    await expect(
+      upload(ownerProjectId, { entityType: 'invoice', entityId: ownedCharacterId })
+    ).rejects.toThrow('要掛上去的對象不屬於這個作品')
+  })
+
+  it('六種 entity 都認得出歸屬——別的作品的掛不上來，自己的掛得上去', async () => {
+    /*
+     * 原本只測 `character` 一種。另外五條 join 寫錯（例如 `shot` 接到別張
+     * 表）、或 `document` 的軟刪除漏掉，全部看不出來——而每一條都是一個獨立
+     * 的查詢，不是同一段程式的六次呼叫。
+     */
+    for (const [entityType, entityId] of owned) {
+      await expect(
+        upload(strangerProjectId, { entityType, entityId }),
+        `${entityType} 應該被擋下來`
+      ).rejects.toThrow('要掛上去的對象不屬於這個作品')
+
+      const result = await upload(ownerProjectId, { entityType, entityId })
+      expect(result.assetId, `${entityType} 應該掛得上去`).toBeTruthy()
+    }
+  })
+
+  it('同一個作品的角色照樣掛得上去，而且連結真的建了', async () => {
+    // 沒有這一條，上面四條用「永遠拒絕」也會全綠。
+    const result = await upload(ownerProjectId, {
+      entityType: 'character',
+      entityId: ownedCharacterId,
+    })
+
+    const { db } = await import('@/db')
+    const schema = await import('@/db/schema')
+    const { and, eq } = await import('drizzle-orm')
+
+    const links = await db
+      .select({ entityId: schema.assetLinks.entityId })
+      .from(schema.assetLinks)
+      .where(
+        and(
+          eq(schema.assetLinks.assetId, result.assetId),
+          eq(schema.assetLinks.entityType, 'character')
+        )
+      )
+
+    expect(links.map((link) => link.entityId)).toEqual([ownedCharacterId])
+  })
+})

@@ -68,6 +68,7 @@ export function BookTabs({
   cast,
   unlisted,
   canEditCast,
+  initialPanel = 'toc',
 }: {
   projectId: string
   title: string
@@ -80,8 +81,18 @@ export function BookTabs({
   cast: BookCast[]
   unlisted: UnlistedSpeaker[]
   canEditCast: boolean
+  /**
+   * 從別的地方指名要開哪一個分頁 (Z147)。
+   *
+   * 小說工作台的「對白歸屬與配音」總覽會連過來，而判斷與合成兩顆按鈕都在
+   * 「有聲」這一頁——落在「目錄」等於把人丟在門口自己找。
+   *
+   * 只當初始值，不是受控的：進來之後切分頁是純前端的事，不必每切一次就改
+   * 網址、推一筆歷史紀錄進去。
+   */
+  initialPanel?: Panel
 }) {
-  const [panel, setPanel] = useState<Panel>('toc')
+  const [panel, setPanel] = useState<Panel>(initialPanel)
 
   const totals = useMemo(() => {
     const chars = episodes.reduce((sum, episode) => sum + episode.charCount, 0)

@@ -251,6 +251,26 @@ export async function advanceAudiobook(jobId: string): Promise<AudiobookStep> {
        * 42 秒，而使用者兩個都看得到。
        */
       durationSec: Math.round(durationFromBytes(audio.length)),
+      /*
+       * 這一筆自己說自己是什麼 (Z147).
+       *
+       * 「這一集有沒有聲音」本來靠 `kind = 'VOICE'` ＋ 有 `episode_id` 判
+       * 斷，而那些條件**手上傳的檔案也全部符合**——集數素材頁的可上傳清單裡
+       * 就有 VOICE，而它的上傳帶著 `episodeId`。於是一段三秒的參考音會把真
+       * 正的成品頂掉（查詢取最新的那一個）。
+       *
+       * 修在這裡而不是在查詢裡疊條件：查詢只能猜（檔名？標題？時長？），而
+       * 這裡知道答案。既有的兩筆由 `drizzle/0034_audiobook_marker.sql` 從
+       * `ai_jobs.result.assetId` 補標記。
+       */
+      generationMeta: {
+        source: 'NOVEL_TO_AUDIO',
+        kind: 'AUDIOBOOK',
+        jobId: job.id,
+        voice: request.narratorVoice,
+        locale: request.locale,
+        parts: request.ssml.length,
+      },
       uploadStatus: 'COMPLETED',
       ...(job.requestedById ? { uploadedById: job.requestedById } : {}),
     })

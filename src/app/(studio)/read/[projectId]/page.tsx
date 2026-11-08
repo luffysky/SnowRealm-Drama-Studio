@@ -5,15 +5,20 @@ import { listArcs } from '@/lib/arcs'
 import { unlistedSpeakers } from '@/lib/attribution-job'
 import { getSessionUser } from '@/lib/auth/session'
 import { can } from '@/lib/auth/rbac'
+import { audiobooksByEpisode } from '@/lib/assets'
 import { getCharacters } from '@/lib/characters'
 import { db } from '@/db'
-import { assets, episodes } from '@/db/schema'
+import { episodes } from '@/db/schema'
 import { and, eq, isNull } from 'drizzle-orm'
 import { novelTitleOf } from '@/lib/project-titles'
 import { requireProjectPage } from '@/lib/project-access'
 import { novelToc } from '@/lib/writing'
 
-type Params = { params: Promise<{ projectId: string }> }
+type Params = {
+  params: Promise<{ projectId: string }>
+  /** `?tab=audio` — 小說工作台的配音總覽指名要開「有聲」(Z147)。 */
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const user = await getSessionUser()
@@ -37,39 +42,26 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * 刻意**沒有**排行榜、分類篩選、字數級距那些：那是幾十萬本書撐起來的東西，
  * 兩部作品套上去就是一堆空畫面（spec v2 §4）。留下的是這裡真的有資料的部分。
  */
-export default async function BookPage({ params }: Params) {
+export default async function BookPage({ params, searchParams }: Params) {
   const user = await getSessionUser()
   if (!user) redirect('/login')
 
   const { projectId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
+  const wanted = (await searchParams).tab
+  const initialPanel = wanted === 'audio' || wanted === 'about' ? wanted : 'toc'
+
   const [toc, arcs, characters, audio, unlisted] = await Promise.all([
     novelToc(project.id, 'NOVEL'),
     listArcs(project.id),
     getCharacters(project.id),
     /*
-     * 已經做好的有聲書。讀的是素材，不是任務——任務跑完就結束了，而檔案留著。
-     * 一集可能做過好幾次（換了音色重做），所以取最新的那一個。
+     * 已經做好的有聲書。這段原本是寫在這一頁裡的一段查詢加一個「取最新」的
+     * 迴圈，而 Z147 的跨集總覽需要**同一件事**——所以搬進
+     * `audiobooksByEpisode`，讓「這一集有沒有聲音」只有一個定義。
      */
-    db
-      .select({
-        assetId: assets.id,
-        episodeId: assets.episodeId,
-        title: assets.title,
-        durationSec: assets.durationSec,
-        sizeBytes: assets.sizeBytes,
-        createdAt: assets.createdAt,
-      })
-      .from(assets)
-      .where(
-        and(
-          eq(assets.projectId, project.id),
-          eq(assets.kind, 'VOICE'),
-          eq(assets.uploadStatus, 'COMPLETED'),
-          isNull(assets.deletedAt)
-        )
-      ),
+    audiobooksByEpisode(project.id),
     /*
      * 在正文裡說過話、但角色表沒有的人 (Z137)。歸屬那一趟會認出他們，而他們
      * 現在卡在半吊子狀態：配得到聲音，但不在角色頁、沒有定妝照。
@@ -92,16 +84,9 @@ export default async function BookPage({ params }: Params) {
     if (arc) arcOf.set(row.id, { id: arc.id, title: arc.title, index: arc.index })
   }
 
-  /** Newest audiobook per episode. */
-  const audioByEpisode = new Map<string, (typeof audio)[number]>()
-  for (const row of audio) {
-    if (!row.episodeId) continue
-    const existing = audioByEpisode.get(row.episodeId)
-    if (!existing || row.createdAt > existing.createdAt) audioByEpisode.set(row.episodeId, row)
-  }
-
   return (
     <BookTabs
+      initialPanel={initialPanel}
       projectId={project.id}
       title={novelTitleOf(project)}
       logline={project.logline}
@@ -126,12 +111,12 @@ export default async function BookPage({ params }: Params) {
         })),
         arcId: arcOf.get(episode.episodeId)?.id ?? null,
         audio: (() => {
-          const row = audioByEpisode.get(episode.episodeId)
+          const row = audio.get(episode.episodeId)
           if (!row) return null
           return {
             assetId: row.assetId,
             durationSec: row.durationSec,
-            sizeBytes: Number(row.sizeBytes),
+            sizeBytes: row.sizeBytes,
           }
         })(),
       }))}

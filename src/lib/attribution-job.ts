@@ -328,6 +328,76 @@ export async function attributionFor(episodeId: string): Promise<{
   return { speakers, genders }
 }
 
+/** 一集的歸屬狀態，給跨集總覽用 (Z147)。 */
+export type AttributionStatus = {
+  /** 存了幾列。一列是一個段落的判斷結果。 */
+  judged: number
+  /** 其中真的有人在說話的幾句（其餘是旁白）。 */
+  spoken: number
+  /** 認出幾個不同的說話人。 */
+  speakers: number
+  /** 其中幾句是人工改的。人工改過的不會被重跑蓋掉。 */
+  manual: number
+  lastAt: Date | null
+}
+
+/**
+ * 每一集判到哪裡了 (Z147，函式本身是 Z146 砍掉的那一支改寫).
+ *
+ * ## 為什麼它回來了，而且不一樣
+ *
+ * 原本那一支回 `{ lines, characters }`，`lines` 是**列數**。而一列不等於一句
+ * 對白：`character_id` 是 null 且 `spoken_as` 是空字串的那一列，意思是「這一
+ * 段確定沒有人在說話」——旁白。把它算進「判了幾句」會讓一集看起來比實際熱
+ * 鬧。所以這裡 `judged`（判過幾段）與 `spoken`（真的有人說話幾句）分開。
+ *
+ * 今天這部作品兩個數字剛好一樣（73／73），因為套用時只寫有說話人的那些段
+ * 落、不寫旁白列。**兩個數字一樣不是它們是同一件事的證據**，而等到哪天真的
+ * 開始寫旁白列，一個混在一起的數字不會有人發現它變了意思。
+ *
+ * `speakers` 用 `coalesce(character_id, spoken_as)` 去重：同一個人可能有些段
+ * 落連到角色表、有些只有名字（角色表還沒收的說話人，Z137）。而旁白那一種要排
+ * 除掉，否則 `coalesce` 會把它們全折成空字串、算成「一位說話人」。
+ *
+ * 不回「總共幾句對白」當分母。那要把 120 集的正文全部讀出來、逐段跑一次對白
+ * 偵測，而一個要讀整本書才畫得出來的數字，會讓這個總覽貴到沒有人想打開。沒有
+ * 分母的「判過 73 段」仍然答得出這個總覽要答的問題：**哪幾集判過、哪幾集沒
+ * 有。**
+ */
+export async function attributionStatus(
+  episodeIds: readonly string[]
+): Promise<Map<string, AttributionStatus>> {
+  if (episodeIds.length === 0) return new Map()
+
+  const named = sql`(${episodeLineSpeakers.characterId} is not null or ${episodeLineSpeakers.spokenAs} <> '')`
+
+  const rows = await db
+    .select({
+      episodeId: episodeLineSpeakers.episodeId,
+      judged: sql<number>`count(*)::int`,
+      spoken: sql<number>`count(*) filter (where ${named})::int`,
+      speakers: sql<number>`count(distinct case when ${named} then coalesce(${episodeLineSpeakers.characterId}::text, ${episodeLineSpeakers.spokenAs}) end)::int`,
+      manual: sql<number>`count(*) filter (where ${episodeLineSpeakers.source} = 'manual')::int`,
+      lastAt: sql<Date | null>`max(${episodeLineSpeakers.updatedAt})`,
+    })
+    .from(episodeLineSpeakers)
+    .where(inArray(episodeLineSpeakers.episodeId, [...episodeIds]))
+    .groupBy(episodeLineSpeakers.episodeId)
+
+  return new Map(
+    rows.map((row) => [
+      row.episodeId,
+      {
+        judged: row.judged,
+        spoken: row.spoken,
+        speakers: row.speakers,
+        manual: row.manual,
+        lastAt: row.lastAt ? new Date(row.lastAt) : null,
+      },
+    ])
+  )
+}
+
 /*
  * 這裡本來有一支 `attributionStatus(episodeIds[])` (Z146).
  *
@@ -338,6 +408,10 @@ export async function attributionFor(episodeId: string): Promise<{
  * 那個總覽是真的有用的（「現在只有一集有聲音？」問的就是這個），但它需要
  * 一支吃一串集數的端點加上介面，不是把這個函式留在這裡等。排進待辦
  * （Z147），要做的時候 git 裡有。
+ *
+ * **Z147 做了，所以它就在上面。** 從 git 撿回來的時候改了形狀（見那支的說
+ * 明）。這段留著是因為它記的是「為什麼它曾經被刪掉」——一支沒有呼叫端的函式
+ * 該刪，而刪掉之後要做總覽時要記得去 git 裡撿，兩件事都成立。
  */
 
 /* -------------------------------------------------------------------------- */

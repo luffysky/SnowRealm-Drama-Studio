@@ -5,11 +5,15 @@ import {
   assets,
   assetVariants,
   characters,
+  documents,
   episodes,
+  expenses,
   projects,
   shots,
+  tasks,
   uploadSessions,
   users,
+  worldEntries,
 } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import {
@@ -136,6 +140,176 @@ export type BeginUploadResult = {
   totalParts?: number
 }
 
+/** 一集做好的有聲書。 */
+export type EpisodeAudiobook = {
+  assetId: string
+  title: string
+  durationSec: number | null
+  sizeBytes: number
+  createdAt: Date
+}
+
+/**
+ * 每一集最新的那一份有聲書 (Z147).
+ *
+ * 讀的是**素材**不是任務：任務跑完就結束了，而檔案留著。一集可能做過好幾次
+ * （換了音色重做），所以取最新的那一個。
+ *
+ * 有聲書是 `kind = 'VOICE'` 加上 `episode_id`——**沒有 `AUDIOBOOK` 這個
+ * kind**，雖然 `tts/job.ts` 裡有一個叫那個名字的型別（那是任務請求的判別標
+ * 籤，不是素材分類）。這兩個名字長得太像，所以這一支存在的理由有一半是：讓
+ * 「這一集有沒有聲音」只有一個定義，而不是每個呼叫端自己猜一次。
+ *
+ * **光靠 `kind` 與 `episode_id` 不夠，而我第一版以為夠。**
+ *
+ * `origin = 'LIBRARY'` 擋掉聊天室的語音訊息（`kind` 也是 VOICE，Z116）。但真
+ * 正會混進來的不是聊天室，是**集數素材頁**：`EpisodeAssetBrowser` 的可上傳清
+ * 單裡就有 VOICE，而它的上傳帶著 `episodeId`、origin 也是 LIBRARY。於是在那
+ * 一頁傳一段三秒的參考音，它就符合全部條件——而這支取的是**最新的那一個**，
+ * 所以它會把真正的成品頂掉：閱讀器顯示三秒、下載鍵指向那段參考音、總覽也把它
+ * 算成「做出有聲書」。
+ *
+ * 所以改成認 `generation_meta`：合成出來的那一筆自己說自己是什麼
+ * （`tts/job.ts`），既有的兩筆由 `drizzle/0034_audiobook_marker.sql` 從
+ * `ai_jobs.result.assetId` 補標記。查詢裡疊更多條件只是換一種猜法——檔名、標
+ * 題、時長，每一種都會在某個正常用法上猜錯。
+ */
+export async function audiobooksByEpisode(
+  projectId: string
+): Promise<Map<string, EpisodeAudiobook>> {
+  const rows = await db
+    .select({
+      assetId: assets.id,
+      episodeId: assets.episodeId,
+      title: assets.title,
+      durationSec: assets.durationSec,
+      sizeBytes: assets.sizeBytes,
+      createdAt: assets.createdAt,
+    })
+    .from(assets)
+    .where(
+      and(
+        eq(assets.projectId, projectId),
+        eq(assets.kind, 'VOICE'),
+        eq(assets.origin, 'LIBRARY'),
+        sql`${assets.generationMeta} ->> 'kind' = 'AUDIOBOOK'`,
+        eq(assets.uploadStatus, 'COMPLETED'),
+        isNull(assets.deletedAt)
+      )
+    )
+
+  const newest = new Map<string, EpisodeAudiobook>()
+  for (const row of rows) {
+    if (!row.episodeId) continue
+    const existing = newest.get(row.episodeId)
+    if (existing && existing.createdAt >= row.createdAt) continue
+    newest.set(row.episodeId, {
+      assetId: row.assetId,
+      title: row.title,
+      durationSec: row.durationSec,
+      sizeBytes: Number(row.sizeBytes),
+      createdAt: row.createdAt,
+    })
+  }
+
+  return newest
+}
+
+/**
+ * `linkTo` 指到的那個東西屬於哪一個作品，查不到就回 null (Z169).
+ *
+ * ## 為什麼要有這一支
+ *
+ * `beginUpload` 驗了 `episodeId` 屬於本作品，但 `linkTo.entityId` 完全沒驗。
+ * 手動發一個 `projectId` 填 A、`linkTo` 指向 B 作品某個角色的上傳請求，那一列
+ * `asset_links` 就建起來了。
+ *
+ * **今天這不是權限漏洞。** 這個 schema 沒有 per-project 成員（`visibleProjects()`
+ * 說兩個人都看得到每一部作品），所以跨作品不是一道權限邊界，只是資料完整性
+ * ——A 的角色身上掛著 B 的圖。等 membership 真的出現，這條要先補起來再開那個
+ * 功能。
+ *
+ * ## 為什麼修在這裡而不是六個讀取端
+ *
+ * `asset_links` 有 `shot`／`character`／`task`／`world_entry`／`document`／
+ * `expense` 六種。Z168 已經讓角色圖庫查詢自己加上 `assets.projectId` 條件，所
+ * 以**顯示**那條路堵住了——但那是在讀取端補的，照那個做法走下去六個讀取端都
+ * 要各自防一次，而六處裡只要有一處忘了洞就還在。一個寫入端，不是六個讀取端。
+ *
+ * 反方向（素材屬於 B、掛到 A 的角色）已經有 `assertAssetUsable` 守著
+ * （`characters.ts`），所以兩邊都封起來了。
+ *
+ * ## 連軟刪除的也不收
+ *
+ * 四張表有 `deleted_at`，而掛到一個已刪除的角色身上，那一列是**讀不出來的**
+ * ——`characters.ts` 的圖庫查詢會把刪掉的濾掉。建一列沒有人讀得到的連結不是
+ * 寬容，是製造垃圾。`shots` 與 `expenses` 沒有這個欄位，所以沒有這一層。
+ */
+async function ownerOfLinkTarget(entityType: string, entityId: string): Promise<string | null> {
+  switch (entityType) {
+    case 'character': {
+      const [row] = await db
+        .select({ projectId: characters.projectId })
+        .from(characters)
+        .where(and(eq(characters.id, entityId), isNull(characters.deletedAt)))
+        .limit(1)
+      return row?.projectId ?? null
+    }
+    case 'world_entry': {
+      const [row] = await db
+        .select({ projectId: worldEntries.projectId })
+        .from(worldEntries)
+        .where(and(eq(worldEntries.id, entityId), isNull(worldEntries.deletedAt)))
+        .limit(1)
+      return row?.projectId ?? null
+    }
+    case 'task': {
+      const [row] = await db
+        .select({ projectId: tasks.projectId })
+        .from(tasks)
+        .where(and(eq(tasks.id, entityId), isNull(tasks.deletedAt)))
+        .limit(1)
+      return row?.projectId ?? null
+    }
+    case 'expense': {
+      const [row] = await db
+        .select({ projectId: expenses.projectId })
+        .from(expenses)
+        .where(eq(expenses.id, entityId))
+        .limit(1)
+      return row?.projectId ?? null
+    }
+    /*
+     * 這兩張自己沒有 `project_id`，掛在集數底下，所以要多跳一次。
+     */
+    case 'shot': {
+      const [row] = await db
+        .select({ projectId: episodes.projectId })
+        .from(shots)
+        .innerJoin(episodes, eq(episodes.id, shots.episodeId))
+        .where(eq(shots.id, entityId))
+        .limit(1)
+      return row?.projectId ?? null
+    }
+    case 'document': {
+      const [row] = await db
+        .select({ projectId: episodes.projectId })
+        .from(documents)
+        .innerJoin(episodes, eq(episodes.id, documents.episodeId))
+        .where(and(eq(documents.id, entityId), isNull(documents.deletedAt)))
+        .limit(1)
+      return row?.projectId ?? null
+    }
+    /*
+     * 沒聽過的類型一律當成查不到。驗證器（`validators.ts`）已經把它限成那六
+     * 種，而這裡再擋一次是因為**新增第七種的時候會先忘記改這裡**——那時候該
+     * 發生的是上傳被拒絕，不是悄悄建一列沒人驗過的連結。
+     */
+    default:
+      return null
+  }
+}
+
 /**
  * Creates the asset row (PENDING) plus an upload session, and returns the
  * presigned destination. The asset only becomes visible to the library once
@@ -173,6 +347,20 @@ export async function beginUpload(input: {
     if (!ep) throw ApiError.badRequest('指定的集數不屬於這個作品')
     // Used only to group the object in the bucket; the row is authoritative.
     episodeNumber = ep.number
+  }
+
+  /*
+   * 在寫任何一列之前 (Z169).
+   *
+   * 跟上面那個 `assertR2Configured()` 同一個理由：下面兩列是在碰 R2 之前就
+   * 提交的，所以一個「其實該拒絕」的請求如果拒絕得太晚，留下的是一個沒有人
+   * 會清掉的 PENDING 素材加一個上傳工作階段。
+   */
+  if (input.linkTo) {
+    const owner = await ownerOfLinkTarget(input.linkTo.entityType, input.linkTo.entityId)
+    if (owner !== input.projectId) {
+      throw ApiError.badRequest('要掛上去的對象不屬於這個作品')
+    }
   }
 
   const objectKey = buildObjectKey({
