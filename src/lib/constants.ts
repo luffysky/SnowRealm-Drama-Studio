@@ -117,12 +117,22 @@ export const EPISODE_STATUS_STYLE: Record<EpisodeStatusValue, string> = {
 export const SHOT_SIZES = ['EWS', 'WS', 'FS', 'MS', 'MCU', 'CU', 'ECU', 'INSERT'] as const
 export type ShotSizeValue = (typeof SHOT_SIZES)[number]
 
+/**
+ * 景別的中文，用華語影視在講的那一套 (Z182).
+ *
+ * `MCU` 本來寫「中近景」。那不是錯的詞，但它不是現場會講的詞——標準的階梯是
+ * **遠景、全景、中景、近景、特寫、大特寫**，而「近景」就是 MCU（胸部以
+ * 上）。結果是清單裡找不到「近景」，而那一格明明在。
+ *
+ * 只改標籤：值仍然是 `MCU`，所以資料庫的 enum、AI 的輸出格式、既有的每一列
+ * 都不受影響。
+ */
 export const SHOT_SIZE_LABEL: Record<ShotSizeValue, string> = {
   EWS: '大遠景',
   WS: '遠景',
   FS: '全景',
   MS: '中景',
-  MCU: '中近景',
+  MCU: '近景',
   CU: '特寫',
   ECU: '大特寫',
   INSERT: '插入鏡',
@@ -596,3 +606,15 @@ export const NOTIFICATION_KIND_LABEL: Record<NotificationKindValue, string> = {
  * 元件一 import 就建置失敗（見 `npm run check:client`）。
  */
 export const CHARACTER_PORTRAIT_SLOT = 'key_visual'
+
+/**
+ * 分鏡鏡頭的參考圖掛在哪一個 slot (Z183).
+ *
+ * 跟 `CHARACTER_PORTRAIT_SLOT` 同一個理由住在這裡：用戶端元件要帶同一個字
+ * 串，而 `@/lib/storyboard` 碰 `@/db`。
+ *
+ * 跟首尾幀（`first_frame`／`last_frame`）分開是刻意的：參考圖是**人給模型看
+ * 的**（這個場景的氛圍、這件道具長什麼樣），首尾幀是**生出來的結果**。兩種東
+ * 西放同一個 slot，之後要分就只能靠猜。
+ */
+export const SHOT_REFERENCE_SLOT = 'ref'

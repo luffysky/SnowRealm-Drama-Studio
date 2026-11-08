@@ -4,17 +4,16 @@ import { EDITOR_SURFACES } from '@/lib/editor/modules'
 import { AI_EFFORTS } from '@/lib/settings-view'
 import { CURRENCIES } from '@/lib/money'
 import { PRODUCTION_STAGE_KEYS, PRODUCTION_STAGE_STATUSES } from '@/lib/production'
+import { VOCABULARY_VALUE_PATTERN } from '@/lib/vocabulary-view'
 import {
   AI_JOB_KINDS,
   AI_PROVIDER_KINDS,
   ASSET_KINDS,
-  CAMERA_MOVES,
   CHARACTER_TIERS,
   DOCUMENT_KINDS,
   EPISODE_STATUSES,
   MAX_UPLOAD_BYTES,
   PROJECT_STATUSES,
-  SHOT_SIZES,
   SHOT_STATUSES,
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -203,6 +202,12 @@ export const outlineApplySchema = z.object({
     .max(200),
 })
 
+/** 一個下拉代碼的長相：大寫英數底線 (Z184)。 */
+const vocabularyValue = z
+  .string()
+  .trim()
+  .regex(VOCABULARY_VALUE_PATTERN, '選項代碼只能是大寫英文字母、數字與底線')
+
 /** 批次建立集數 — e.g. episodes 1..120 in one call. */
 export const episodeBatchSchema = z
   .object({
@@ -292,8 +297,15 @@ export const shotSchema = z.object({
     .int()
     .min(1, '鏡頭長度至少 1 秒')
     .max(120, '單一鏡頭不可超過 120 秒'),
-  shotSize: z.enum(SHOT_SIZES).optional().default('MS'),
-  camera: z.enum(CAMERA_MOVES).optional().default('STATIC'),
+  /*
+   * 景別與運鏡只驗**長相**，不驗合不合法 (Z184).
+   *
+   * 它們現在可以有使用者自己加的值，而合法清單在資料庫裡——zod 的解析是同步
+   * 的，查不了。真正的把關在 `createShot`／`updateShot` 的
+   * `assertVocabularyValue`；這裡擋的是「一看就不可能是代碼」的東西。
+   */
+  shotSize: vocabularyValue.optional().default('MS'),
+  camera: vocabularyValue.optional().default('STATIC'),
   location: z.string().trim().max(120).optional().default(''),
   timeOfDay: z.string().trim().max(40).optional().default(''),
   action: z.string().trim().max(3000).optional().default(''),
@@ -329,8 +341,8 @@ export const shotPatchSchema = z
       .min(1, '鏡頭長度至少 1 秒')
       .max(120, '單一鏡頭不可超過 120 秒')
       .optional(),
-    shotSize: z.enum(SHOT_SIZES).optional(),
-    camera: z.enum(CAMERA_MOVES).optional(),
+    shotSize: vocabularyValue.optional(),
+    camera: vocabularyValue.optional(),
     location: z.string().trim().max(120).optional(),
     timeOfDay: z.string().trim().max(40).optional(),
     action: z.string().trim().max(3000).optional(),

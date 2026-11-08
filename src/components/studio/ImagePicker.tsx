@@ -2,7 +2,8 @@
 
 import { ImageUp, Loader2, Trash2 } from 'lucide-react'
 import { useRef, useState, type DragEvent } from 'react'
-import { CropDialog } from '@/components/studio/CropDialog'
+import { CropDialog, type CropShape } from '@/components/studio/CropDialog'
+import { ZoomImage } from '@/components/ui/ZoomImage'
 import { useUploader } from '@/components/studio/useUploader'
 import { assetPreviewUrl } from '@/lib/asset-url'
 import { acceptFor, familyOf, resolveMimeType } from '@/lib/media-types'
@@ -37,8 +38,14 @@ export function ImagePicker({
   projectId: string
   assetId: string | null
   onChange: (assetId: string | null) => void
-  /** `wide` 16:9 for covers, `portrait` 2:3 for book covers and people. */
-  shape?: 'wide' | 'portrait' | 'square'
+  /**
+   * `wide` 16:9 for covers, `portrait` 2:3 for book covers.
+   *
+   * `free` 不限長寬——打開裁切視窗就是整張原圖，預覽也照原比例 (Z180)。人物
+   * 用這一種：角色圖會被分鏡與 AI 拿去當樣貌參考，而那些地方要的是完整的
+   * 人，不是一個 2:3 的切片。
+   */
+  shape?: CropShape
   label?: string
   hint?: string
   /**
@@ -120,8 +127,17 @@ export function ImagePicker({
      *
      * 本來是 `aspect-16/10`，而全專案真的顯示封面的地方全是 `aspect-video`。
      * 這個縮圖是上傳完之後唯一的預覽，它跟實際顯示不一樣就等於在騙人。
+     *
+     * `free` 沒有固定比例，所以給的是一個**上限框**：圖在裡面照原比例縮到放
+     * 得下為止 (Z180)。給它一個固定比例就是把這個功能又做回去。
      */
-    shape === 'portrait' ? 'aspect-2/3 w-24' : shape === 'square' ? 'size-24' : 'aspect-video w-40'
+    shape === 'portrait'
+      ? 'aspect-2/3 w-24'
+      : shape === 'square'
+        ? 'size-24'
+        : shape === 'free'
+          ? 'h-28 w-28'
+          : 'aspect-video w-40'
 
   return (
     <div className="flex flex-col gap-2">
@@ -153,13 +169,27 @@ export function ImagePicker({
           )}
         >
           {assetId ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={assetPreviewUrl(assetId)}
-              alt=""
-              className="size-full object-cover"
-              decoding="async"
-            />
+            /*
+             * `free` 用 `object-contain` 而且可以放大看 (Z180／Z181)。
+             *
+             * 固定比例的那幾種維持 `object-cover`：那裡的框是真的，蓋不滿就
+             * 是留黑邊，而使用者剛剛才對著同一個比例裁過一次。
+             */
+            shape === 'free' ? (
+              <ZoomImage
+                src={assetPreviewUrl(assetId)}
+                alt={label}
+                className="group size-full"
+              />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={assetPreviewUrl(assetId)}
+                alt=""
+                className="size-full object-cover"
+                decoding="async"
+              />
+            )
           ) : (
             <span className="grid size-full place-items-center">
               <ImageUp aria-hidden className="size-5 text-ink-700" />

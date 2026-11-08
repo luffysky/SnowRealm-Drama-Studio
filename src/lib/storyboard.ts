@@ -1,12 +1,14 @@
 import { and, asc, count, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { characters, episodes, projects, shots } from '@/db/schema'
+import { assetLinks, assets, characters, episodes, projects, shots } from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
-import { SHOT_STATUSES } from '@/lib/constants'
+import { SHOT_REFERENCE_SLOT, SHOT_STATUSES } from '@/lib/constants'
+import { assertVocabularyValue } from '@/lib/vocabulary'
 import {
   durationCheck,
   type ShotPatch,
+  type ShotReference,
   type ShotRow,
   type StoryboardEpisode,
   type StoryboardView,
@@ -96,7 +98,7 @@ export async function storyboardFor(
 
   if (!episode) return null
 
-  const [rows, cast, scriptCount] = await Promise.all([
+  const [rows, cast, scriptCount, references] = await Promise.all([
     db
       .select({
         id: shots.id,
@@ -138,13 +140,56 @@ export async function storyboardFor(
          and deleted_at is null
          and char_count > 0
     `),
+
+    /*
+     * 這一集所有鏡頭的參考圖，一次查完 (Z183).
+     *
+     * 一個鏡頭一次查的話是 N+1，而一集的鏡頭數沒有上限。`innerJoin` 到
+     * `shots` 是為了只拿這一集的——`asset_links` 沒有集數的概念。
+     */
+    db
+      .select({
+        shotId: assetLinks.entityId,
+        assetId: assets.id,
+        title: assets.title,
+        name: assets.name,
+        createdAt: assetLinks.createdAt,
+      })
+      .from(assetLinks)
+      .innerJoin(shots, eq(shots.id, assetLinks.entityId))
+      .innerJoin(assets, eq(assets.id, assetLinks.assetId))
+      .where(
+        and(
+          eq(assetLinks.entityType, 'shot'),
+          eq(assetLinks.slot, SHOT_REFERENCE_SLOT),
+          eq(shots.episodeId, episodeId),
+          eq(assets.uploadStatus, 'COMPLETED'),
+          isNull(assets.deletedAt)
+        )
+      )
+      /*
+       * `id` 當第二順位。`created_at` 的預設值是交易時間戳，所以同一個
+       * INSERT 進來的好幾列**完全相同**——沒有第二順位的話，它們的順序由堆
+       * 積順序決定，也就是沒有定義。一次拖六張進來正好是那個情況。
+       */
+      .orderBy(asc(assetLinks.createdAt), asc(assetLinks.id)),
   ])
 
   const scriptRows = (scriptCount as unknown as { rows?: { n: number }[] }).rows ?? []
 
+  const refsByShot = new Map<string, ShotReference[]>()
+  for (const row of references) {
+    const list = refsByShot.get(row.shotId) ?? []
+    list.push({ assetId: row.assetId, label: row.title || row.name || '參考圖' })
+    refsByShot.set(row.shotId, list)
+  }
+
   return {
     episode,
-    shots: rows as ShotRow[],
+    shots: rows.map((row) => ({
+      ...row,
+      references: refsByShot.get(row.id) ?? [],
+    })) as ShotRow[],
     duration: durationCheck(
       rows.map((row) => row.durationSec),
       episode.targetSec
@@ -158,6 +203,57 @@ export async function storyboardFor(
 /* 寫入                                                                        */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * 把一張參考圖從鏡頭上移掉 (Z183).
+ *
+ * 只解除連結，不刪檔案——檔案留在素材庫。要真的刪檔案走素材中心，那條路會先
+ * 檢查還有誰在引用它。跟角色圖庫同一個規矩。
+ *
+ * `shotId` 要先確認屬於這個作品，否則這支會變成「給我任何一個 shot id，我就
+ * 幫你拆掉它的連結」。
+ */
+export async function unlinkShotReference(input: {
+  projectId: string
+  shotId: string
+  assetId: string
+}): Promise<void> {
+  const [shot] = await db
+    .select({ id: shots.id })
+    .from(shots)
+    .innerJoin(episodes, eq(episodes.id, shots.episodeId))
+    .where(and(eq(shots.id, input.shotId), eq(episodes.projectId, input.projectId)))
+    .limit(1)
+
+  if (!shot) throw ApiError.notFound('找不到這個鏡頭')
+
+  await db
+    .delete(assetLinks)
+    .where(
+      and(
+        eq(assetLinks.assetId, input.assetId),
+        eq(assetLinks.entityType, 'shot'),
+        eq(assetLinks.entityId, input.shotId),
+        eq(assetLinks.slot, SHOT_REFERENCE_SLOT)
+      )
+    )
+}
+
+/**
+ * 景別與運鏡存不存得進去 (Z184).
+ *
+ * 這兩欄從 pg enum 改成 text 了（因為使用者可以自己加選項），所以**資料庫不
+ * 再替我們擋亂寫的值**。驗證器只看長相（大寫英數底線），合法清單在資料庫
+ * 裡，而 zod 的解析是同步的查不了——所以每一個寫入端都要過這一關。
+ *
+ * 沒帶那一欄就什麼都不做：PATCH 只改秒數的時候不該去查兩次詞彙表。
+ */
+async function assertShotVocabulary(patch: ShotPatch): Promise<void> {
+  await Promise.all([
+    assertVocabularyValue('shot_size', patch.shotSize),
+    assertVocabularyValue('camera_move', patch.camera),
+  ])
+}
+
 /** 新增一個鏡頭，排在最後面。 */
 export async function createShot(input: {
   projectId: string
@@ -166,6 +262,7 @@ export async function createShot(input: {
   user: SessionUser
 }): Promise<{ id: string; order: number }> {
   await assertEpisodeInProject(input.projectId, input.episodeId)
+  await assertShotVocabulary(input.patch)
 
   const [last] = await db
     .select({ max: sql<number>`coalesce(max(${shots.order}), 0)` })
@@ -207,6 +304,9 @@ export async function updateShot(input: {
 
   const patch = cleanPatch(input.patch)
   if (Object.keys(patch).length === 0) return { version: existing.version }
+
+  // 清乾淨之後才驗：`cleanPatch` 拿掉的欄位不用查詞彙表。
+  await assertShotVocabulary(patch)
 
   const [updated] = await db
     .update(shots)

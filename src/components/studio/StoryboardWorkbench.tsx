@@ -17,17 +17,20 @@ import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { applyTargetFor } from '@/lib/ai/apply-targets'
+import { ReferenceImages } from '@/components/studio/ReferenceImages'
+import { VocabularySelect } from '@/components/ui/VocabularySelect'
+import { vocabularyTermLabel, type VocabularyTerm } from '@/lib/vocabulary-view'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
+import type { ShotReference } from '@/lib/storyboard-view'
+/*
+ * 景別與運鏡的清單不從這裡來了 (Z184)：它們可以有使用者自己加的值，所以選項
+ * 由 `vocabularyOptions` 算（內建 ∪ 自訂），標籤由 `vocabularyTermLabel` 查。
+ * 鏡頭狀態還是列舉——它有程式分支讀它的值。
+ */
 import {
-  CAMERA_MOVES,
-  CAMERA_MOVE_LABEL,
-  SHOT_SIZES,
-  SHOT_SIZE_LABEL,
   SHOT_STATUSES,
   SHOT_STATUS_LABEL,
   SHOT_STATUS_STYLE,
-  type CameraMoveValue,
-  type ShotSizeValue,
   type ShotStatusValue,
 } from '@/lib/constants'
 import type { CurrencyValue, FxRates } from '@/lib/money'
@@ -65,8 +68,8 @@ export type ShotItem = {
   order: number
   sceneCode: string
   durationSec: number
-  shotSize: ShotSizeValue
-  camera: CameraMoveValue
+  shotSize: string
+  camera: string
   location: string
   timeOfDay: string
   action: string
@@ -77,6 +80,8 @@ export type ShotItem = {
   negativePrompt: string
   status: ShotStatusValue
   notes: string
+  /** 人上傳的參考圖 (Z183)。 */
+  references: ShotReference[]
 }
 
 export type StoryboardEpisodeOption = {
@@ -102,6 +107,7 @@ export function StoryboardWorkbench({
   providerReady,
   providerDetail,
   selectedShotId,
+  terms,
 }: {
   projectId: string
   episodes: StoryboardEpisodeOption[]
@@ -116,6 +122,14 @@ export function StoryboardWorkbench({
   providerReady: boolean
   providerDetail?: string
   selectedShotId: string | null
+  /**
+   * 使用者自己加的景別與運鏡 (Z184)。
+   *
+   * 從頁面傳下來而不是在元件裡 fetch：它一頁只需要一次，而且在伺服器端查完
+   * 之後，第一次畫出來的下拉就是完整的——用 effect 去拿的話，開頁的第一格會
+   * 少掉自訂的那幾個，而剛好在那一格選一個值的人會選到別的東西。
+   */
+  terms: VocabularyTerm[]
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -270,7 +284,13 @@ export function StoryboardWorkbench({
         )}
       </header>
 
-      <DurationBar duration={duration} shots={shots} selectedId={selected?.id ?? null} onPick={(id) => go({ shot: id })} />
+      <DurationBar
+        duration={duration}
+        shots={shots}
+        terms={terms}
+        selectedId={selected?.id ?? null}
+        onPick={(id) => go({ shot: id })}
+      />
 
       {shots.length === 0 ? (
         <EmptyState
@@ -292,6 +312,7 @@ export function StoryboardWorkbench({
                   shot={shot}
                   active={selected?.id === shot.id}
                   canWrite={canWrite}
+                  terms={terms}
                   busy={busy === shot.id}
                   first={shot.order === shots[0]?.order}
                   last={shot.order === shots.at(-1)?.order}
@@ -307,9 +328,11 @@ export function StoryboardWorkbench({
             <ShotDetail
               key={selected.id}
               projectId={projectId}
+              episodeId={episode.id}
               shot={selected}
               cast={cast}
               canWrite={canWrite}
+              terms={terms}
             />
           )}
         </div>
@@ -345,11 +368,13 @@ function DurationBar({
   shots,
   selectedId,
   onPick,
+  terms,
 }: {
   duration: DurationCheck
   shots: ShotItem[]
   selectedId: string | null
   onPick: (id: string) => void
+  terms: VocabularyTerm[]
 }) {
   const tone =
     duration.verdict === 'OK'
@@ -398,7 +423,7 @@ function DurationBar({
               key={shot.id}
               type="button"
               onClick={() => onPick(shot.id)}
-              title={`第 ${shot.order} 鏡・${shot.durationSec} 秒・${SHOT_SIZE_LABEL[shot.shotSize]}`}
+              title={`第 ${shot.order} 鏡・${shot.durationSec} 秒・${vocabularyTermLabel('shot_size', shot.shotSize, terms)}`}
               aria-label={`跳到第 ${shot.order} 個鏡頭`}
               style={{
                 // 比例用 flex-grow，不用百分比寬度：加起來永遠剛好填滿，不會
@@ -435,8 +460,10 @@ function ShotCard({
   onPick,
   onMove,
   onRemove,
+  terms,
 }: {
   shot: ShotItem
+  terms: VocabularyTerm[]
   active: boolean
   canWrite: boolean
   busy: boolean
@@ -464,8 +491,12 @@ function ShotCard({
             <span className="font-mono text-[10px] text-ink-600">{shot.sceneCode}</span>
           )}
           <span className="text-[10px] tabular-nums text-ink-400">{shot.durationSec}s</span>
-          <span className="text-[10px] text-ink-500">{SHOT_SIZE_LABEL[shot.shotSize]}</span>
-          <span className="text-[10px] text-ink-600">{CAMERA_MOVE_LABEL[shot.camera]}</span>
+          <span className="text-[10px] text-ink-500">
+            {vocabularyTermLabel('shot_size', shot.shotSize, terms)}
+          </span>
+          <span className="text-[10px] text-ink-600">
+            {vocabularyTermLabel('camera_move', shot.camera, terms)}
+          </span>
           <span
             className={cn(
               'rounded px-1 py-0.5 text-[9px] ring-1 ring-inset',
@@ -538,14 +569,18 @@ function ShotCard({
  */
 function ShotDetail({
   projectId,
+  episodeId,
   shot,
   cast,
   canWrite,
+  terms,
 }: {
   projectId: string
+  episodeId: string
   shot: ShotItem
   cast: { id: string; name: string }[]
   canWrite: boolean
+  terms: VocabularyTerm[]
 }) {
   const router = useRouter()
   const toast = useToast()
@@ -640,25 +675,27 @@ function ShotDetail({
           />
         </Field>
         <Field label="景別">
-          <Select
+          {/*
+            清單裡沒有的可以自己加 (Z184)。景別與運鏡是純標籤，沒有任何程式
+            分支讀它們的值——而那正是一個下拉能不能開放自訂的唯一條件。
+          */}
+          <VocabularySelect
+            kind="shot_size"
+            terms={terms}
             value={form.shotSize}
             disabled={!canWrite}
-            onChange={(event) => set('shotSize', event.target.value as ShotSizeValue)}
-            options={SHOT_SIZES.map((value) => ({
-              value,
-              label: `${SHOT_SIZE_LABEL[value]}（${value}）`,
-            }))}
+            canManage={canWrite}
+            onChange={(next) => set('shotSize', next)}
           />
         </Field>
         <Field label="運鏡">
-          <Select
+          <VocabularySelect
+            kind="camera_move"
+            terms={terms}
             value={form.camera}
             disabled={!canWrite}
-            onChange={(event) => set('camera', event.target.value as CameraMoveValue)}
-            options={CAMERA_MOVES.map((value) => ({
-              value,
-              label: CAMERA_MOVE_LABEL[value],
-            }))}
+            canManage={canWrite}
+            onChange={(next) => set('camera', next)}
           />
         </Field>
         <Field label="地點">
@@ -756,13 +793,24 @@ function ShotDetail({
       </div>
 
       {/*
-        首尾幀與候選圖：spec 13 要求這一區，但圖片生成供應商還沒接，
+        參考圖是人上傳的，所以它不用等圖片 adapter (Z183)。
+      */}
+      <ReferenceImages
+        projectId={projectId}
+        episodeId={episodeId}
+        shotId={shot.id}
+        items={shot.references}
+        canWrite={canWrite}
+      />
+
+      {/*
+        首尾幀與候選圖：spec 13 要求這一區，但圖片**生成**供應商還沒接，
         `adapterFor()` 對 IMAGE 類一律回 null。所以照實說，不放空按鈕
-        （spec v2 §4）。
+        （spec v2 §4）。上面那一區是人手上已經有的圖，兩件事不一樣。
       */}
       <p className="rounded-lg bg-stage-850/60 px-3 py-2 text-[10px] leading-relaxed text-ink-600 ring-1 ring-inset ring-stage-700/70">
-        首尾幀、候選圖與版本比較還沒有做：圖片生成供應商尚未接上，所以這裡只先存提示詞。
-        素材可以先在「素材資產中心」上傳，之後這一區會接過去。
+        首尾幀、候選圖與版本比較還沒有做：圖片<strong className="font-semibold text-ink-400">生成</strong>
+        供應商尚未接上，所以這裡只先存提示詞與上面那些參考圖。
       </p>
 
       {canWrite && (

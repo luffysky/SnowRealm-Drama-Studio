@@ -10,7 +10,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { episodes } from './catalog'
 import { characters } from './characters'
-import { cameraMoveEnum, shotSizeEnum, shotStatusEnum } from './enums'
+import { shotStatusEnum } from './enums'
 import { scenes } from './writing'
 
 /**
@@ -31,8 +31,19 @@ export const shots = pgTable(
     /** Scene label shown on the card, e.g. S03. */
     sceneCode: text('scene_code').notNull().default(''),
     durationSec: integer('duration_sec').notNull().default(5),
-    shotSize: shotSizeEnum('shot_size').notNull().default('MS'),
-    camera: cameraMoveEnum('camera').notNull().default('STATIC'),
+    /*
+     * 景別與運鏡是 **text**，不是 enum (Z184).
+     *
+     * 它們可以被使用者加新的選項，而 enum 加了就刪不掉（Postgres 沒有
+     * `DROP VALUE`）。合法值由應用程式把關：`SHOT_SIZES` ∪ `vocabulary_terms`
+     * 裡 kind 是 `shot_size` 的那幾列。
+     *
+     * `shotSizeEnum`／`cameraMoveEnum` 這兩個型別在資料庫裡**留著沒刪**，
+     * `enums.ts` 也還匯出它們：它們記著「內建的是哪幾個」，而刪掉是這次改動
+     * 唯一真的不可逆的一步。
+     */
+    shotSize: text('shot_size').notNull().default('MS'),
+    camera: text('camera').notNull().default('STATIC'),
     location: text('location').notNull().default(''),
     timeOfDay: text('time_of_day').notNull().default(''),
     /** 畫面描述 */

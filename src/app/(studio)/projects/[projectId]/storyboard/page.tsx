@@ -8,6 +8,7 @@ import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
 import { getFxRates } from '@/lib/settings'
 import { storyboardFor, storyboardIndex } from '@/lib/storyboard'
+import { listVocabulary } from '@/lib/vocabulary'
 
 export const metadata: Metadata = { title: '分鏡工作台' }
 
@@ -60,10 +61,18 @@ export default async function StoryboardPage({ params, searchParams }: Params) {
     index.find((row) => row.shotCount > 0)?.id ??
     index[0]!.id
 
-  const [view, fx, provider] = await Promise.all([
+  const [view, fx, provider, terms] = await Promise.all([
     storyboardFor(project.id, episodeId),
     getFxRates(),
     aiProviderStatus('STORYBOARD_GENERATE'),
+    /*
+     * 自訂的景別與運鏡 (Z184)。
+     *
+     * 在伺服器端查完才畫，所以第一次出現的下拉就是完整的。用 effect 去拿的
+     * 話，開頁的第一格會少掉自訂的那幾個——而剛好在那一格選東西的人會選到別
+     * 的值。
+     */
+    listVocabulary(),
   ])
 
   // `storyboardIndex` 剛剛才確認過這一集存在，所以這裡只可能是競態（有人在這
@@ -102,11 +111,13 @@ export default async function StoryboardPage({ params, searchParams }: Params) {
         negativePrompt: shot.negativePrompt,
         status: shot.status,
         notes: shot.notes,
+        references: shot.references,
       }))}
       duration={view.duration}
       cast={view.cast}
       hasScript={view.hasScript}
       canWrite={can(user, 'shot.write')}
+      terms={terms}
       currency={user.displayCurrency}
       fx={fx}
       providerReady={provider.available}

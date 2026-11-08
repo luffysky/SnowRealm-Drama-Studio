@@ -112,6 +112,13 @@ export function parseShotTable(text: string): ParsedShots {
       durationSec,
       // 讀不出來的落在預設值而不是退回整筆：景別猜錯改一個下拉就好，秒數猜
       // 錯則會讓總長失真——兩者的代價差很多。
+      /*
+       * 只收**內建**的那幾個，不管使用者自己加了什麼 (Z184).
+       *
+       * 模型拿到的提示詞裡列的就是內建那八個（`prompts.ts`），所以它回別的東
+       * 西一律是猜的。把自訂值也收進來的話，一個叫 `CU2` 的自訂景別會讓模型
+       * 偶然吐出的 `CU2` 變成「有效」——而那不是人教它的，是碰巧撞上。
+       */
       shotSize: (SHOT_SIZES as readonly string[]).includes(rawSize)
         ? (rawSize as ShotSizeValue)
         : 'MS',

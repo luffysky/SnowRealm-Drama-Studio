@@ -41,8 +41,15 @@ const ASPECT: Record<'wide' | 'portrait' | 'square', number> = {
   square: 1,
 }
 
-/** 裁切視窗的顯示寬度。**只是 UI**，跟輸出解析度無關。 */
-const WINDOW_WIDTH = 480
+/**
+ * 裁切視窗的顯示上限。**只是 UI**，跟輸出解析度無關。
+ *
+ * `free` 之前只有寬度是固定的，因為其他三種形狀的高度由比例決定、而那三個比
+ * 例都不會太高。原圖比例可以是任何東西（一張 1:4 的直幅），所以高度也要有上
+ * 限，不然對話框會長到按鈕被擠出螢幕。
+ */
+const WINDOW_MAX_WIDTH = 480
+const WINDOW_MAX_HEIGHT = 420
 
 /**
  * 輸出解析度上限，依形狀分開 (Z165).
@@ -58,11 +65,29 @@ const WINDOW_WIDTH = 480
  * 絕不**上**採樣：輸出取「裁切區域的原始像素」與這個上限的較小者，所以小
  * 圖不會被放大成一張更大的糊圖。
  */
-const OUTPUT_MAX: Record<'wide' | 'portrait' | 'square', number> = {
+const OUTPUT_MAX: Record<CropShape, number> = {
   wide: 1920,
   portrait: 1440,
   square: 1024,
+  /*
+   * `free` 給得比其他都高，因為它現在是角色圖走的那一條 (Z180)，而角色圖的
+   * 用途寫在它自己的提示裡：分鏡與 AI 生圖會拿它當樣貌參考。
+   */
+  free: 2048,
 }
+
+/**
+ * `free` ＝ 不限長寬 (Z180).
+ *
+ * 其他三種是「這張圖之後會被放進一個固定比例的框」，所以裁切視窗長什麼樣，
+ * 顯示的時候就長什麼樣。角色圖不是那樣——它會被放進分鏡與 AI 的參考，而那些
+ * 地方要的是**完整的人**，不是一個 2:3 的切片。
+ *
+ * 所以 `free` 的裁切視窗用**原圖自己的比例**：打開來就是整張圖，按「裁切並上
+ * 傳」只是讓人把邊緣修掉，而不是逼人選一塊。「用原圖，不裁切」在這個形狀下跟
+ * 預設畫面一模一樣，這是刻意的。
+ */
+export type CropShape = 'wide' | 'portrait' | 'square' | 'free'
 
 /**
  * 來源像素上限。
@@ -75,6 +100,20 @@ const OUTPUT_MAX: Record<'wide' | 'portrait' | 'square', number> = {
  * **每一張圖都跑**，所以這個常數只是個註解；現在它真的在擋東西 (Z166)。
  */
 const MAX_SOURCE_PIXELS = 16_000_000
+
+/**
+ * 裁切視窗在畫面上的大小。
+ *
+ * 寬高各有上限，所以極端比例（很高的直幅、很長的橫幅）不會把對話框撐爆。取
+ * 兩個上限裡**先碰到**的那一個當基準。
+ */
+function windowBox(aspect: number): { width: number; height: number } {
+  const safe = Number.isFinite(aspect) && aspect > 0 ? aspect : 1
+  if (safe >= WINDOW_MAX_WIDTH / WINDOW_MAX_HEIGHT) {
+    return { width: WINDOW_MAX_WIDTH, height: Math.round(WINDOW_MAX_WIDTH / safe) }
+  }
+  return { width: Math.round(WINDOW_MAX_HEIGHT * safe), height: WINDOW_MAX_HEIGHT }
+}
 
 /**
  * 畫布上有沒有任何東西被畫上去 (Z166).
@@ -113,15 +152,22 @@ export function CropDialog({
   onDone,
 }: {
   file: File
-  shape: 'wide' | 'portrait' | 'square'
+  shape: CropShape
   onCancel: () => void
   /** 裁好的檔案；按「用原圖」時回傳原本那一個。 */
   onDone: (file: File) => void
 }) {
-  const aspect = ASPECT[shape]
-  const windowHeight = Math.round(WINDOW_WIDTH / aspect)
-
   const [image, setImage] = useState<HTMLImageElement | null>(null)
+
+  /*
+   * `free` 的比例要等圖載進來才知道，所以先用 1 擋著。
+   *
+   * 讀 `image` 就好、不另外存一份比例：多一份會有「圖換了、比例還是舊的」那
+   * 一格的不一致，而那一格正好是視窗尺寸在變的時候。
+   */
+  const aspect =
+    shape === 'free' ? (image ? image.naturalWidth / image.naturalHeight : 1) : ASPECT[shape]
+  const { width: windowWidth, height: windowHeight } = windowBox(aspect)
   const [error, setError] = useState<string | null>(null)
   const [zoom, setZoom] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
@@ -142,38 +188,58 @@ export function CropDialog({
 
     img.onload = () => {
       /*
+       * 視窗尺寸在這裡**重算一次**，不能用外面那個。
+       *
+       * 外面那個是用 `image` 算的，而這一刻 `image` 還是上一張（或 null）。
+       * 把它放進 effect 的依賴裡則會打轉：設了圖 → 比例變 → 視窗變 →
+       * effect 重跑 → 再載一次圖。
+       */
+      const loadedAspect =
+        shape === 'free' ? img.naturalWidth / img.naturalHeight : ASPECT[shape]
+      const box = windowBox(loadedAspect)
+      /*
        * 置中在這裡算，不要用 effect 設 state。
        *
        * 「圖載好了就 setOffset」寫成 effect 的話，每次 render 都要再判斷一
        * 次要不要設——而 React 會把它當成串連渲染（lint 就是這樣擋的）。這裡
        * 本來就是事件處理函式，算好一次設完。
        */
-      const fit = Math.max(WINDOW_WIDTH / img.naturalWidth, windowHeight / img.naturalHeight)
+      const fit = Math.max(box.width / img.naturalWidth, box.height / img.naturalHeight)
       setImage(img)
       setZoom(1)
       setOffset({
-        x: (WINDOW_WIDTH - img.naturalWidth * fit) / 2,
-        y: (windowHeight - img.naturalHeight * fit) / 2,
+        x: (box.width - img.naturalWidth * fit) / 2,
+        y: (box.height - img.naturalHeight * fit) / 2,
       })
     }
     img.onerror = () => setError('這張圖讀不進來，可能是檔案壞了。')
     img.src = url
 
     return () => URL.revokeObjectURL(url)
-  }, [file, windowHeight])
+  }, [file, shape])
 
   /** 讓圖至少蓋滿視窗的最小縮放。小於它就會露出空白。 */
   const minScale = image
-    ? Math.max(WINDOW_WIDTH / image.naturalWidth, windowHeight / image.naturalHeight)
+    ? Math.max(windowWidth / image.naturalWidth, windowHeight / image.naturalHeight)
     : 1
 
   const scale = minScale * zoom
 
   /** 告訴人實際會存成多大，不是視窗多大。 */
   const outputSize = (() => {
-    const sw = WINDOW_WIDTH / scale
+    const sw = windowWidth / scale
     const width = Math.max(1, Math.round(Math.min(sw, OUTPUT_MAX[shape])))
-    return { width, height: Math.max(1, Math.round(width / aspect)) }
+    /*
+     * 用**視窗的實際比例**，不是原圖的 `aspect`。
+     *
+     * `windowBox()` 會把寬高 round 成整數像素，所以真正裁下來的那一塊的比例
+     * 是 `windowWidth / windowHeight`，跟 `aspect` 差一點點。一般比例差
+     * 0.2% 看不出來，而極端比例（很長的橫幅）會變成看得見的垂直拉伸。
+     */
+    return {
+      width,
+      height: Math.max(1, Math.round((width * windowHeight) / windowWidth)),
+    }
   })()
 
   /** 夾住位移，讓視窗永遠落在圖裡面。 */
@@ -182,7 +248,7 @@ export function CropDialog({
     const w = image.naturalWidth * atScale
     const h = image.naturalHeight * atScale
     return {
-      x: Math.min(0, Math.max(WINDOW_WIDTH - w, next.x)),
+      x: Math.min(0, Math.max(windowWidth - w, next.x)),
       y: Math.min(0, Math.max(windowHeight - h, next.y)),
     }
   }
@@ -222,7 +288,7 @@ export function CropDialog({
      * 的部分推出畫面，要再拖回來。
      */
     const nextScale = minScale * next
-    const cx = WINDOW_WIDTH / 2
+    const cx = windowWidth / 2
     const cy = windowHeight / 2
     const ratio = nextScale / scale
 
@@ -237,7 +303,7 @@ export function CropDialog({
       // 視窗左上角對應到原圖的哪一點。
       const sx = -offset.x / scale
       const sy = -offset.y / scale
-      const sw = WINDOW_WIDTH / scale
+      const sw = windowWidth / scale
       const sh = windowHeight / scale
 
       /*
@@ -247,7 +313,8 @@ export function CropDialog({
        * 都被壓成 480，而顯示的地方要 774。
        */
       const outWidth = Math.max(1, Math.round(Math.min(sw, OUTPUT_MAX[shape])))
-      const outHeight = Math.max(1, Math.round(outWidth / aspect))
+      // 跟 `outputSize` 同一條算式——畫面上寫幾乘幾，存出來就要是幾乘幾。
+      const outHeight = Math.max(1, Math.round((outWidth * windowHeight) / windowWidth))
 
       const canvas = document.createElement('canvas')
       canvas.width = outWidth
@@ -293,8 +360,12 @@ export function CropDialog({
       onRequestClose={() => {
         if (!busy) onCancel()
       }}
-      title="裁切封面"
-      description="拖曳移動、拉桿縮放。視窗的比例就是這張圖實際顯示的比例。"
+      title={shape === 'free' ? '確認這張圖' : '裁切封面'}
+      description={
+        shape === 'free'
+          ? '這張圖不限長寬，打開就是整張。想修掉邊緣再拖曳縮放，否則直接「用原圖」。'
+          : '拖曳移動、拉桿縮放。視窗的比例就是這張圖實際顯示的比例。'
+      }
       busy={busy}
       footer={
         <div className="flex w-full items-center justify-between gap-3">
@@ -336,7 +407,7 @@ export function CropDialog({
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          style={{ width: WINDOW_WIDTH, height: windowHeight }}
+          style={{ width: windowWidth, height: windowHeight }}
           className="relative mx-auto max-w-full touch-none overflow-hidden rounded-lg bg-stage-950 ring-1 ring-stage-700"
         >
           {image ? (

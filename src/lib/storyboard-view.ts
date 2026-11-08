@@ -1,6 +1,4 @@
 import type {
-  CameraMoveValue,
-  ShotSizeValue,
   ShotStatusValue,
 } from '@/lib/constants'
 
@@ -94,8 +92,15 @@ export type ShotRow = {
   order: number
   sceneCode: string
   durationSec: number
-  shotSize: ShotSizeValue
-  camera: CameraMoveValue
+  /*
+   * `string`，不是那個列舉 (Z184).
+   *
+   * 景別與運鏡可以有使用者自己加的值，所以型別不能是「內建那八個之一」——那
+   * 會讓每一個讀它的地方在編譯期相信一件執行期不成立的事。要顯示的時候走
+   * `vocabularyTermLabel`，它查不到會回值本身。
+   */
+  shotSize: string
+  camera: string
   location: string
   timeOfDay: string
   action: string
@@ -107,6 +112,15 @@ export type ShotRow = {
   status: ShotStatusValue
   notes: string
   updatedAt: Date
+  /** 人上傳的參考圖，依上傳順序 (Z183)。 */
+  references: ShotReference[]
+}
+
+/** 一張掛在鏡頭上的參考圖。 */
+export type ShotReference = {
+  assetId: string
+  /** 標題優先，沒有就用檔名——縮圖要有 alt，而「圖片」不是 alt。 */
+  label: string
 }
 
 export type StoryboardEpisode = {
@@ -134,8 +148,8 @@ export type StoryboardView = {
 export type ShotPatch = {
   sceneCode?: string
   durationSec?: number
-  shotSize?: ShotSizeValue
-  camera?: CameraMoveValue
+  shotSize?: string
+  camera?: string
   location?: string
   timeOfDay?: string
   action?: string

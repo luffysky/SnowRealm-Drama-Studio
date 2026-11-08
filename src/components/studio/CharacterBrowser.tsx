@@ -541,6 +541,14 @@ function IdentityEditor({
   )
 }
 
+/**
+ * 角色的頭像格。
+ *
+ * `object-contain` 不是 `object-cover` (Z180)。這個框是正方／直式的，而角色
+ * 圖現在不限長寬——`cover` 會把一張橫式的角色設定圖從中間切掉，而那張圖正是
+ * 分鏡與 AI 要拿去當樣貌參考的那一張。寧可留黑邊，也不要在列表裡給人一個跟
+ * 原圖不一樣的構圖。
+ */
 function Portrait({
   character,
   size,
@@ -558,7 +566,10 @@ function Portrait({
         alt=""
         loading="lazy"
         decoding="async"
-        className={cn('shrink-0 rounded-lg object-cover ring-1 ring-stage-700', dimension)}
+        className={cn(
+          'shrink-0 rounded-lg bg-stage-950 object-contain ring-1 ring-stage-700',
+          dimension
+        )}
       />
     )
   }
@@ -1160,13 +1171,17 @@ function PortraitGallery({
                 busy && 'opacity-50'
               )}
             >
+              {/*
+                `object-contain`：縮圖是方的，而圖不是 (Z180)。切一刀之後點
+                下去設成定妝照，列表顯示的又是另一個構圖。
+              */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={assetPreviewUrl(item.assetId)}
                 alt={item.label}
                 loading="lazy"
                 decoding="async"
-                className="size-full object-cover"
+                className="size-full bg-stage-950 object-contain"
               />
             </button>
 
@@ -1236,10 +1251,10 @@ function PortraitGallery({
             void unlink(primary)
           }
         }}
-        shape="portrait"
+        shape="free"
         label="角色圖"
         uploadLabel="新增角色圖"
-        hint="一個角色可以放多張；其中一張設為定妝照，角色列表與這一欄顯示的就是那一張。直式、臉部清楚最好。"
+        hint="一個角色可以放多張；其中一張設為定妝照，角色列表與這一欄顯示的就是那一張。不限長寬，整張都會留著——分鏡與 AI 生圖拿的是這一張，裁掉的部分它們也看不到。滑鼠移上去放大看，手機長按。"
         linkTo={{
           entityType: 'character',
           entityId: character.id,
