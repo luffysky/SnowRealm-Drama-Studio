@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clapperboard,
+  FileUp,
   Plus,
   Trash2,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ import { Field, Input, Select, Textarea } from '@/components/ui/Field'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { applyTargetFor } from '@/lib/ai/apply-targets'
+import { ImportDialog } from '@/components/studio/ImportDialog'
 import { ReferenceImages } from '@/components/studio/ReferenceImages'
 import { VocabularySelect } from '@/components/ui/VocabularySelect'
 import { vocabularyTermLabel, type VocabularyTerm } from '@/lib/vocabulary-view'
@@ -138,6 +140,7 @@ export function StoryboardWorkbench({
 
   const [busy, setBusy] = useState<string | null>(null)
   const [removing, setRemoving] = useState<ShotItem | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const selected = shots.find((shot) => shot.id === selectedShotId) ?? shots[0] ?? null
 
@@ -271,6 +274,18 @@ export function StoryboardWorkbench({
               ]}
             />
 
+            {/*
+              匯入 (Z185)。放在「新增鏡頭」旁邊而不是藏進選單：一次把一集的
+              鏡頭表貼進來，比按二十次「新增鏡頭」合理太多。
+            */}
+            <Button
+              size="sm"
+              variant="ghost"
+              leadingIcon={<FileUp aria-hidden className="size-3.5" />}
+              onClick={() => setImporting(true)}
+            >
+              匯入
+            </Button>
             <Button
               size="sm"
               variant="primary"
@@ -283,6 +298,20 @@ export function StoryboardWorkbench({
           </div>
         )}
       </header>
+
+      {importing && (
+        <ImportDialog
+          projectId={projectId}
+          episodes={episodes.map((item) => ({
+            id: item.id,
+            number: item.number,
+            title: item.title,
+          }))}
+          defaultTarget="shots"
+          defaultEpisodeId={episode.id}
+          onClose={() => setImporting(false)}
+        />
+      )}
 
       <DurationBar
         duration={duration}

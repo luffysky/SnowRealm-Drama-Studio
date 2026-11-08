@@ -535,6 +535,35 @@
     box-shadow: 0 0 0 1px var(--color-gilt-300);
   }
 
+  /*
+   * 列印頁 (Z187).
+   *
+   * `print:hidden` 這種變體 Tailwind 自己有，但**整張紙的底色與文字色**要在
+   * 這裡壓：這個專案的 `body` 是深色，而深色底印出來是一整頁墨水——印表機不
+   * 會替你把它變白。
+   */
+  @media print {
+    body {
+      background: #fff;
+      color: #000;
+    }
+
+    /* 列印頁自己排版，不要繼承應用程式的外框與捲動容器。 */
+    .print-sheet {
+      max-width: none;
+      padding: 0;
+    }
+
+    /* 一列不要被切成兩頁——半行字跨頁最難讀。 */
+    tr {
+      break-inside: avoid;
+    }
+
+    thead {
+      display: table-header-group;
+    }
+  }
+
   .prose-editor :where(table) {
     width: 100%;
     border-collapse: collapse;

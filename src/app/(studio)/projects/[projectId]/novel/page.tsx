@@ -2,6 +2,7 @@ import { AudioLines, BookOpen, FileText, PenLine, TriangleAlert } from 'lucide-r
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { ImportButton } from '@/components/studio/ImportButton'
 import { NovelExportMenu } from '@/components/studio/NovelExportMenu'
 import { OutlineBoard } from '@/components/studio/OutlineBoard'
 import { EmptyState } from '@/components/ui/StateViews'
@@ -116,6 +117,21 @@ export default async function NovelWorkbenchPage({ params }: Params) {
               閱讀
             </Link>
           )}
+          {/*
+            匯入 (Z186)。放在匯出旁邊：這兩件事是同一組動作，而把匯入藏在集
+            數頁裡會讓「我有十集的稿子」變成開十次頁面。
+          */}
+          <ImportButton
+            projectId={project.id}
+            episodes={rows.map((row) => ({
+              id: row.episodeId,
+              number: row.number,
+              title: row.title,
+            }))}
+            target="chapters"
+            episodeId={resume?.episodeId ?? null}
+            label="匯入小說"
+          />
           <NovelExportMenu
             projectId={project.id}
             episodes={written.map((row) => ({
