@@ -449,12 +449,14 @@ describe('範本自己匯得回去（Z185）', () => {
         const sheet = parseSheet(templateFor(target.key, format))
         const mapping = detectMapping(sheet.headers, target)
 
-        const mapped = target.fields.filter((field) =>
-          mapping.includes(field.key)
-        )
-        expect(mapped.map((f) => f.key).sort()).toEqual(
-          target.fields.map((f) => f.key).sort()
-        )
+        /*
+         * 比**位置**，不只比集合 (Z190).
+         *
+         * 原本只斷言「每一個欄位都出現在對應表裡」——而兩個欄位互相對調它照
+         * 樣綠，而那正是子代理抓到的那一類錯（負面提示詞被對到正向欄位）。
+         * 範本的第 i 欄就是第 i 個欄位，所以這裡可以直接比。
+         */
+        expect(mapping).toEqual(target.fields.map((field) => field.key))
       })
     }
   }
@@ -749,3 +751,204 @@ describe('小說 Markdown 拆成集數＋章節（Z186）', () => {
     expect(doc.chapters[0]?.content).toBe('甲')
   })
 })
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 子代理審出來的那幾條，每一條一個測試（Z190）。
+ *
+ * 這些全部是「不報錯、但資料是錯的」那一類——所以沒有測試守著的話，下一次改
+ * 動把它們改回去也不會有人知道。
+ */
+describe('子代理審出來的（Z190）', () => {
+  const shots = importTarget('shots')
+  const characters = importTarget('characters')
+  const sheet = (headers: string[], rows: string[][]) => ({
+    headers,
+    rows,
+    format: 'csv' as const,
+  })
+
+  it('負面提示詞不會被對到正向提示詞', () => {
+    /*
+     * 「提示詞」是「負向提示詞」的子字串，而它宣告在前面——照宣告順序取第一
+     * 個命中的話，負面提示詞會寫進**正向**欄位，而正向是直接餵給生圖的。不
+     * 報錯，要到出圖才看得出來。
+     */
+    expect(detectMapping(['姓名', '反向提示詞'], characters)).toEqual([
+      'name',
+      'negativePrompt',
+    ])
+    expect(detectMapping(['姓名', '負向提示詞'], characters)).toEqual([
+      'name',
+      'negativePrompt',
+    ])
+    expect(detectMapping(['場次', '負向提示詞'], shots)).toEqual(['sceneCode', 'negativePrompt'])
+  })
+
+  it('「場景」不會被對到「場次代號」', () => {
+    // `地點` 先認領 `location` 之後，`場景` 去撞 `sceneCode` 的別名「場景代號」。
+    const mapping = detectMapping(['地點', '場景'], shots)
+    expect(mapping[0]).toBe('location')
+    expect(mapping[1]).not.toBe('sceneCode')
+  })
+
+  it('不在別名清單裡的負向欄名，寧可不對也不要對到正向', () => {
+    /*
+     * 補別名只能擋掉想得到的那幾種寫法。`負面的提示詞`、`排除提示詞` 這種沒
+     * 人列得完，而它們全都包含「提示詞」——所以沒有守衛的話，一律落進**正
+     * 向**欄位，而正向是直接餵給生圖的。
+     *
+     * 正確的結果是 null：讓人自己選一次，比默默餵錯好。
+     */
+    for (const header of ['負面的提示詞', '排除提示詞', '不要的 negative 提示詞']) {
+      const mapping = detectMapping([header], shots)
+      expect(mapping[0], header).not.toBe('prompt')
+    }
+  })
+
+  it('正向提示詞自己還是對得上', () => {
+    // 修法是「取最長命中」，所以不能把原本對的也改壞。
+    expect(detectMapping(['生圖提示詞'], shots)).toEqual(['prompt'])
+    expect(detectMapping(['提示詞'], shots)).toEqual(['prompt'])
+  })
+
+  it('歐式小數與會計負數不會變成別的數字', () => {
+    /*
+     * 原本「把逗號與空白一起當千分位拿掉」，於是 `1 200,50` 變成 120050
+     * ——差一百倍，而且沒有任何提醒。
+     */
+    const expenses = importTarget('expenses')
+    const run = (value: string) =>
+      mapRows(
+        sheet(['項目', '金額'], [['甲', value]]),
+        ['description', 'amount'],
+        expenses,
+        EMPTY
+      )
+
+    expect(run('NT$1,200.50').rows[0]?.amount).toBe(1200.5)
+    expect(run('1,200.50').rows[0]?.amount).toBe(1200.5)
+
+    /*
+     * 歐式寫法（空白當千分位、逗號當小數點）**不猜**：`1 200,50` 可能是
+     * 1200.5，也可能是誰少打了一個字。原本的做法把它變成 120050——差一百
+     * 倍，而且沒有任何提醒。現在它是一個講得出口的錯誤。
+     */
+    expect(run('1 200,50').rows).toHaveLength(0)
+    expect(run('1 200,50').issues[0]?.message).toContain('看不出是數字')
+
+    /*
+     * 會計的負數括號認得出來，而負的金額會被擋下來——把 -500 夾成 0 是在虛
+     * 構一個數字，而 0 看起來完全正常。
+     */
+    expect(run('(500)').rows).toHaveLength(0)
+    expect(run('(500)').issues[0]?.message).toContain('負數')
+  })
+
+  it('看不懂的數字要報錯，不是猜一個', () => {
+    const run = (value: string) =>
+      mapRows(sheet(['秒數'], [[value]]), ['durationSec'], shots, EMPTY)
+
+    for (const bad of ['3-5', '1.2.3', '12e3', '大概五秒']) {
+      const result = run(bad)
+      expect(result.rows, bad).toHaveLength(0)
+      expect(result.issues[0]?.level, bad).toBe('error')
+    }
+  })
+
+  it('整列只填了一個認不得的狀態，不會被當成空行吞掉', () => {
+    /*
+     * 列舉值認不得時不放值進 record，而「整列空白」的判斷看的是 record——於
+     * 是那一列被跳過，而訊息寫著「會用預設值」。說的跟做的不一樣。
+     */
+    const result = mapRows(sheet(['狀態'], [['審核中']]), ['status'], shots, EMPTY)
+    expect(result.rows).toHaveLength(1)
+    expect(result.skipped).toEqual([])
+    expect(result.issues[0]?.message).toContain('不是狀態的選項')
+  })
+
+  it('真的空白的那一列還是要跳過', () => {
+    // 上面那條不能把「尾端空行」也救回來。
+    const result = mapRows(sheet(['狀態'], [['']]), ['status'], shots, EMPTY)
+    expect(result.rows).toHaveLength(0)
+    expect(result.skipped).toEqual([1])
+  })
+
+  it('一欄位址誇張的 Excel 不會把程序撐爆', () => {
+    /*
+     * 欄位址是從字母算的，而 `AAAAAA1` 算出來是三億——然後那一列會被配成一個
+     * 三億筆的陣列，Node 直接 OOM。那是 FATAL ERROR 不是例外，try/catch 救
+     * 不了。幾百 bytes 的檔案就做得到。
+     */
+    const file = readFileSync('tests/fixtures/column-bomb.xlsx')
+    const before = process.memoryUsage().heapUsed
+    const sheetOut = parseXlsx(file)
+    const after = process.memoryUsage().heapUsed
+
+    expect(sheetOut.headers.length).toBeLessThanOrEqual(16384)
+    // 多配個幾百 MB 的話這一條會紅。
+    expect(after - before).toBeLessThan(200 * 1024 * 1024)
+  })
+
+  it('壞掉的 zip 丟的是看得懂的錯，不是 Node 的內部訊息', () => {
+    const broken = Buffer.concat([
+      Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      Buffer.alloc(60, 0),
+    ])
+    expect(() => parseXlsx(broken)).toThrow(ImportParseError)
+  })
+
+  it('HTML 的超範圍實體不會丟 RangeError', () => {
+    // `String.fromCodePoint(0x110000)` 丟的是 Node 的英文內部訊息。
+    const parsed = parseSheet(
+      '<table><tr><td>a</td></tr><tr><td>&#x110000;&#999999999999;</td></tr></table>'
+    )
+    expect(parsed.rows[0]?.[0]).toContain('&#x110000;')
+  })
+
+  it('簡體 CSV 不會被判成 Big5', () => {
+    /*
+     * 解錯的那一串落點也在常用漢字區（「賒醱鏡扴」每個字都算一分），所以只
+     * 數漢字會平分——而平分時穩定排序讓先推入的 Big5 永遠贏。簡體 Windows 的
+     * Excel 存出來的 CSV 因此一律亂碼。
+     */
+    const gbk = gbkBytes('场次,景别,画面描述\nS01,中景,沈知味推开门，灶上的火还没熄。')
+    const result = decodeBytes(gbk)
+    expect(result.text).toContain('画面描述')
+    expect(result.text).toContain('沈知味推开门')
+  })
+
+  it('繁體 Big5 的也還是對的', () => {
+    const big5 = big5Bytes('場次,景別,畫面描述\nS01,中景,沈知味推開門。')
+    const result = decodeBytes(big5)
+    expect(result.text).toContain('畫面描述')
+  })
+})
+
+/* Node 內建的轉碼器只解不編，所以用一張最小的對照表自己編。 */
+function encodeWith(text: string, label: 'big5' | 'gb18030'): Uint8Array {
+  const decoder = new TextDecoder(label)
+  const out: number[] = []
+  for (const char of text) {
+    const code = char.codePointAt(0)!
+    if (code < 0x80) {
+      out.push(code)
+      continue
+    }
+    let found = false
+    for (let lead = 0x81; lead <= 0xfe && !found; lead += 1) {
+      for (let trail = 0x40; trail <= 0xfe && !found; trail += 1) {
+        if (decoder.decode(new Uint8Array([lead, trail])) === char) {
+          out.push(lead, trail)
+          found = true
+        }
+      }
+    }
+    if (!found) throw new Error(`編不出「${char}」(${label})`)
+  }
+  return new Uint8Array(out)
+}
+
+const big5Bytes = (text: string) => encodeWith(text, 'big5')
+const gbkBytes = (text: string) => encodeWith(text, 'gb18030')

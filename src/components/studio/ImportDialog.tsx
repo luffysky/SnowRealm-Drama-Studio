@@ -11,6 +11,7 @@ import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { FILENAME_KEYWORDS } from '@/lib/import/filename'
 import { FORMAT_LABEL, type ImportFormat } from '@/lib/import/parse'
 import { SHEET_FORMAT_LABEL, type SheetFormat } from '@/lib/import/sheet-format'
+import { detectMapping } from '@/lib/import/map'
 import { IMPORT_TARGETS, importTarget, type ImportTargetKey } from '@/lib/import/targets'
 import { cn } from '@/lib/utils'
 
@@ -95,6 +96,17 @@ export function ImportDialog({
       const form = new FormData()
       for (const file of picked) form.append('files', file)
       if (text.trim()) form.append('text', text)
+      /*
+       * 把「這一頁預設匯入哪一區」送過去 (Z190).
+       *
+       * 漏掉這一個的後果是整條功能**靜靜地不做事**：伺服器端只剩檔名猜測，
+       * 所以貼上的內容（來源名字是「貼上的內容」）與檔名不含關鍵字的檔案都
+       * 認不出區塊 → 不回 `mapping` → 用戶端補成空陣列 → 每一欄都是「不匯
+       * 入」→ 按下匯入，每一列都被當空白列跳過 → 「已匯入 0 筆」。
+       *
+       * 沒有錯誤訊息，因為確實沒有出錯。
+       */
+      if (defaultTarget) form.append('target', defaultTarget)
 
       const response = await apiFetch(`/api/projects/${projectId}/import/preview`, {
         method: 'POST',
@@ -105,12 +117,24 @@ export function ImportDialog({
       const body = (await response.json()) as { files: PreviewFile[] }
       setFiles((current) => [
         ...current,
-        ...body.files.map((file) => ({
-          ...file,
-          chosenTarget: file.target ?? defaultTarget,
-          chosenMapping: file.mapping ?? [],
-          episodeId: episodeFor(file),
-        })),
+        ...body.files.map((file) => {
+          const chosenTarget = file.target ?? defaultTarget
+          return {
+            ...file,
+            chosenTarget,
+            /*
+             * 伺服器沒給對應（它認不出區塊）而我們知道是哪一區時，在這裡補
+             * 算一次——`detectMapping` 是純函式，用戶端跑得了。少了這一步，
+             * 那個檔案的每一欄都會停在「不匯入」。
+             */
+            chosenMapping:
+              file.mapping ??
+              (chosenTarget && file.sheet
+                ? detectMapping(file.sheet.headers, importTarget(chosenTarget))
+                : []),
+            episodeId: episodeFor(file),
+          }
+        }),
       ])
       setPasted('')
     } catch (cause) {
@@ -320,6 +344,11 @@ export function ImportDialog({
                   onChange={(next) =>
                     setFiles((current) => current.map((item, i) => (i === index ? next : item)))
                   }
+                  onRetarget={(target) =>
+                    setFiles((current) =>
+                      current.map((item, i) => (i === index ? retarget(item, target) : item))
+                    )
+                  }
                   onRemove={() =>
                     setFiles((current) => current.filter((_, i) => i !== index))
                   }
@@ -502,15 +531,43 @@ function ExportLinks({
   )
 }
 
+/**
+ * 換了「這是什麼」就重算欄位對應 (Z190).
+ *
+ * 不重算的話，畫面上那組「可匯入 N 列、M 列不會匯入」是**在說舊區塊的
+ * 話**。大部分組合會因為欄位名完全不重疊而全部報必填錯誤（吵，但看得出
+ * 來）；而剛好有同名欄位的兩個區塊（集數大綱 → 任務，兩邊都有「標題」與
+ * 「狀態」）會無聲地建出一堆只有標題的東西。
+ *
+ * 只重算對應，不重算問題清單——那要再打一次伺服器，而使用者按下匯入時本來
+ * 就會重算一次。所以舊的計數先清掉，不要留一個會說謊的數字在畫面上。
+ */
+function retarget(file: FileState, target: ImportTargetKey | null): FileState {
+  if (!target || !file.sheet) {
+    return { ...file, chosenTarget: target, chosenMapping: [], counts: undefined, issues: [] }
+  }
+  return {
+    ...file,
+    chosenTarget: target,
+    chosenMapping: detectMapping(file.sheet.headers, importTarget(target)),
+    counts: undefined,
+    issues: [],
+    unmapped: undefined,
+    newVocabulary: undefined,
+  }
+}
+
 function FileCard({
   file,
   episodes,
   onChange,
+  onRetarget,
   onRemove,
 }: {
   file: FileState
   episodes: ImportEpisodeOption[]
   onChange: (next: FileState) => void
+  onRetarget: (target: ImportTargetKey | null) => void
   onRemove: () => void
 }) {
   if (file.error) {
@@ -543,7 +600,7 @@ function FileCard({
             <Select
               value={file.chosenTarget ?? ''}
               onChange={(event) =>
-                onChange({ ...file, chosenTarget: (event.target.value || null) as ImportTargetKey })
+                onRetarget((event.target.value || null) as ImportTargetKey)
               }
               className="h-7 w-36 text-[11px]"
               placeholder="這是什麼？"

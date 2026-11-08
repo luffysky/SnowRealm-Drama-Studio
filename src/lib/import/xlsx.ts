@@ -25,6 +25,28 @@ import { ImportParseError, sheetFromGrid, type ImportSheet } from '@/lib/import/
 /** 一個 zip 條目：名字與它解開之後的位元組。 */
 type ZipEntry = { name: string; data: Buffer }
 
+/**
+ * Excel 的欄數上限是 XFD（16384）。
+ *
+ * **沒有這個上限會讓整個程序死掉** (Z190)：欄位址是從 `r="C7"` 的字母算出來
+ * 的，而 `AAAAAA1` 算出來是三億——然後那一列會被配成一個三億筆的陣列，Node
+ * 直接 OOM。那是 **FATAL ERROR 不是例外**，try/catch 救不了，函式實例跟著
+ * 死。一個幾百 bytes 的檔案就做得到。
+ */
+const MAX_COLUMNS = 16384
+
+/** 一個 zip 條目解開之後的上限。 */
+const MAX_ENTRY_BYTES = 64 * 1024 * 1024
+
+/**
+ * 我們真正會讀的那幾份。
+ *
+ * `readZip` 原本把**每一個** entry 都解開，而 `.xlsx` 是個 zip——一個 8MB 的
+ * 檔案可以展開成好幾 GB（實測壓縮比 1029:1）。只解要用的那幾份，放大器就沒
+ * 了。
+ */
+const WANTED = /^(xl\/workbook\.xml|xl\/_rels\/workbook\.xml\.rels|xl\/sharedStrings\.xml|xl\/worksheets\/[^/]+\.xml|EncryptedPackage)$/
+
 export function parseXlsx(file: Buffer): ImportSheet {
   if (file.length < 4 || file.readUInt32LE(0) !== 0x04034b50) {
     throw new ImportParseError('這不是一個 .xlsx 檔（連 zip 的開頭都不是）')
@@ -63,6 +85,12 @@ function readZip(file: Buffer): ZipEntry[] {
 
   const entries: ZipEntry[] = []
   for (let i = 0; i < count; i += 1) {
+    /*
+     * 每一次讀之前先驗界。損壞或惡意的 zip 會讓位移指到檔案外面，而
+     * `readUInt32LE` 丟的是 Node 的 `RangeError: offset is out of range`
+     * ——攔得住，但使用者看到的是一句英文的內部訊息。
+     */
+    if (offset < 0 || offset + 46 > file.length) break
     if (file.readUInt32LE(offset) !== 0x02014b50) break
 
     const method = file.readUInt16LE(offset + 10)
@@ -74,14 +102,26 @@ function readZip(file: Buffer): ZipEntry[] {
     const name = file.toString('utf8', offset + 46, offset + 46 + nameLength)
 
     // 區域檔頭的長度欄位自己也要讀一次——它的 extra 欄位跟中央目錄的不一樣長。
+    if (localOffset < 0 || localOffset + 30 > file.length) break
     const localNameLength = file.readUInt16LE(localOffset + 26)
     const localExtraLength = file.readUInt16LE(localOffset + 28)
     const start = localOffset + 30 + localNameLength + localExtraLength
     const raw = file.subarray(start, start + compressedSize)
 
-    if (method === 0) entries.push({ name, data: Buffer.from(raw) })
-    else if (method === 8) entries.push({ name, data: inflateRawSync(raw) })
-    // 其他壓縮法（bzip2、lzma）Excel 不會用，跳過比炸掉好。
+    /*
+     * 只解我們要的那幾份，而且給解開之後的大小一個上限。
+     *
+     * 兩個放大器：原本每一個 entry 都解（.xlsx 裡可能有一堆圖片與主題
+     * 檔），而 deflate 的壓縮比可以到千倍。`maxOutputLength` 超過會丟例外，
+     * 而那是可以攔的——比 OOM 好。
+     */
+    if (WANTED.test(name)) {
+      if (method === 0) entries.push({ name, data: Buffer.from(raw) })
+      else if (method === 8) {
+        entries.push({ name, data: inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_BYTES }) })
+      }
+      // 其他壓縮法（bzip2、lzma）Excel 不會用，跳過比炸掉好。
+    }
 
     offset += 46 + nameLength + extraLength + commentLength
   }
@@ -97,6 +137,7 @@ function readZip(file: Buffer): ZipEntry[] {
  * 四個位元組的簽章。
  */
 function findEndOfCentralDirectory(file: Buffer): number {
+  if (file.length < 22) throw new ImportParseError('這個檔案太小，不是一個 zip')
   const floor = Math.max(0, file.length - 22 - 0xffff)
   for (let i = file.length - 22; i >= floor; i -= 1) {
     if (file.readUInt32LE(i) === 0x06054b50) return i
@@ -163,7 +204,12 @@ function readSheet(xml: string, shared: string[]): string[][] {
   const grid: string[][] = []
 
   for (const rowMatch of xml.matchAll(/<row\b([^>]*)>([\s\S]*?)<\/row>/gi)) {
-    const rowIndex = Number(/r="(\d+)"/i.exec(rowMatch[1] ?? '')?.[1] ?? grid.length + 1) - 1
+    /*
+     * `r="0"` 不合法（Excel 的列從 1 開始），而算出來的 -1 會讓那一列靜靜消
+     * 失——`grid[-1]` 是物件屬性，不是索引。接在最後面比丟掉好。
+     */
+    const declared = Number(/r="(\d+)"/i.exec(rowMatch[1] ?? '')?.[1] ?? '0')
+    const rowIndex = declared >= 1 ? declared - 1 : grid.length
     const line: string[] = []
 
     for (const cellMatch of (rowMatch[2] ?? '').matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/gi)) {
@@ -185,7 +231,8 @@ function readSheet(xml: string, shared: string[]): string[][] {
         text = decodeXml(/<v>([\s\S]*?)<\/v>/i.exec(body)?.[1] ?? '')
       }
 
-      if (column >= 0) line[column] = text
+      // 超出 Excel 自己的欄數上限：那不是一張真的試算表（見 `MAX_COLUMNS`）。
+      if (column >= 0 && column < MAX_COLUMNS) line[column] = text
     }
 
     grid[rowIndex] = fillCells(line)
@@ -217,14 +264,25 @@ function columnIndex(letters: string): number {
   return value - 1
 }
 
+function codePoint(code: number, fallback: string): string {
+  return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+    ? String.fromCodePoint(code)
+    : fallback
+}
+
 function decodeXml(text: string): string {
   return text
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
+    /*
+     * 範圍要擋。`&#x110000;` 讓 `String.fromCodePoint` 丟 `RangeError`，而那
+     * 不是 `ImportParseError`——使用者會看到一句英文的內部訊息。超出範圍的就
+     * 原樣留著。
+     */
+    .replace(/&#x([0-9a-f]+);/gi, (whole, hex: string) => codePoint(Number.parseInt(hex, 16), whole))
+    .replace(/&#(\d+);/g, (whole, dec: string) => codePoint(Number(dec), whole))
     // `&amp;` 要最後換，不然 `&amp;lt;` 會變成 `<`。
     .replace(/&amp;/g, '&')
 }

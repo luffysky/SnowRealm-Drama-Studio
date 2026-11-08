@@ -378,7 +378,13 @@ function decodeEntities(text: string): string {
       const code = body[1]?.toLowerCase() === 'x'
         ? Number.parseInt(body.slice(2), 16)
         : Number.parseInt(body.slice(1), 10)
-      return Number.isFinite(code) ? String.fromCodePoint(code) : whole
+      /*
+       * 範圍要擋：`&#x110000;` 讓 `String.fromCodePoint` 丟 `RangeError`，而
+       * 那不是 `ImportParseError`——使用者會看到一句英文的內部訊息 (Z190)。
+       */
+      return Number.isInteger(code) && code >= 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : whole
     }
     return named[body.toLowerCase()] ?? whole
   })

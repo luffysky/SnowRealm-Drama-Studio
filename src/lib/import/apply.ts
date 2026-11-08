@@ -139,6 +139,28 @@ async function createOptions(
 
 type Counts = { created: number; updated: number; skipped: number }
 
+/**
+ * 一次 INSERT 幾列 (Z190).
+ *
+ * Postgres 的 wire protocol 一個 statement 最多 65535 個綁定參數，而 drizzle
+ * 每一列會產生一個參數一欄。鏡頭有十四到十五欄，所以一個 statement 最多四千
+ * 多列——而驗證器允許到五千列。超過會在協定層失敗，而那個錯誤訊息跟資料一點
+ * 關係都沒有。
+ *
+ * 五百列對每一種區塊都安全（最多十五欄＝七千五百個參數），而且分批之後記憶
+ * 體峰值也小。
+ */
+const INSERT_CHUNK = 500
+
+async function insertInChunks<T>(
+  run: (slice: T[]) => Promise<unknown>,
+  values: T[]
+): Promise<void> {
+  for (let i = 0; i < values.length; i += INSERT_CHUNK) {
+    await run(values.slice(i, i + INSERT_CHUNK))
+  }
+}
+
 const text = (row: Record<string, unknown>, key: string, fallback = '') =>
   typeof row[key] === 'string' ? (row[key] as string) : fallback
 const num = (row: Record<string, unknown>, key: string, fallback: number) =>
@@ -226,7 +248,7 @@ export async function applyNovelDocument(
       }
     })
 
-  if (values.length > 0) await db.insert(chapters).values(values)
+  if (values.length > 0) await insertInChunks((slice) => db.insert(chapters).values(slice), values)
 
   return {
     created: values.length,
@@ -285,7 +307,7 @@ async function applyShots(
   })
 
   if (values.length === 0) return { created: 0, updated: 0, skipped: mapped.skipped.length }
-  await db.insert(shots).values(values)
+  await insertInChunks((slice) => db.insert(shots).values(slice), values)
   notes.push(`接在既有鏡頭後面，從第 ${Number(last?.max ?? 0) + 1} 鏡開始。`)
   return { created: values.length, updated: 0, skipped: mapped.skipped.length }
 }
@@ -414,6 +436,9 @@ async function applyEpisodes(
   let created = 0
   let updated = 0
   let skipped = mapped.skipped.length
+  /** 這一批裡已經處理過的集號。 */
+  const seen = new Set<number>()
+  const duplicated: number[] = []
 
   for (const row of mapped.rows) {
     const number = num(row, 'number', 0)
@@ -430,6 +455,21 @@ async function applyEpisodes(
       ...(text(row, 'status') ? { status: text(row, 'status') as 'PLANNED' } : {}),
       updatedAt: new Date(),
     }
+
+    /*
+     * 同一個檔案裡出現兩次同一集號的時候，第二次只能跳過 (Z190).
+     *
+     * 原本的寫法是插入之後 `byNumber.set(number, 'new')` 當佔位，而下一列拿
+     * 到那個 `'new'` 之後會去跑 `where(eq(episodes.id, 'new'))`——`id` 是
+     * uuid 欄，Postgres 回語法錯誤，整支 500。而前面那些列已經寫進去了（沒有
+     * 交易），所以使用者看到的是一個錯誤加一半的資料。
+     */
+    if (seen.has(number)) {
+      duplicated.push(number)
+      skipped += 1
+      continue
+    }
+    seen.add(number)
 
     const id = byNumber.get(number)
     if (id) {
@@ -453,11 +493,15 @@ async function applyEpisodes(
       number,
       ...patch,
     })
-    byNumber.set(number, 'new')
     created += 1
   }
 
   if (updated > 0) notes.push(`${updated} 集已經存在，更新了大綱（正文沒有動）。`)
+  if (duplicated.length > 0) {
+    notes.push(
+      `檔案裡有重複的集號（第 ${duplicated.slice(0, 8).join('、')} 集），只用了第一次出現的那一列。`
+    )
+  }
   return { created, updated, skipped }
 }
 
@@ -491,7 +535,7 @@ async function applyChapters(
   })
 
   if (values.length === 0) return { created: 0, updated: 0, skipped: mapped.skipped.length }
-  await db.insert(chapters).values(values)
+  await insertInChunks((slice) => db.insert(chapters).values(slice), values)
   notes.push(`接在既有章節後面，從第 ${Number(last?.max ?? 0) + 1} 章開始。`)
   return { created: values.length, updated: 0, skipped: mapped.skipped.length }
 }
@@ -526,7 +570,7 @@ async function applyScenes(
   })
 
   if (values.length === 0) return { created: 0, updated: 0, skipped: mapped.skipped.length }
-  await db.insert(scenes).values(values)
+  await insertInChunks((slice) => db.insert(scenes).values(slice), values)
   notes.push(`接在既有場次後面，從第 ${Number(last?.max ?? 0) + 1} 場開始。`)
   return { created: values.length, updated: 0, skipped: mapped.skipped.length }
 }
@@ -582,7 +626,7 @@ async function applyTasks(
   }))
 
   if (values.length === 0) return { created: 0, updated: 0, skipped: mapped.skipped.length }
-  await db.insert(tasks).values(values)
+  await insertInChunks((slice) => db.insert(tasks).values(slice), values)
   return { created: values.length, updated: 0, skipped: mapped.skipped.length }
 }
 
@@ -610,7 +654,7 @@ async function applyExpenses(
   }))
 
   if (values.length === 0) return { created: 0, updated: 0, skipped: mapped.skipped.length }
-  await db.insert(expenses).values(values)
+  await insertInChunks((slice) => db.insert(expenses).values(slice), values)
   notes.push('匯率沒有換算：匯入的金額照原幣別存著，成本中心會用當天的匯率換算。')
   return { created: values.length, updated: 0, skipped: mapped.skipped.length }
 }

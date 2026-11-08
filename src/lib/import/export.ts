@@ -68,7 +68,18 @@ async function fetchRecords(
 
   switch (target) {
     case 'shots': {
-      const episodeId = requireEpisode(input)
+      /*
+       * 要驗這一集屬於這個作品 (Z190).
+       *
+       * 原本只檢查 `episodeId` 非空，然後直接 `where(shots.episodeId = …)`
+       * ——而那個值是從查詢字串拿的。同一個檔案裡的 `documentFor` 有驗，
+       * `apply.ts` 的每一條寫入路徑也都有驗，只有這一條漏了。
+       *
+       * 今天還不是可利用的漏洞（`visibleProjects()` 讓兩個人都看得到所有作
+       * 品），但 `project-access.ts` 自己的註解寫著「收緊成員權限時只要改一
+       * 個地方」——這一行就是那個地方改完之後唯一還會漏的。
+       */
+      const episodeId = await episodeInProject(requireEpisode(input), projectId)
       const terms = await listVocabulary()
       const rows = await db
         .select({
@@ -227,6 +238,25 @@ async function fetchRecords(
 function requireEpisode(input: { episodeId?: string | null }): string {
   if (!input.episodeId) throw ApiError.badRequest('這一種匯出要先選一集')
   return input.episodeId
+}
+
+/**
+ * 這一集真的是這個作品的嗎。
+ *
+ * 順便擋掉不是 uuid 的值——它會讓 Postgres 回一個語法錯誤，而那是一個 500 而
+ * 不是「你給的東西不對」。
+ */
+async function episodeInProject(episodeId: string, projectId: string): Promise<string> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(episodeId)) {
+    throw ApiError.badRequest('集數的編號格式不對')
+  }
+  const [found] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .where(and(eq(episodes.id, episodeId), eq(episodes.projectId, projectId)))
+    .limit(1)
+  if (!found) throw ApiError.badRequest('指定的集數不屬於這個作品')
+  return found.id
 }
 
 async function documentFor(

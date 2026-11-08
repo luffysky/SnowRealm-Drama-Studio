@@ -169,6 +169,17 @@ export const NAV_SECTIONS: NavSection[] = [
     ready: true,
     design: 21,
   },
+  /*
+   * 說明中心 (Z189)。排在最後：它是「卡住的時候才會點」的東西，而不是每天
+   * 要用的——放在上面只會把真正常用的入口往下推。
+   */
+  {
+    key: 'help',
+    label: '使用說明',
+    icon: 'CircleHelp',
+    href: '/help',
+    ready: true,
+  },
 ]
 
 /** Rail-only entries, pinned to the foot of the tree. */

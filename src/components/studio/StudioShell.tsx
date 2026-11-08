@@ -61,6 +61,7 @@ import { cn } from '@/lib/utils'
 const ICONS: Record<string, LucideIcon> = {
   LayoutDashboard,
   Bot,
+  CircleHelp,
   Clapperboard,
   Film,
   PenLine,
@@ -150,12 +151,15 @@ function TopBar({ user, onOpenRail }: { user: SessionUser; onOpenRail: () => voi
           reason="通知中心尚未實作，預計於 M4 階段交付"
           icon={<Bell aria-hidden className="size-4" />}
         />
-        <ChromeButton
-          label="說明"
-          disabled
-          reason="說明中心尚未實作"
-          icon={<CircleHelp aria-hidden className="size-4" />}
-        />
+        {/* 說明中心做好了，所以這顆不再是停用的 (Z189)。 */}
+        <Link
+          href="/help"
+          aria-label="使用說明"
+          title="使用說明"
+          className="grid size-8 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-stage-800 hover:text-ink-100"
+        >
+          <CircleHelp aria-hidden className="size-4" />
+        </Link>
         <UserChip user={user} />
       </div>
     </header>

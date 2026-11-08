@@ -182,7 +182,7 @@ const SHOT_FIELDS: readonly ImportField[] = [
     label: '負面提示詞',
     type: 'longText',
     max: 2000,
-    aliases: ['負面提示詞', '反向提示詞', 'negativePrompt', 'negative_prompt', 'negative'],
+    aliases: ['負面提示詞', '反向提示詞', '負向提示詞', 'negativePrompt', 'negative_prompt', 'negative'],
     sample: '模糊，多手',
   },
   {
@@ -294,7 +294,7 @@ const CHARACTER_FIELDS: readonly ImportField[] = [
     label: '負面提示詞',
     type: 'longText',
     max: 2000,
-    aliases: ['負面提示詞', 'negativePrompt', 'negative'],
+    aliases: ['負面提示詞', '反向提示詞', '負向提示詞', 'negativePrompt', 'negative'],
     sample: '濃妝，現代服飾',
   },
   {

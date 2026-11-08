@@ -68,8 +68,16 @@ export function decodeBytes(bytes: Uint8Array): DecodeResult {
   }
   candidates.sort((a, b) => b.score - a.score)
 
+  /*
+   * 還是平分的話，**不要默默選第一個**。
+   *
+   * 穩定排序會讓先推入的那一個永遠贏，而那是一個沒有根據的偏好。分不出來就
+   * 照 UTF-8 的寬鬆模式走，並且講出來——一個「我認不出來」比一個猜錯的答案
+   * 誠實。
+   */
   const best = candidates[0]
-  if (best && best.score > 0) {
+  const tied = candidates.length > 1 && candidates[1]!.score === best?.score
+  if (best && best.score > 0 && !tied) {
     return {
       text: best.text,
       encoding: best.encoding,
@@ -100,19 +108,43 @@ function tryDecode(encoding: string, bytes: Uint8Array, fatal: boolean): string 
 }
 
 /**
- * 解出來的東西有多像中文。
+ * 解出來的東西有多像**真的中文**。
  *
- * 同一串位元組 Big5 與 GBK 都「解得出來」，差別在解錯的那一個會給出一堆罕用
- * 字與替換字元。所以數常用漢字、扣掉替換字元與私用區。
+ * ## 為什麼不能只數漢字
+ *
+ * 同一串位元組 Big5 與 GBK 都解得出東西，而**解錯的那一個落點也還在常用漢字
+ * 區**——一列簡體分鏡被 Big5 誤解之後是「賒醱鏡扴」，每一個字都算 +1。實測兩
+ * 邊都是 23 分，而平分時穩定排序讓先推入的 Big5 永遠贏，於是簡體 Windows 的
+ * Excel 存出來的 CSV **一律被判成 Big5**，整張表亂碼 (Z190)。
+ *
+ * ## 改成看「常不常用」
+ *
+ * 解對的中文裡，高頻字（的一是不了在人有我他⋯⋯）佔很大的比例；解錯的那一
+ * 串雖然也都是漢字，但幾乎全是罕用字。所以高頻字加重算，而其餘漢字只給很小
+ * 的分數。標點與數字也算——`，。「」` 這些在解錯時幾乎不會出現。
  */
+const COMMON = new Set(
+  '的一是不了在人有我他這個們中來上大為和國地到以說時要就出會可也你對生能而子那得於著下自之年過發後作裡用道行所然家種事成方多經麼去法學如都同現當沒動面起看定天分還進好小部其些主樣理心她本前開但因只從想實日軍者意無力它與長把機十民第公此已工使情明性知全三又關點正業外將兩高間由問很最重並物手應戰向頭文體政美相見被利什二等產或新己制身果加西斯月話合回特代內信表化老給世位次度門任常先海通教兒原東聲提立及比員解水名真論處走義各入幾口認條平系氣題活爾更別打女變四神總何電數安少報才結反受目太量再感建務做接必場件計管期市直德資命山金指克許統區保至隊形社便空決治展馬科司五基眼書非則聽白卻界達光放強即像難且權思王象完設式色路記南品住告類求據程北邊死張該交規萬取拉格望覺術領共確傳師觀清今切院讓識候帶導爭運笑飛風步改收根乾造言聯持組每濟車親極林服快辦議往元英士證近失轉夫令準布始怎呢存未遠叫台單影具羅字愛擊流備兵連調深商算質團集百需價花黨華城石級整府離況亞請技際約示復病息究線似官火斷精滿支視消越器容照須九增研寫稱企八功吧301010'
+    .split('')
+)
+
 function scoreChinese(text: string): number {
   let score = 0
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0
-    if (code === 0xfffd) score -= 4 // 替換字元：解錯的訊號
-    else if (code >= 0x4e00 && code <= 0x9fff) score += 1 // 常用漢字
-    else if (code >= 0x3400 && code <= 0x4dbf) score -= 1 // 擴充 A：多半是解錯
-    else if (code >= 0xe000 && code <= 0xf8ff) score -= 2 // 私用區
+
+    if (code === 0xfffd) {
+      score -= 8 // 替換字元：解錯的硬訊號
+      continue
+    }
+    if (COMMON.has(char)) {
+      score += 6 // 高頻字：解對了才會有這麼多
+      continue
+    }
+    if (code >= 0x4e00 && code <= 0x9fff) score += 1 // 其餘漢字：解錯時也會有
+    else if (code >= 0x3400 && code <= 0x4dbf) score -= 3 // 擴充 A：幾乎一定是解錯
+    else if (code >= 0xe000 && code <= 0xf8ff) score -= 4 // 私用區
+    else if ('，。、；：「」『』（）！？—…'.includes(char)) score += 4 // 中文標點
   }
   return score
 }

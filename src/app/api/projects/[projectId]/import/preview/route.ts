@@ -11,9 +11,22 @@ import { requireProjectApi } from '@/lib/project-access'
 
 export const runtime = 'nodejs'
 
-/** 一次最多幾個檔案、單檔多大。 */
+/**
+ * 一次最多幾個檔案、單檔多大、一批總共多大 (Z190).
+ *
+ * **8 MB 是一個達不到的數字。** Vercel 的函式請求本體上限約 4.5 MB，所以一個
+ * 超過那個的 multipart 在進到這支之前就被平台擋掉——使用者拿到的不是「超過
+ * 8 MB」，是一個看不懂的網路錯誤。
+ *
+ * 所以壓到 3 MB，而且加一個**整批**的上限：原本是先把二十個檔案全部讀進記憶
+ * 體再處理，沒有任何總量限制。
+ *
+ * 介面那一端是逐檔送的，所以 `MAX_FILES` 實際上是「一次預覽幾個」而不是「一
+ * 次上傳幾個」——真正會撞到上限的是單檔。
+ */
 const MAX_FILES = 20
-const MAX_BYTES = 8 * 1024 * 1024
+const MAX_BYTES = 3 * 1024 * 1024
+const MAX_BATCH_BYTES = 4 * 1024 * 1024
 
 /**
  * 看一眼要匯入什麼，**還不寫** (Z185).
@@ -58,12 +71,18 @@ export const POST = handle(
     const results: unknown[] = []
 
     const sources: { name: string; bytes: Uint8Array | null; text: string | null }[] = []
+    let batch = 0
     for (const file of files) {
       if (file.size > MAX_BYTES) {
         results.push({
           filename: file.name,
-          error: `超過 ${Math.round(MAX_BYTES / 1024 / 1024)} MB`,
+          error: `這個檔案 ${(file.size / 1024 / 1024).toFixed(1)} MB，超過單檔 ${MAX_BYTES / 1024 / 1024} MB 的上限。請拆成幾個小的。`,
         })
+        continue
+      }
+      batch += file.size
+      if (batch > MAX_BATCH_BYTES) {
+        results.push({ filename: file.name, error: '這一批加起來太大了，請分次丟。' })
         continue
       }
       sources.push({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), text: null })

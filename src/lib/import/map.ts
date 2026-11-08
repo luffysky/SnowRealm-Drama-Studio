@@ -59,30 +59,65 @@ export function detectMapping(
   })
 
   /*
-   * 第二輪：包含。
+   * 第二輪：包含，而且取**命中最長的那一個**。
    *
    * 「鏡頭景別（必填）」這種帶補充說明的欄名很常見，而要求人把標題改乾淨不
-   * 是這個功能該做的事。只比**較長的那一邊包含較短的那一邊**，而且短的至少
-   * 要兩個字——一個字的別名（例如「秒」）去包含比對會把「秒數」以外的東西也
-   * 收進來。
+   * 是這個功能該做的事。只比較長的那一邊包含較短的那一邊，而且短的至少要兩
+   * 個字——一個字的別名（例如「秒」）去包含比對會把「秒數」以外的東西也收進
+   * 來。
+   *
+   * **取最長而不是宣告順序第一個** (Z190)：生圖提示詞的別名「提示詞」是「負
+   * 面提示詞」的子字串，而它宣告在前面——照順序取的話，「負向提示詞」這一欄
+   * 會被對到**正向**提示詞，而正向提示詞是直接餵給生圖的。不報錯，要到出圖
+   * 才看得出來。
+   *
+   * 同一個根因還有「場景」被對到「場次代號」：`地點` 先認領 `location` 之
+   * 後，`場景` 去撞 `sceneCode` 的別名。取最長之後，`場景` 與 `場景代號` 的
+   * 命中長度比得出高下。
    */
   headers.forEach((_, index) => {
     if (mapping[index]) return
     const head = folded[index]!
     if (!head) return
+
+    let best: { field: ImportField; length: number } | null = null
     for (const field of target.fields) {
       if (taken.has(field.key)) continue
-      const hit = candidates(field).some(
-        (name) => name.length >= 2 && (head.includes(name) || name.includes(head))
-      )
-      if (hit) {
-        claim(index, field)
-        return
+      if (negativeMismatch(head, field.key)) continue
+      for (const name of candidates(field)) {
+        if (name.length < 2) continue
+        /*
+         * **只收「欄名包含別名」**，不收反過來的。
+         *
+         * 反過來（別名包含欄名）代表欄名比別名更短、更不明確，而那是一個很
+         * 弱的訊號——`場景` 會因此撞上 `場次代號`，於是一段場景描述寫進一個
+         * 長度上限 20 的代號欄。寧可留 null 讓人自己選。
+         */
+        if (!head.includes(name)) continue
+        if (!best || name.length > best.length) best = { field, length: name.length }
       }
     }
+    if (best) claim(index, best.field)
   })
 
   return mapping
+}
+
+/**
+ * 正向與負向提示詞不准互串 (Z190).
+ *
+ * 「提示詞」是「負向提示詞」的子字串，所以任何帶「負」「反」的欄名都會落進
+ * **正向**欄位——而正向提示詞是直接餵給生圖的。不報錯，要到出圖才看得出來。
+ *
+ * 所以：欄名看起來是負向的，就只准對到負向欄位；看起來不是負向的，就不准對
+ * 到負向欄位。這不是通用規則，是針對一個會悄悄產生壞圖的具體情況。
+ */
+const NEGATIVE_WORDS = ['負', '负', '反向', '排除', 'negative', 'exclude']
+
+function negativeMismatch(head: string, key: string): boolean {
+  const headIsNegative = NEGATIVE_WORDS.some((word) => head.includes(foldHeader(word)))
+  const fieldIsNegative = key.toLowerCase().includes('negative')
+  return headIsNegative !== fieldIsNegative
 }
 
 /* -------------------------------------------------------------------------- */
@@ -152,10 +187,22 @@ export function mapRows(
       if (result.value !== undefined) record[key] = result.value
     })
 
-    // 必填欄位。整列空白的直接跳過，不報錯——尾端的空行很常見。
-    const empty = Object.values(record).every(
-      (value) => value === null || value === '' || value === undefined
+    /*
+     * 整列空白的直接跳過，不報錯——尾端的空行很常見。
+     *
+     * 但「原始那一列有字、只是每一格都沒被收進 record」不算空白 (Z190)：列
+     * 舉值認不得的時候不放值進 record，於是一列只填了「狀態: 審核中」的資料
+     * 會被當成空行跳過——而畫面上的訊息寫著「會用預設值」。說的跟做的不一
+     * 樣，比兩者都錯更難查。
+     */
+    const blankSource = mapping.every(
+      (key, column) => !key || !(line[column] ?? '').trim()
     )
+    const empty =
+      blankSource &&
+      Object.values(record).every(
+        (value) => value === null || value === '' || value === undefined
+      )
     if (empty) {
       skipped.push(rowNumber)
       return
@@ -207,16 +254,26 @@ function coerce(
        * 數字要先把人會打的東西拿掉：全形數字、千分位逗號、單位（「5 秒」）、
        * 幣別符號。模型與試算表兩邊都會產出這些，而 `Number('5 秒')` 是 NaN。
        */
-      const cleaned = raw
-        .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
-        .replace(/[,，\s]/g, '')
-        .replace(/[^\d.+-]/g, '')
-      const parsed = field.type === 'int' ? Number.parseInt(cleaned, 10) : Number.parseFloat(cleaned)
-
-      if (!Number.isFinite(parsed)) {
-        return { issues: [{ text: `「${raw}」不是數字`, level: 'error' }] }
+      const cleaned = cleanNumber(raw)
+      if (cleaned === null) {
+        return { issues: [{ text: `「${raw}」看不出是數字`, level: 'error' }] }
       }
+      const parsed = field.type === 'int' ? Math.round(cleaned) : cleaned
       if (field.min !== undefined && parsed < field.min) {
+        /*
+         * **負數不夾，直接擋下來** (Z190).
+         *
+         * 把 -500 夾成 0 是在虛構一個數字——而 0 看起來完全正常，沒有人會回
+         * 頭查。超過上限夾住是另一回事（120 秒的鏡頭多半是單位寫錯，夾住之
+         * 後還能用），但正負號是有意義的。
+         */
+        if (parsed < 0) {
+          return {
+            issues: [
+              { text: `${parsed} 是負數，而${field.label}不能是負的`, level: 'error' },
+            ],
+          }
+        }
         return {
           value: field.min,
           issues: [{ text: `${parsed} 小於下限 ${field.min}，改用 ${field.min}`, level: 'warning' }],
@@ -317,6 +374,54 @@ function coerce(
       return { value: raw, issues: [] }
     }
   }
+}
+
+/**
+ * 一格文字變成數字，而**看不懂就說看不懂** (Z190).
+ *
+ * 原本的做法是「把逗號與空白拿掉、把非數字字元拿掉，然後 parseFloat」。那一
+ * 條路會把這些悄悄變成別的數字：
+ *
+ *     1 200,50   → 120050     歐式寫法的小數點被當成千分位吃掉（差一百倍）
+ *     (500)      → 500        會計的負數括號被丟掉
+ *     3-5        → 3          一個範圍被截成下界
+ *     1.2.3      → 1          版本號被當成數字
+ *
+ * 所以改成**先認出整個字串的形狀**再轉。認不出來就回 null，由呼叫端報成錯
+ * 誤——一個看不懂的金額應該擋下來，不是猜一個。
+ */
+function cleanNumber(raw: string): number | null {
+  const text = raw
+    // 全形數字與全形標點先換成半形。
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[，]/g, ',')
+    .replace(/[．]/g, '.')
+    .replace(/[（]/g, '(')
+    .replace(/[）]/g, ')')
+    .trim()
+
+  // 會計的負數：`(500)`。
+  const accounting = /^\((.*)\)$/.exec(text)
+  const body = accounting ? accounting[1]! : text
+  const sign = accounting ? -1 : 1
+
+  /*
+   * 把幣別符號與單位拿掉，但**只在頭尾**——中間出現的東西（`3-5`、`1.2.3`）
+   * 代表這不是一個數字，而不是「有雜訊的數字」。
+   */
+  const core = body
+    .replace(/^[^\d+-]+/, '')
+    .replace(/[^\d]+$/, '')
+    .trim()
+
+  // 千分位逗號：只有在「三位一組」時才算，否則它是小數點。
+  const grouped = /^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(core)
+  const normalised = grouped ? core.replace(/,/g, '') : core.replace(/,/g, '.')
+
+  if (!/^[+-]?(\d+(\.\d+)?|\.\d+)$/.test(normalised)) return null
+
+  const value = Number(normalised)
+  return Number.isFinite(value) ? sign * value : null
 }
 
 /**
