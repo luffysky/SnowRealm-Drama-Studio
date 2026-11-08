@@ -179,6 +179,59 @@ export function foldForCompare(text: string, preference: ScriptPreference): stri
   return toSimplified(convertScript(text, preference))
 }
 
+/*
+ * 一個字折一次，而且結果會留著 (Z179).
+ *
+ * `foldForSearch` 會被每一次按鍵叫到，餵進去的是一整章（這本書一章 9,000
+ * 字）。不快取的話每打一個字就是九千次轉換器呼叫。快取的鍵是**單字**，所以一
+ * 章裡不同的字大約一兩千個，第二次開始全是 Map 查詢。
+ */
+const searchFoldCache = new Map<string, string>()
+
+/**
+ * 搜尋比對用的折疊：繁簡兩種都收，而且**長度一個字都不會變** (Z179).
+ *
+ * ## 為什麼不能用 `foldForCompare`
+ *
+ * `foldForCompare` 是給「打字確認」用的，它只要答對或錯。搜尋不一樣：找到之後
+ * 要知道**它在文件的哪個位置**，而位置是靠偏移量算的。詞彙層級的轉換會改變長
+ * 度（`計算機` → `计算机` 剛好同長，但一對多與多對一的詞組不保證），於是折疊
+ * 後的偏移量對不回原文——高亮會標在隔壁，取代會砍到別的字。那種錯不會報錯，
+ * 只會默默吃掉稿子。
+ *
+ * 所以這一支**逐字**折，而且只在「換出來剛好一樣長」的時候採用，否則保留原
+ * 字。於是 `fold(text).length === text.length` 恆成立（有測試守著），偏移量可
+ * 以直接拿來用。
+ *
+ * ## 逐字折不準，但它一致，而搜尋要的是一致
+ *
+ * 逐字會失去詞彙上下文：`頭髮` 與 `發現` 的 `髮`／`發` 是兩個不同的簡體字，而
+ * 逐字只能給一個答案。這對**顯示**是錯的（所以顯示那條路走的是
+ * `convertScript`，不是這裡），但對**比對**不是錯的——因為兩邊都用同一張表折，
+ * 所以 `头发` 與 `頭髮` 一定落在同一點。
+ *
+ * 代價是會多收：折疊後 `干`／`乾`／`幹` 同一點，所以搜「干」會連「乾淨」一起
+ * 找到。對一個標著「繁簡通用」的開關來說，多收是它該有的行為；不想要的時候把
+ * 開關關掉就是精確比對。
+ */
+export function foldForSearch(text: string): string {
+  if (!text) return text
+
+  let out = ''
+  // `for…of` 走的是碼位，所以代理對（罕用漢字）是一個 char，不會被切兩半。
+  for (const char of text) {
+    let folded = searchFoldCache.get(char)
+    if (folded === undefined) {
+      const converted = toSimplified(char)
+      // 長度不同就不要——偏移量的正確性比多認一個字重要。
+      folded = converted.length === char.length ? converted : char
+      searchFoldCache.set(char, folded)
+    }
+    out += folded
+  }
+  return out
+}
+
 export function isScriptPreference(value: unknown): value is ScriptPreference {
   return value === 'original' || value === 'simplified' || value === 'traditional'
 }

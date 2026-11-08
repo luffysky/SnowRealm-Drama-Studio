@@ -17,6 +17,7 @@ import Typography from '@tiptap/extension-typography'
 import Underline from '@tiptap/extension-underline'
 import type { Extensions } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import { SearchHighlight } from '@/components/editor/search-highlight'
 import { Screenplay } from '@/components/editor/screenplay'
 import type { EditorModuleId } from '@/lib/editor/modules'
 
@@ -100,6 +101,16 @@ export function buildExtensions(input: {
 
   if (enabled.has('screenplay')) {
     extensions.push(Screenplay)
+  }
+
+  if (enabled.has('findReplace')) {
+    /*
+     * 只有搜尋面板要畫的那一層 decoration，沒有指令也沒有快速鍵。
+     *
+     * 掛在這裡而不是永遠掛著：關掉「尋找與取代」模組的人不該付一支外掛的錢，
+     * 而這一支的規矩跟其他模組一樣——關掉就是真的沒有載入。
+     */
+    extensions.push(SearchHighlight)
   }
 
   if (enabled.has('focus')) {

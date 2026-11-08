@@ -513,6 +513,28 @@
     padding-inline: 0.15em;
   }
 
+  /*
+   * 搜尋相符處 (Z179).
+   *
+   * 不用 `mark`：那是作者自己標的螢光筆，混在一起就分不出「我標的」跟「搜尋
+   * 找到的」。這兩條是 decoration 的 class，文件裡沒有對應的節點，所以關掉面
+   * 板它們就一起消失，不會留在稿子裡。
+   *
+   * 當前那一個要明顯比其餘的強：面板上寫著 `3 / 69`，而人要能一眼看出 69 個
+   * 之中哪一個是「3」——否則按「下一個」跟沒按一樣。
+   */
+  .prose-editor :where(.search-hit) {
+    background-color: color-mix(in oklab, var(--color-accent-500) 28%, transparent);
+    border-radius: 2px;
+  }
+
+  .prose-editor :where(.search-hit-on) {
+    background-color: color-mix(in oklab, var(--color-gilt-400) 70%, transparent);
+    color: var(--color-stage-990);
+    /* 捲到畫面上之後還要找得到它，所以加一圈外框而不只是換底色。 */
+    box-shadow: 0 0 0 1px var(--color-gilt-300);
+  }
+
   .prose-editor :where(table) {
     width: 100%;
     border-collapse: collapse;
