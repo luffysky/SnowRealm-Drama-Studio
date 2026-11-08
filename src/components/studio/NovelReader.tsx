@@ -555,8 +555,23 @@ export function NovelReader({
       )}
 
       {/* ---- toolbar ---------------------------------------------------- */}
+      {/*
+        手機上只留圖示，文字從 `sm` 才出現 (Z176).
+
+        這一列在 390px 下最多塞六個東西：退出、目錄、書名、朗讀、停止、閱讀設
+        定——而中間那個書名是 `flex-1 truncate`，所以**它是唯一會被壓扁的那一
+        個**。結果是書名被切成兩三個字，而四組「圖示＋兩字」各自佔著寬度。
+        朗讀中的時候最糟，因為那時候才會多出「停止」那一顆。
+
+        拿掉文字而不是縮小字級或改成兩行：兩行會把正文往下推（這是一個以正文
+        為主的畫面），縮字級則是讓六個東西一起變難按。圖示本來就都有
+        `aria-label` 與 `title`，所以拿掉可見文字不會讓任何一顆變成猜謎——
+        `目錄` 跟 `閱讀設定` 原本沒有，這次補上。
+
+        `gap-2 → gap-1`、`px-3 → px-2` 也只在手機上縮，桌機維持原樣。
+      */}
       <div
-        className="flex shrink-0 items-center gap-2 border-b px-3 py-2 backdrop-blur-sm"
+        className="flex shrink-0 items-center gap-1 border-b px-2 py-2 backdrop-blur-sm sm:gap-2 sm:px-3"
         style={{
           borderColor: `${theme.faint}33`,
           background: `${theme.bg}e6`,
@@ -575,16 +590,18 @@ export function NovelReader({
           className="tap inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
         >
           <X aria-hidden className="size-3.5" />
-          退出
+          <span className="hidden sm:inline">退出</span>
         </Link>
 
         <button
           type="button"
           onClick={() => setPanel(panel === "toc" ? "none" : "toc")}
-          className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
+          aria-label="目錄"
+          title="目錄"
+          className="tap inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] transition-opacity hover:opacity-70 sm:px-2"
         >
           <List aria-hidden className="size-3.5" />
-          目錄
+          <span className="hidden sm:inline">目錄</span>
         </button>
 
         <span
@@ -599,77 +616,6 @@ export function NovelReader({
           a speech engine has no voices at all, and a play button that does
           nothing is worse than no play button.
         */}
-                {/*
-                  字形選單不該綁在語音引擎上 (Z174).
-
-                  它原本縮在下面那個 `{speechSupported() && (` 裡面，跟朗讀音
-                  色、語速、分角色朗讀擺在一起——於是**沒有裝語音引擎的裝置
-                  連繁簡都切不了**。兩件事毫無關係，而這個錯只在少數裝置上
-                  出現，所以不會有人回報。
-
-                  子代理審 Z172 的時候順手指出來的；真正讓它現形的是瀏覽器
-                  probe——headless Chrome 沒有語音引擎，所以那三顆按鈕一顆
-                  都抓不到。
-                */}
-                    {/*
-                      正文的繁簡 (Z135).
-
-                      Separate from the interface switch on purpose: somebody
-                      may want a 简体 interface around 繁體 prose, or the
-                      other way round. Tying them together removes both of
-                      those readings.
-                    */}
-                    <Field
-                      label="正文字體"
-                      hint="只改顯示，寫進資料庫的字沒有被動過。跟介面的設定分開。原文＝不轉換（目前的稿子是簡體）。"
-                    >
-                      <div
-                        data-script-keep
-                        className="flex gap-1 rounded-md border p-0.5"
-                        style={{ borderColor: `${theme.faint}55` }}
-                      >
-                        {/*
-                          三顆，而本來只有兩顆 (Z174).
-
-                          舊的兩顆是「简体」跟「繁體（原文）」，而那個標籤把
-                          兩件事綁成一件：它假設原文就是繁體，所以「不轉換」
-                          等於「繁體」。稿子是簡體寫的，所以按那一顆什麼都不
-                          會發生——Z172 做出了簡 → 繁 的轉換，而**沒有任何一顆
-                          按鈕選得到它**。
-
-                          拆開之後：原文＝不轉、简体＝轉成簡體、繁體＝轉成繁
-                          體。對今天的稿子，前兩顆看起來一樣，而那是誠實的
-                          ——它們真的做的是兩件不同的事，只是在簡體稿上結果
-                          相同；哪天混進繁體的章節就分得出來了。
-                        */}
-                        {(
-                          [
-                            ["original", "原文"],
-                            ["simplified", "简体"],
-                            ["traditional", "繁體"],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            role="radio"
-                            aria-checked={settings.script === value}
-                            onClick={() => update({ script: value })}
-                            className="tap flex-1 rounded px-1.5 py-1 text-[11px] transition-opacity"
-                            style={
-                              settings.script === value
-                                ? {
-                                    background: `${theme.faint}33`,
-                                    color: theme.ink,
-                                  }
-                                : { color: theme.faint }
-                            }
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </Field>
         {/*
           `ready &&`，不然整頁 hydration 失敗 (Z175).
 
@@ -703,18 +649,20 @@ export function NovelReader({
               }}
               aria-label={reading === "playing" ? "暫停朗讀" : "朗讀"}
               title={reading === "playing" ? "暫停朗讀" : "朗讀這一章"}
-              className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
+              className="tap inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] transition-opacity hover:opacity-70 sm:px-2"
             >
               {reading === "playing" ? (
                 <Pause aria-hidden className="size-3.5" />
               ) : (
                 <Play aria-hidden className="size-3.5" />
               )}
-              {reading === "off"
-                ? "朗讀"
-                : reading === "paused"
-                  ? "繼續"
-                  : "暫停"}
+              <span className="hidden sm:inline">
+                {reading === "off"
+                  ? "朗讀"
+                  : reading === "paused"
+                    ? "繼續"
+                    : "暫停"}
+              </span>
             </button>
 
             {reading !== "off" && (
@@ -734,10 +682,12 @@ export function NovelReader({
         <button
           type="button"
           onClick={() => setPanel(panel === "settings" ? "none" : "settings")}
-          className="tap inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-opacity hover:opacity-70"
+          aria-label="閱讀設定"
+          title="閱讀設定"
+          className="tap inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] transition-opacity hover:opacity-70 sm:px-2"
         >
           <Settings2 aria-hidden className="size-3.5" />
-          閱讀設定
+          <span className="hidden sm:inline">閱讀設定</span>
         </button>
       </div>
 
@@ -1058,6 +1008,80 @@ export function NovelReader({
                 />
 
                 {/* `ready &&` 的理由見上面朗讀入口那一段 (Z175)。 */}
+                {/*
+                  字形選單不綁在語音引擎上 (Z174).
+
+                  它原本縮在下面那個 `{ready && speechSupported() && (` 裡面，跟
+                  朗讀音色、語速、分角色朗讀擺在一起——於是**沒有裝語音引擎的裝
+                  置連正文繁簡都切不了**。兩件事毫無關係，而這個錯只在少數裝置
+                  上出現，所以不會有人回報。讓它現形的是瀏覽器 probe：headless
+                  Chrome 沒有語音引擎，所以那三顆按鈕一顆都抓不到。
+
+                  **而我搬錯地方了**：第一版用「檔案裡第一個 `speechSupported()`」
+                  定位，而那是**工具列上的播放鍵**，不是這個面板——於是整個 Field
+                  連標籤帶說明一起跑到閱讀器頂部，把手機上的 header 擠爆。`tsc`、
+                  `lint`、`next build` 全綠，probe 也全過（它找 `[role="radio"]`，
+                  在哪一層都找得到）。是人看到畫面才發現的。
+
+                  教訓：`next()` 回的是第一個命中，而「第一個」跟「我要的那個」
+                  是兩件事。
+                */}
+                {/*
+                  正文的繁簡 (Z135).
+
+                  Separate from the interface switch on purpose: somebody
+                  may want a 简体 interface around 繁體 prose, or the
+                  other way round. Tying them together removes both of
+                  those readings.
+                */}
+                <Field label="正文字體">
+                  <div
+                    data-script-keep
+                    className="flex gap-1 rounded-md border p-0.5"
+                    style={{ borderColor: `${theme.faint}55` }}
+                  >
+                    {/*
+                      三顆，而本來只有兩顆 (Z174).
+
+                      舊的兩顆是「简体」跟「繁體（原文）」，而那個標籤把
+                      兩件事綁成一件：它假設原文就是繁體，所以「不轉換」
+                      等於「繁體」。稿子是簡體寫的，所以按那一顆什麼都不
+                      會發生——Z172 做出了簡 → 繁 的轉換，而**沒有任何一顆
+                      按鈕選得到它**。
+
+                      拆開之後：原文＝不轉、简体＝轉成簡體、繁體＝轉成繁
+                      體。對今天的稿子，前兩顆看起來一樣，而那是誠實的
+                      ——它們真的做的是兩件不同的事，只是在簡體稿上結果
+                      相同；哪天混進繁體的章節就分得出來了。
+                    */}
+                    {(
+                      [
+                        ["original", "原文"],
+                        ["simplified", "简体"],
+                        ["traditional", "繁體"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={settings.script === value}
+                        onClick={() => update({ script: value })}
+                        className="tap flex-1 rounded px-1.5 py-1 text-[11px] transition-opacity"
+                        style={
+                          settings.script === value
+                            ? {
+                                background: `${theme.faint}33`,
+                                color: theme.ink,
+                              }
+                            : { color: theme.faint }
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
                 {ready && speechSupported() && (
                   <>
                     <Field
