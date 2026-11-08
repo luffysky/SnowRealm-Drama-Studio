@@ -3,6 +3,7 @@ import {
   index,
   integer,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -50,6 +51,14 @@ export const shots = pgTable(
     action: text('action').notNull().default(''),
     /** 台詞 / 旁白 */
     dialogue: text('dialogue').notNull().default(''),
+    /**
+     * @deprecated 說話人改成 `shot_speakers`（Z194）——一個鏡頭可以有好幾個人
+     * 說話，而這裡只放得下一個。
+     *
+     * 欄位**留著沒刪**，而且沒有任何程式再讀它：0036 那支遷移是純新增的，所
+     * 以可以先跑遷移再部署，中間不會有任何一邊壞掉。丟掉它是另一支遷移的事
+     * （Z195），等這一版在線上穩了再說。
+     */
     speakerId: uuid('speaker_id').references(() => characters.id, { onDelete: 'set null' }),
     /** Image / video generation prompt. */
     prompt: text('prompt').notNull().default(''),
@@ -77,8 +86,42 @@ export const shots = pgTable(
   ]
 )
 
-export const shotsRelations = relations(shots, ({ one }) => ({
+/**
+ * 一個鏡頭的說話人們 (Z194).
+ *
+ * 一鏡多人對話是常態——「沈知味與錢管事在灶前拌嘴」本來只能拆成兩鏡來記，而那
+ * 會讓鏡號、秒數與分鏡表全部跟著失真。
+ *
+ * `sortOrder` 記的是誰先開口：對白是一句接一句的，順序有差。
+ *
+ * 角色被刪掉時連帶拿掉這一列（`cascade`），效果等同舊欄位的 `set null`——那個
+ * 鏡頭就少一個說話人，而不是留著一個指向空氣的 id。
+ */
+export const shotSpeakers = pgTable(
+  'shot_speakers',
+  {
+    shotId: uuid('shot_id')
+      .notNull()
+      .references(() => shots.id, { onDelete: 'cascade' }),
+    characterId: uuid('character_id')
+      .notNull()
+      .references(() => characters.id, { onDelete: 'cascade' }),
+    sortOrder: integer('sort_order').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ name: 'shot_speakers_pk', columns: [t.shotId, t.characterId] }),
+    index('shot_speakers_shot_idx').on(t.shotId, t.sortOrder),
+    index('shot_speakers_character_idx').on(t.characterId),
+  ]
+)
+
+export const shotsRelations = relations(shots, ({ one, many }) => ({
   episode: one(episodes, { fields: [shots.episodeId], references: [episodes.id] }),
   scene: one(scenes, { fields: [shots.sceneId], references: [scenes.id] }),
-  speaker: one(characters, { fields: [shots.speakerId], references: [characters.id] }),
+  speakers: many(shotSpeakers),
+}))
+
+export const shotSpeakersRelations = relations(shotSpeakers, ({ one }) => ({
+  shot: one(shots, { fields: [shotSpeakers.shotId], references: [shots.id] }),
+  character: one(characters, { fields: [shotSpeakers.characterId], references: [characters.id] }),
 }))

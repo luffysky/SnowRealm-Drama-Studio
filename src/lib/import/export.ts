@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   characters,
@@ -7,6 +7,7 @@ import {
   episodes,
   expenses,
   shots,
+  shotSpeakers,
   scenes,
   tasks,
   worldEntries,
@@ -91,15 +92,27 @@ async function fetchRecords(
           timeOfDay: shots.timeOfDay,
           action: shots.action,
           dialogue: shots.dialogue,
-          speaker: characters.name,
+          /*
+           * 一鏡可以有好幾個說話人 (Z194)，所以這裡是把名字聚起來而不是 join
+           * 一個角色——join 的話一鏡三個人會變成三列同樣的鏡頭。
+           *
+           * `filter (where … is not null)` 是因為沒有說話人的鏡頭在 left join
+           * 之後會聚出一個 `{null}`，而那會匯出成一個空字串以外的東西。
+           */
+          speaker: sql<string>`coalesce(string_agg(${characters.name}, '、' order by ${shotSpeakers.sortOrder}) filter (where ${characters.id} is not null), '')`,
           prompt: shots.prompt,
           negativePrompt: shots.negativePrompt,
           status: shots.status,
           notes: shots.notes,
         })
         .from(shots)
-        .leftJoin(characters, eq(characters.id, shots.speakerId))
+        .leftJoin(shotSpeakers, eq(shotSpeakers.shotId, shots.id))
+        .leftJoin(
+          characters,
+          and(eq(characters.id, shotSpeakers.characterId), isNull(characters.deletedAt))
+        )
         .where(eq(shots.episodeId, episodeId))
+        .groupBy(shots.id)
         .orderBy(asc(shots.order))
 
       return rows.map((row) => ({

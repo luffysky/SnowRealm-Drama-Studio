@@ -140,7 +140,7 @@ export type NewVocabulary = {
 
 export type MappedRows = {
   /** 可以匯入的列。鍵是欄位 key。 */
-  rows: Record<string, string | number | null>[]
+  rows: Record<string, string | number | null | string[]>[]
   issues: CellIssue[]
   /** 要先建起來的下拉選項，已經去重。 */
   newVocabulary: NewVocabulary[]
@@ -163,13 +163,13 @@ export function mapRows(
 ): MappedRows {
   const byKey = new Map(target.fields.map((field) => [field.key, field]))
   const issues: CellIssue[] = []
-  const rows: Record<string, string | number | null>[] = []
+  const rows: Record<string, string | number | null | string[]>[] = []
   const skipped: number[] = []
   const pending = new Map<string, NewVocabulary>()
 
   sheet.rows.forEach((line, index) => {
     const rowNumber = index + 1
-    const record: Record<string, string | number | null> = {}
+    const record: Record<string, string | number | null | string[]> = {}
     let fatal = false
 
     mapping.forEach((key, column) => {
@@ -235,7 +235,7 @@ export function mapRows(
 /* -------------------------------------------------------------------------- */
 
 type Coerced = {
-  value?: string | number | null
+  value?: string | number | null | string[]
   issues: { text: string; level: 'warning' | 'error' }[]
 }
 
@@ -356,11 +356,45 @@ function coerce(
     }
 
     case 'reference': {
-      const id = context.characters.get(foldForSearch(raw))
-      if (id) return { value: id, issues: [] }
-      return {
-        issues: [{ text: `找不到叫「${raw}」的角色，這一欄會留空`, level: 'warning' }],
+      /*
+       * 一格可以寫好幾個人 (Z194).
+       *
+       * 「沈知味、錢管事」是一鏡兩人對話，不是打錯字——`shot_speakers` 放得下
+       * 好幾個，所以照頓號拆開一個一個對。順序就是寫的順序，而那正是說話的
+       * 順序。
+       *
+       * 一個名字裡本來就有頓號的角色會被這條拆壞，但那種名字在角色表裡也會
+       * 被當成兩個人讀，所以問題在名字不在這裡。
+       */
+      const parts = raw
+        .split(/[、，,;；/／|｜]+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+
+      const ids: string[] = []
+      const missing: string[] = []
+      for (const part of parts) {
+        const id = context.characters.get(foldForSearch(part))
+        if (id) {
+          // 同一個人寫兩次只算一次，不然會撞到 `(shot_id, character_id)` 主鍵。
+          if (!ids.includes(id)) ids.push(id)
+        } else {
+          missing.push(part)
+        }
       }
+
+      const issues: { text: string; level: 'warning' }[] = []
+      if (missing.length > 0) {
+        issues.push({
+          text:
+            missing.length === parts.length
+              ? `找不到叫「${raw}」的角色，這一欄會留空`
+              : `找不到「${missing.join('、')}」這${missing.length > 1 ? '幾' : ''}個角色，其餘的照常匯入`,
+          level: 'warning',
+        })
+      }
+
+      return ids.length > 0 ? { value: ids, issues } : { issues }
     }
 
     default: {

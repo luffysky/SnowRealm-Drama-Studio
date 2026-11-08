@@ -105,8 +105,13 @@ export type ShotRow = {
   timeOfDay: string
   action: string
   dialogue: string
-  speakerId: string | null
-  speakerName: string | null
+  /**
+   * 這一鏡有誰在說話，依說話順序 (Z194).
+   *
+   * 一鏡多人對話是常態，而舊的 `speakerId` 只放得下一個——「沈知味與錢管事在
+   * 灶前拌嘴」本來得拆成兩鏡來記，而那會讓鏡號、秒數與整張分鏡表跟著失真。
+   */
+  speakers: { id: string; name: string }[]
   prompt: string
   negativePrompt: string
   status: ShotStatusValue
@@ -154,7 +159,13 @@ export type ShotPatch = {
   timeOfDay?: string
   action?: string
   dialogue?: string
-  speakerId?: string | null
+  /**
+   * 給了就**整組換掉**，沒給就不動 (Z194).
+   *
+   * 空陣列是「把說話人清空」，`undefined` 是「這次沒有要改說話人」——兩者不
+   * 一樣，而把它們混為一談會讓「只改秒數」順手清掉說話人。
+   */
+  speakerIds?: string[]
   prompt?: string
   negativePrompt?: string
   status?: ShotStatusValue

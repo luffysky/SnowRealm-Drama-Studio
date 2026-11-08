@@ -1,6 +1,6 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { aiJobs, characters, episodes, shots } from '@/db/schema'
+import { aiJobs, characters, episodes, shots, shotSpeakers } from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import {
@@ -198,7 +198,6 @@ export async function applyStoryboard(input: {
       timeOfDay: draft.timeOfDay,
       action: draft.action,
       dialogue: draft.dialogue,
-      speakerId: draft.speaker ? (byName.get(draft.speaker) ?? null) : null,
       prompt: draft.prompt,
       negativePrompt: draft.negativePrompt,
       // 提示詞寫好了但還沒生圖——這正是 PROMPT_READY 的意思。
@@ -206,7 +205,35 @@ export async function applyStoryboard(input: {
     }
   })
 
-  await db.insert(shots).values(values)
+  /*
+   * 說話人住在 `shot_speakers`，所以要拿到新鏡頭的 id 才寫得進去 (Z194).
+   *
+   * 模型回的 `speaker` 是一串名字，而一鏡可以有好幾個人——照頓號拆開一個一個
+   * 對，對不到的就略過（這裡沒有地方回報，而憑空造一個角色比少一個說話人糟）。
+   * `returning` 的順序跟送進去的 `values` 一致，所以照位置對回去。
+   */
+  const created = await db.insert(shots).values(values).returning({ id: shots.id })
+
+  const links = created.flatMap((shot, index) => {
+    const draft = parsed.shots[index]
+    if (!draft?.speaker) return []
+
+    const seen = new Set<string>()
+    const names = draft.speaker
+      .split(/[、，,;；/／|｜]+/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+
+    return names.flatMap((name) => {
+      const characterId = byName.get(name)
+      // 同一個人寫兩次會撞到 `(shot_id, character_id)` 主鍵。
+      if (!characterId || seen.has(characterId)) return []
+      seen.add(characterId)
+      return [{ shotId: shot.id, characterId, sortOrder: seen.size - 1 }]
+    })
+  })
+
+  if (links.length > 0) await db.insert(shotSpeakers).values(links)
 
   await db
     .update(aiJobs)

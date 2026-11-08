@@ -33,7 +33,7 @@ export const POST = handle(
         timeOfDay: rest.timeOfDay,
         action: rest.action,
         dialogue: rest.dialogue,
-        speakerId: rest.speakerId ?? null,
+        speakerIds: rest.speakerIds,
         prompt: rest.prompt,
         negativePrompt: rest.negativePrompt,
         status: rest.status,

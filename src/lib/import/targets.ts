@@ -166,8 +166,8 @@ const SHOT_FIELDS: readonly ImportField[] = [
     type: 'reference',
     reference: 'character',
     aliases: ['誰說的', '說話人', '角色', '說話者', 'speaker', 'character', 'who'],
-    sample: '沈知味',
-    note: '照角色名對，對不到會留空並回報。',
+    sample: '沈知味、錢管事',
+    note: '照角色名對。**一鏡可以有好幾個人說話**，用頓號分開（例如「沈知味、錢管事」），寫的順序就是說話的順序，最多十個。對不到的名字會回報並略過，不會猜。',
   },
   {
     key: 'prompt',

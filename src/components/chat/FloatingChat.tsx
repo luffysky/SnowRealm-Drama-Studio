@@ -188,6 +188,7 @@ export function FloatingChat({
         title: newest.senderName,
         body: newest.recalledAt ? '訊息已收回' : newest.body || '傳送了一個檔案',
         tag: 'srds-chat',
+        url: '/chat',
       })
     }
   }, [messages, meId, state])
@@ -219,6 +220,7 @@ export function FloatingChat({
       title: `${partner?.name ?? '工作室'} 來電`,
       body: call.video ? '視訊通話' : '語音通話',
       tag: 'srds-call',
+      url: '/chat',
       requireInteraction: true,
     })
   }, [call, meId, partner])

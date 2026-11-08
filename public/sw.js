@@ -109,3 +109,47 @@ self.addEventListener('fetch', (event) => {
     })()
   )
 })
+
+/**
+ * Clicking a notification has to do something (Z193).
+ *
+ * `src/lib/notifications.ts` shows these through `registration.showNotification()`
+ * — the only path that works on Android, where the `Notification` constructor
+ * throws. But a notification shown by a worker is dismissed by the worker, and
+ * without this handler clicking one just closed it: no focus, no navigation.
+ * The two things that notify are an incoming message and an incoming *call*,
+ * and a call you cannot answer by tapping its notification is the whole point
+ * of the notification gone.
+ *
+ * Focus an existing window rather than opening a second one — the chat and the
+ * call both live in a widget that is already mounted in the open tab, and a
+ * fresh tab would leave the ringing one behind.
+ */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+
+  const target = event.notification.data?.url || '/dashboard'
+
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({
+        type: 'window',
+        // Without this, a client controlled by a previous worker generation is
+        // invisible here and we open a duplicate tab next to the live one.
+        includeUncontrolled: true,
+      })
+
+      for (const client of windows) {
+        // Same origin only; `matchAll` is already scoped, but `focus()` on a
+        // cross-origin client throws rather than returning null.
+        if (new URL(client.url).origin !== self.location.origin) continue
+        await client.focus()
+        // Already somewhere in the app: leave the person where they were.
+        // Navigating would discard an open dialog or an unsaved draft.
+        return
+      }
+
+      await self.clients.openWindow(target)
+    })()
+  )
+})

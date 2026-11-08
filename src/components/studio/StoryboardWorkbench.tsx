@@ -76,14 +76,94 @@ export type ShotItem = {
   timeOfDay: string
   action: string
   dialogue: string
-  speakerId: string | null
-  speakerName: string | null
+  /** 這一鏡有誰在說話，依說話順序 (Z194)。 */
+  speakers: { id: string; name: string }[]
   prompt: string
   negativePrompt: string
   status: ShotStatusValue
   notes: string
   /** 人上傳的參考圖 (Z183)。 */
   references: ShotReference[]
+}
+
+/**
+ * 誰在說話——可以複選 (Z194).
+ *
+ * 不是 `<select multiple>`：那東西在手機上是一個要按住 Ctrl 才會多選的灰盒子，
+ * 而這裡最多就十個名字，排成一排可以點的名牌反而最清楚。
+ *
+ * **點的順序就是說話的順序**，所以選中的名牌上帶一個序號——對白是一句接一句
+ * 的，誰先開口有差，而一個看不出順序的多選框會讓人以為那是一袋沒有先後的人。
+ */
+function SpeakerPicker({
+  value,
+  cast,
+  disabled,
+  onChange,
+}: {
+  value: string[]
+  cast: { id: string; name: string }[]
+  disabled: boolean
+  onChange: (next: string[]) => void
+}) {
+  if (cast.length === 0) {
+    return (
+      <p className="rounded-lg bg-stage-850 px-3 py-2 text-xs text-ink-600 ring-1 ring-stage-700">
+        還沒有角色可以選。
+      </p>
+    )
+  }
+
+  const toggle = (id: string) => {
+    // 再點一次就移除。移除中間那一個時後面的序號會自己往前遞補，因為序號是
+    // 從陣列位置算的，不是存下來的。
+    onChange(value.includes(id) ? value.filter((item) => item !== id) : [...value, id])
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1.5 rounded-lg bg-stage-850 p-2 ring-1 ring-stage-700">
+      {cast.map((member) => {
+        const index = value.indexOf(member.id)
+        const picked = index >= 0
+        return (
+          <button
+            key={member.id}
+            type="button"
+            disabled={disabled}
+            // 按鈕的按下狀態要讀得出來，不是只有顏色不一樣。
+            aria-pressed={picked}
+            onClick={() => toggle(member.id)}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] ring-1 ring-inset transition-colors disabled:opacity-50',
+              picked
+                ? 'bg-accent-500/15 text-accent-200 ring-accent-500/50'
+                : 'bg-stage-900 text-ink-400 ring-stage-700 hover:text-ink-200'
+            )}
+          >
+            {picked && (
+              <span
+                aria-hidden
+                className="grid size-3.5 place-items-center rounded-full bg-accent-500/30 text-[9px] text-accent-100 tabular-nums"
+              >
+                {index + 1}
+              </span>
+            )}
+            {member.name}
+          </button>
+        )
+      })}
+      {value.length > 0 && (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange([])}
+          className="rounded-full px-2 py-1 text-[11px] text-ink-600 transition-colors hover:text-ink-300 disabled:opacity-50"
+        >
+          清空
+        </button>
+      )}
+    </div>
+  )
 }
 
 export type StoryboardEpisodeOption = {
@@ -546,7 +626,9 @@ function ShotCard({
 
         {shot.dialogue && (
           <span className="line-clamp-1 text-[10px] text-ink-500">
-            {shot.speakerName ? `${shot.speakerName}：` : ''}
+            {shot.speakers.length > 0
+              ? `${shot.speakers.map((person) => person.name).join('、')}：`
+              : ''}
             {shot.dialogue}
           </span>
         )}
@@ -623,7 +705,7 @@ function ShotDetail({
     timeOfDay: shot.timeOfDay,
     action: shot.action,
     dialogue: shot.dialogue,
-    speakerId: shot.speakerId ?? '',
+    speakerIds: shot.speakers.map((person) => person.id),
     prompt: shot.prompt,
     negativePrompt: shot.negativePrompt,
     status: shot.status,
@@ -658,7 +740,7 @@ function ShotDetail({
           timeOfDay: form.timeOfDay,
           action: form.action,
           dialogue: form.dialogue,
-          speakerId: form.speakerId || null,
+          speakerIds: form.speakerIds,
           prompt: form.prompt,
           negativePrompt: form.negativePrompt,
           status: form.status,
@@ -766,15 +848,19 @@ function ShotDetail({
             onChange={(event) => set('dialogue', event.target.value)}
           />
         </Field>
-        <Field label="誰說的" description={cast.length === 0 ? '這部作品還沒有角色。' : undefined}>
-          <Select
-            value={form.speakerId}
-            disabled={!canWrite || cast.length === 0}
-            onChange={(event) => set('speakerId', event.target.value)}
-            options={[
-              { value: '', label: '沒有指定' },
-              ...cast.map((member) => ({ value: member.id, label: member.name })),
-            ]}
+        <Field
+          label="誰說的"
+          description={
+            cast.length === 0
+              ? '這部作品還沒有角色。'
+              : '可以複選。點的順序就是說話的順序。'
+          }
+        >
+          <SpeakerPicker
+            value={form.speakerIds}
+            cast={cast}
+            disabled={!canWrite}
+            onChange={(next) => set('speakerIds', next)}
           />
         </Field>
       </div>

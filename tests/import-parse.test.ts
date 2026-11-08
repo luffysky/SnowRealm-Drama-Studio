@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { foldForSearch } from '@/lib/chinese'
 import { decodeBytes } from '@/lib/import/decode'
 import { filenameGuide, FILENAME_KEYWORDS, readFilename } from '@/lib/import/filename'
 import { detectMapping, foldHeader, mapRows, type MapContext } from '@/lib/import/map'
@@ -277,6 +278,56 @@ describe('每一格怎麼變成值', () => {
     expect(result.issues.some((issue) => issue.level === 'warning')).toBe(true)
   })
 
+  it('一鏡可以有好幾個說話人，照頓號拆開一個一個對', () => {
+    /*
+     * 一鏡多人對話是常態，而舊的 `shots.speaker_id` 只放得下一個——那會逼人把
+     * 「沈知味與錢管事在灶前拌嘴」拆成兩鏡，而拆了之後鏡號、秒數與整張分鏡表
+     * 都跟著失真。改成 `shot_speakers` 之後這一格可以寫好幾個名字（Z194）。
+     */
+    const context: MapContext = {
+      terms: [],
+      // 正式路徑存進去的鍵是折過繁簡的，這裡照做——不折的話這個測試會因為對不
+      // 到而「通過」，但通過的理由是錯的。
+      characters: new Map([
+        [foldForSearch('沈知味'), 'id-shen'],
+        [foldForSearch('錢管事'), 'id-qian'],
+      ]),
+    }
+    const run = (value: string) =>
+      mapRows(sheet(['誰說的'], [[value]]), ['speaker'], shots, context)
+
+    // 兩個人，而且順序就是寫的順序。
+    const two = run('沈知味、錢管事')
+    expect(two.rows[0]?.speaker).toEqual(['id-shen', 'id-qian'])
+    expect(two.issues).toEqual([])
+
+    // 反過來寫，出來的順序也要反過來——那是說話順序，不是一袋沒有先後的人。
+    expect(run('錢管事、沈知味').rows[0]?.speaker).toEqual(['id-qian', 'id-shen'])
+
+    // 逗號、分號、斜線也算分隔。
+    expect(run('沈知味, 錢管事').rows[0]?.speaker).toEqual(['id-shen', 'id-qian'])
+    expect(run('沈知味／錢管事').rows[0]?.speaker).toEqual(['id-shen', 'id-qian'])
+
+    // 同一個人寫兩次只算一次：`(shot_id, character_id)` 是主鍵，重複會整批炸掉。
+    expect(run('沈知味、沈知味').rows[0]?.speaker).toEqual(['id-shen'])
+
+    // 一個對得上一個對不上：對得上的照常進去，對不上的只回報。
+    const half = run('沈知味、路人甲')
+    expect(half.rows[0]?.speaker).toEqual(['id-shen'])
+    expect(half.issues[0]?.message).toContain('路人甲')
+    expect(half.issues[0]?.level).toBe('warning')
+
+    // 全部對不上就留空，訊息講的是整格。
+    const none = run('路人甲、路人乙')
+    expect(none.rows[0]?.speaker).toBeUndefined()
+    expect(none.issues[0]?.message).toContain('找不到叫')
+
+    // 一個人也還是對得上。
+    const one = run('沈知味')
+    expect(one.rows[0]?.speaker).toEqual(['id-shen'])
+    expect(one.issues).toEqual([])
+  })
+
   it('不是數字就整列不匯入', () => {
     const result = mapRows(sheet(['秒數'], [['大概五秒吧']]), ['durationSec'], shots, EMPTY)
     expect(result.rows).toHaveLength(0)
@@ -330,7 +381,8 @@ describe('每一格怎麼變成值', () => {
       shots,
       context
     )
-    expect(result.rows[0]?.speaker).toBe('char-1')
+    // 一鏡可以有好幾個說話人，所以對出來的是一串 id（Z194）。
+    expect(result.rows[0]?.speaker).toEqual(['char-1'])
     expect(result.rows[2]?.speaker).toBeUndefined()
     expect(result.issues.some((issue) => issue.message.includes('路人甲'))).toBe(true)
   })
@@ -338,7 +390,7 @@ describe('每一格怎麼變成值', () => {
   it('說話人用簡體寫也對得到繁體的角色', () => {
     const context: MapContext = { terms: [], characters: new Map([['许山河', 'char-2']]) }
     const result = mapRows(sheet(['誰說的'], [['許山河']]), ['speaker'], shots, context)
-    expect(result.rows[0]?.speaker).toBe('char-2')
+    expect(result.rows[0]?.speaker).toEqual(['char-2'])
   })
 
   it('太長的字截掉並回報，不是整列丟掉', () => {

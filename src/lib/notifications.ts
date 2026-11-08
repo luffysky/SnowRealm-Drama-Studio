@@ -20,6 +20,14 @@ export type NotifyInput = {
   /** Replaces an earlier notification with the same tag instead of stacking. */
   tag?: string
   requireInteraction?: boolean
+  /**
+   * Where to go if no window is open when it is clicked (Z193).
+   *
+   * Only used in that case: the worker focuses an already-open tab instead,
+   * because the chat and the call both live in a widget that tab has already
+   * mounted, and navigating it would discard whatever was open there.
+   */
+  url?: string
 }
 
 export function canNotify(): boolean {
@@ -52,6 +60,8 @@ export async function notify(input: NotifyInput): Promise<void> {
     badge: '/icons/icon-192.png',
     ...(input.tag ? { tag: input.tag } : {}),
     ...(input.requireInteraction ? { requireInteraction: true } : {}),
+    // The worker reads this in `notificationclick`; see public/sw.js.
+    data: { url: input.url ?? '/dashboard' },
   }
 
   try {

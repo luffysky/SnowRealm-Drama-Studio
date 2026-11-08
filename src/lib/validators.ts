@@ -310,7 +310,13 @@ export const shotSchema = z.object({
   timeOfDay: z.string().trim().max(40).optional().default(''),
   action: z.string().trim().max(3000).optional().default(''),
   dialogue: z.string().trim().max(3000).optional().default(''),
-  speakerId: uuid.nullable().optional(),
+  /**
+   * 這一鏡有誰在說話 (Z194).
+   *
+   * 上限十個不是資料庫的限制，是「一個鏡頭十個人同時說話」已經不是一個鏡頭
+   * 了——真要那樣就該拆鏡。擋在這裡是為了讓一個壞掉的匯入檔不會塞進一千列。
+   */
+  speakerIds: z.array(uuid).max(10).optional(),
   prompt: z.string().trim().max(4000).optional().default(''),
   negativePrompt: z.string().trim().max(2000).optional().default(''),
   refAssetId: uuid.nullable().optional(),
@@ -347,7 +353,7 @@ export const shotPatchSchema = z
     timeOfDay: z.string().trim().max(40).optional(),
     action: z.string().trim().max(3000).optional(),
     dialogue: z.string().trim().max(3000).optional(),
-    speakerId: uuid.nullable().optional(),
+    speakerIds: z.array(uuid).max(10).optional(),
     prompt: z.string().trim().max(4000).optional(),
     negativePrompt: z.string().trim().max(2000).optional(),
     status: z.enum(SHOT_STATUSES).optional(),

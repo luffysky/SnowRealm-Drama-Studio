@@ -11,7 +11,7 @@ import {
   tasks,
   worldEntries,
 } from '@/db/schema'
-import { scenes } from '@/db/schema'
+import { scenes, shotSpeakers } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import { foldForSearch } from '@/lib/chinese'
@@ -152,17 +152,34 @@ type Counts = { created: number; updated: number; skipped: number }
  */
 const INSERT_CHUNK = 500
 
+async function insertInChunks<T, R = unknown>(
+  run: (slice: T[]) => Promise<R[]>,
+  values: T[]
+): Promise<R[]>
+async function insertInChunks<T>(run: (slice: T[]) => Promise<unknown>, values: T[]): Promise<void>
+/**
+ * 分批插入，並且**把每一批的 returning 串回來**（Z194）。
+ *
+ * 需要回傳值是因為說話人住在另一張表：要先拿到新鏡頭的 id 才寫得進去。沒有
+ * `returning` 的呼叫端照舊拿 `void`，所以舊的用法不用改。
+ */
 async function insertInChunks<T>(
   run: (slice: T[]) => Promise<unknown>,
   values: T[]
-): Promise<void> {
+): Promise<unknown> {
+  const out: unknown[] = []
   for (let i = 0; i < values.length; i += INSERT_CHUNK) {
-    await run(values.slice(i, i + INSERT_CHUNK))
+    const result = await run(values.slice(i, i + INSERT_CHUNK))
+    if (Array.isArray(result)) out.push(...result)
   }
+  return out
 }
 
 const text = (row: Record<string, unknown>, key: string, fallback = '') =>
   typeof row[key] === 'string' ? (row[key] as string) : fallback
+/** `reference` 這一種對出來的是一串 id（Z194）。 */
+const ids = (row: Record<string, unknown>, key: string): string[] =>
+  Array.isArray(row[key]) ? (row[key] as string[]) : []
 const num = (row: Record<string, unknown>, key: string, fallback: number) =>
   typeof row[key] === 'number' ? (row[key] as number) : fallback
 const date = (row: Record<string, unknown>, key: string): Date | null => {
@@ -298,7 +315,6 @@ async function applyShots(
       timeOfDay: text(row, 'timeOfDay'),
       action: text(row, 'action'),
       dialogue: text(row, 'dialogue'),
-      speakerId: text(row, 'speaker') || null,
       prompt: text(row, 'prompt'),
       negativePrompt: text(row, 'negativePrompt'),
       notes: text(row, 'notes'),
@@ -307,7 +323,31 @@ async function applyShots(
   })
 
   if (values.length === 0) return { created: 0, updated: 0, skipped: mapped.skipped.length }
-  await insertInChunks((slice) => db.insert(shots).values(slice), values)
+
+  /*
+   * 說話人住在 `shot_speakers`，所以要拿到新鏡頭的 id 才寫得進去 (Z194).
+   *
+   * `returning` 的順序跟送進去的 `values` 一致（Postgres 對多列 INSERT 保證
+   * 這一點），所以可以照位置對回原本那一列。
+   */
+  const created = await insertInChunks<(typeof values)[number], { id: string }>(
+    (slice) => db.insert(shots).values(slice).returning({ id: shots.id }),
+    values
+  )
+
+  const links = created.flatMap((shot, index) => {
+    const row = mapped.rows[index]
+    if (!row) return []
+    return ids(row, 'speaker').map((characterId, order) => ({
+      shotId: shot.id,
+      characterId,
+      sortOrder: order,
+    }))
+  })
+  if (links.length > 0) {
+    await insertInChunks((slice) => db.insert(shotSpeakers).values(slice), links)
+  }
+
   notes.push(`接在既有鏡頭後面，從第 ${Number(last?.max ?? 0) + 1} 鏡開始。`)
   return { created: values.length, updated: 0, skipped: mapped.skipped.length }
 }

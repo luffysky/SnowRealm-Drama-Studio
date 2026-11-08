@@ -108,10 +108,22 @@ function scan(dir: string, out: Found[] = []): Found[] {
     const text = readFileSync(full, 'utf8')
     text.split('\n').forEach((line, index) => {
       // href="/x" | href={`/x/${y}`} | href={'/x'} | router.push(`/x`)
+      /*
+       * 第四條是**物件屬性**那個形狀：`href: '/x'`、`href: to('/x')`。
+       *
+       * 儀表板的「內容存量」把一排 `{ label, value, href }` 算成陣列再
+       * `href={row.href}` 展開，於是路徑字面值離 `href=` 有好幾行遠——前三條
+       * 全部看不到它，而那條連結指向 `/projects/<id>/script`（磁碟上是
+       * `scripts`，複數）。這支工具當時是綠的。
+       *
+       * 抓的是「這一行有 `href:`」然後把這一行所有看起來像路由的字面值撈出
+       * 來——包不包在函式呼叫裡都一樣撈得到。
+       */
       const patterns = [
         /href=["'](\/[^"']*)["']/g,
         /href=\{[`'"](\/[^`'"]*)[`'"]\}/g,
         /(?:router\.(?:push|replace)|redirect)\(\s*[`'"](\/[^`'"]*)[`'"]/g,
+        ...(/\bhref:\s/.test(line) ? [/[`'"](\/[^`'"\s]*)[`'"]/g] : []),
       ]
 
       for (const pattern of patterns) {
@@ -161,6 +173,23 @@ function matches(link: string, route: string): boolean {
  * 著路由一起維護。
  */
 function selfTest(routes: string[]): boolean {
+  /*
+   * 掃描器自己也要測一次 (Z194).
+   *
+   * 路由清單對不對是一回事，**掃描器看不看得見某一種寫法**是另一回事——而後
+   * 者才是 `/script` 那個 404 溜過去的原因。這一段餵它一行物件屬性形狀的
+   * 連結，抓不到就直接說工具壞了。
+   */
+  const sample = "      href: to('/zzz-not-a-route'),"
+  const seen: string[] = []
+  if (/\bhref:\s/.test(sample)) {
+    for (const match of sample.matchAll(/[`'"](\/[^`'"\s]*)[`'"]/g)) seen.push(match[1]!)
+  }
+  if (!seen.includes('/zzz-not-a-route')) {
+    console.log('  ✗ 這支工具壞了：`href: to(\'/x\')` 這種寫法掃不到')
+    return false
+  }
+
   const shouldFail = ['/listen/*', '/watch/*/*']
   const shouldPass = ['/listen', '/projects/*/episodes', '/projects/*/episodes/*']
 

@@ -1,6 +1,14 @@
-import { and, asc, count, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { assetLinks, assets, characters, episodes, projects, shots } from '@/db/schema'
+import {
+  assetLinks,
+  assets,
+  characters,
+  episodes,
+  projects,
+  shots,
+  shotSpeakers,
+} from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import { SHOT_REFERENCE_SLOT, SHOT_STATUSES } from '@/lib/constants'
@@ -98,7 +106,7 @@ export async function storyboardFor(
 
   if (!episode) return null
 
-  const [rows, cast, scriptCount, references] = await Promise.all([
+  const [rows, speakerRows, cast, scriptCount, references] = await Promise.all([
     db
       .select({
         id: shots.id,
@@ -111,8 +119,6 @@ export async function storyboardFor(
         timeOfDay: shots.timeOfDay,
         action: shots.action,
         dialogue: shots.dialogue,
-        speakerId: shots.speakerId,
-        speakerName: characters.name,
         prompt: shots.prompt,
         negativePrompt: shots.negativePrompt,
         status: shots.status,
@@ -123,9 +129,29 @@ export async function storyboardFor(
         updatedAt: shots.updatedAt,
       })
       .from(shots)
-      .leftJoin(characters, eq(characters.id, shots.speakerId))
       .where(eq(shots.episodeId, episodeId))
       .orderBy(asc(shots.order)),
+
+    /*
+     * 說話人另外撈一次，不是 join 在上面 (Z194).
+     *
+     * 一鏡多人之後 join 會讓鏡頭列重複——三個說話人就是三列同一個鏡頭，而上面
+     * 那段程式是照「一列一鏡」寫的。分開撈再併回去，順便省掉一次去重。
+     *
+     * 軟刪掉的角色不算：它不在下面那份 `cast` 裡，而畫面上出現一個挑不回來的
+     * 名字比少一個名字更難解釋。
+     */
+    db
+      .select({
+        shotId: shotSpeakers.shotId,
+        id: characters.id,
+        name: characters.name,
+      })
+      .from(shotSpeakers)
+      .innerJoin(shots, eq(shots.id, shotSpeakers.shotId))
+      .innerJoin(characters, eq(characters.id, shotSpeakers.characterId))
+      .where(and(eq(shots.episodeId, episodeId), isNull(characters.deletedAt)))
+      .orderBy(asc(shotSpeakers.sortOrder), asc(characters.name)),
 
     db
       .select({ id: characters.id, name: characters.name })
@@ -177,6 +203,13 @@ export async function storyboardFor(
 
   const scriptRows = (scriptCount as unknown as { rows?: { n: number }[] }).rows ?? []
 
+  const speakersByShot = new Map<string, { id: string; name: string }[]>()
+  for (const row of speakerRows) {
+    const list = speakersByShot.get(row.shotId) ?? []
+    list.push({ id: row.id, name: row.name })
+    speakersByShot.set(row.shotId, list)
+  }
+
   const refsByShot = new Map<string, ShotReference[]>()
   for (const row of references) {
     const list = refsByShot.get(row.shotId) ?? []
@@ -188,6 +221,7 @@ export async function storyboardFor(
     episode,
     shots: rows.map((row) => ({
       ...row,
+      speakers: speakersByShot.get(row.id) ?? [],
       references: refsByShot.get(row.id) ?? [],
     })) as ShotRow[],
     duration: durationCheck(
@@ -271,16 +305,26 @@ export async function createShot(input: {
 
   const order = Number(last?.max ?? 0) + 1
 
-  const [row] = await db
-    .insert(shots)
-    .values({
-      episodeId: input.episodeId,
-      order,
-      ...cleanPatch(input.patch),
-    })
-    .returning({ id: shots.id, order: shots.order })
+  const speakerIds = await validSpeakers(input.projectId, input.patch.speakerIds)
 
-  if (!row) throw new Error('Failed to create shot')
+  const row = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(shots)
+      .values({
+        episodeId: input.episodeId,
+        order,
+        ...cleanPatch(input.patch),
+      })
+      .returning({ id: shots.id, order: shots.order })
+
+    if (!created) throw new Error('Failed to create shot')
+    if (speakerIds && speakerIds.length > 0) {
+      await tx
+        .insert(shotSpeakers)
+        .values(speakerIds.map((id, index) => ({ shotId: created.id, characterId: id, sortOrder: index })))
+    }
+    return created
+  })
 
   await logActivity({
     user: input.user,
@@ -303,18 +347,49 @@ export async function updateShot(input: {
   const existing = await shotInProject(input.projectId, input.shotId)
 
   const patch = cleanPatch(input.patch)
-  if (Object.keys(patch).length === 0) return { version: existing.version }
+  const speakerIds = await validSpeakers(input.projectId, input.patch.speakerIds)
+
+  /*
+   * 只改說話人的時候還是要算一次改動 (Z194).
+   *
+   * `cleanPatch` 已經把 `speakerIds` 拿掉了（它不是 `shots` 的欄位），所以光
+   * 看 `patch` 會以為什麼都沒改，然後連 `version` 都不會動——而樂觀鎖靠的就是
+   * 那個版號，另一個人同時在改這一鏡時就不會被擋下來。
+   */
+  if (Object.keys(patch).length === 0 && speakerIds === undefined) {
+    return { version: existing.version }
+  }
 
   // 清乾淨之後才驗：`cleanPatch` 拿掉的欄位不用查詞彙表。
   await assertShotVocabulary(patch)
 
-  const [updated] = await db
-    .update(shots)
-    .set({ ...patch, version: existing.version + 1, updatedAt: new Date() })
-    .where(eq(shots.id, input.shotId))
-    .returning({ version: shots.version })
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(shots)
+      .set({ ...patch, version: existing.version + 1, updatedAt: new Date() })
+      .where(eq(shots.id, input.shotId))
+      .returning({ version: shots.version })
 
-  if (!updated) throw new Error('Failed to update shot')
+    if (!row) throw new Error('Failed to update shot')
+
+    if (speakerIds !== undefined) {
+      // 整組換掉。先刪再插，因為「刪掉其中一個」與「調順序」在一次操作裡會
+      // 撞到 `(shot_id, character_id)` 的主鍵。
+      await tx.delete(shotSpeakers).where(eq(shotSpeakers.shotId, input.shotId))
+      if (speakerIds.length > 0) {
+        await tx
+          .insert(shotSpeakers)
+          .values(
+            speakerIds.map((id, index) => ({
+              shotId: input.shotId,
+              characterId: id,
+              sortOrder: index,
+            }))
+          )
+      }
+    }
+    return row
+  })
 
   await logActivity({
     user: input.user,
@@ -414,9 +489,51 @@ function cleanPatch(patch: ShotPatch): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue
+    // `speakerIds` 住在另一張表 (Z194)。漏掉這一行的話 drizzle 會拿它去 set
+    // 一個不存在的欄位，而那是一個執行期的 SQL 錯誤，不是型別錯誤。
+    if (key === 'speakerIds') continue
     out[key] = value
   }
   return out
+}
+
+/**
+ * 這幾個角色真的是這部作品的嗎 (Z194).
+ *
+ * `characterId` 是從請求本體來的，而 `shot_speakers` 只有外鍵約束——外鍵保證
+ * 那個 id 存在，不保證它屬於這部作品。少了這一段，任何進得了某部作品的人都
+ * 可以把別部作品的角色掛到自己的鏡頭上，而畫面上會顯示那個角色的名字。
+ *
+ * 回 `undefined` 代表「這次沒有要改說話人」，跟空陣列（清空）不一樣。
+ */
+async function validSpeakers(
+  projectId: string,
+  ids: string[] | undefined
+): Promise<string[] | undefined> {
+  if (ids === undefined) return undefined
+
+  // 同一個人填兩次不是錯誤，但主鍵擋得住——先去重，順序以第一次出現的為準。
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) return []
+
+  const found = await db
+    .select({ id: characters.id })
+    .from(characters)
+    .where(
+      and(
+        inArray(characters.id, unique),
+        eq(characters.projectId, projectId),
+        isNull(characters.deletedAt)
+      )
+    )
+
+  const allowed = new Set(found.map((row) => row.id))
+  const missing = unique.filter((id) => !allowed.has(id))
+  if (missing.length > 0) {
+    throw ApiError.badRequest(`有 ${missing.length} 個說話人不是這部作品的角色`)
+  }
+
+  return unique
 }
 
 async function assertEpisodeInProject(projectId: string, episodeId: string): Promise<void> {

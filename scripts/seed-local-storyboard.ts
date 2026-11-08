@@ -42,6 +42,16 @@ async function main() {
   const [ep] = await db.insert(schema.episodes)
     .values({ projectId: project!.id, arcId: arc!.id, number: 1, title: '第一集' })
     .returning({ id: schema.episodes.id })
+  /*
+   * 兩個角色，因為「一鏡多人說話」要**兩個**才證明得了（Z194）。
+   *
+   * 只有一個角色的話挑選器會長出來、點得下去、probe 全綠——而綠的理由是沒有
+   * 第二個人可以點。
+   */
+  await db.insert(schema.characters).values([
+    { projectId: project!.id, name: '沈知味', tier: 'LEAD' },
+    { projectId: project!.id, name: '錢管事', tier: 'SUPPORTING' },
+  ])
   await db.insert(schema.shots).values([
     { episodeId: ep!.id, order: 1, sceneCode: 'S01', action: '沈知味推開門' },
     { episodeId: ep!.id, order: 2, sceneCode: 'S01', action: '灶火燒起來' },

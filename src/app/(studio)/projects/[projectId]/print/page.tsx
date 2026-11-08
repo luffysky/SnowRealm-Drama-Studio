@@ -54,7 +54,7 @@ export default async function PrintPage({ params, searchParams }: Params) {
     preference === 'original' ? value : convertScript(value, preference)
 
   return (
-    <div className="print-sheet mx-auto max-w-5xl bg-white p-8 text-stage-990">
+    <div className="print-sheet mx-auto max-w-5xl bg-white p-4 text-stage-990 sm:p-8">
       <PrintNow />
 
       <header className="mb-4 border-b border-stage-300 pb-3">
@@ -74,7 +74,14 @@ export default async function PrintPage({ params, searchParams }: Params) {
       {table.rows.length === 0 ? (
         <p className="text-sm">沒有資料。</p>
       ) : (
-        <table className="w-full border-collapse text-[11px]">
+        /*
+          欄數是動態的（分鏡那一種就十三欄），而手機上扣掉內距只剩三百出頭。
+          `w-full` 不會溢出容器，它會把每一欄擠到看不懂——所以給它一條橫向
+          捲軸。列印時關掉：紙張不會捲動，而捲動容器在列印時會把超出的部分
+          直接切掉。
+        */
+        <div className="overflow-x-auto print:overflow-visible">
+        <table className="w-full min-w-[36rem] border-collapse text-[11px] print:min-w-0">
           <thead>
             <tr>
               {table.headers.map((header) => (
@@ -102,6 +109,7 @@ export default async function PrintPage({ params, searchParams }: Params) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   )
