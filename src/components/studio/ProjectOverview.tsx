@@ -17,6 +17,7 @@ import {
   Users,
   Video,
 } from 'lucide-react'
+import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { EmptyState } from '@/components/ui/StateViews'
 import { EpisodeStatusChip } from '@/components/ui/StatusChip'
@@ -317,6 +318,25 @@ function Panel({
 }
 
 /** A header action that is not built yet. */
+/**
+ * 面板右上角那顆真的能按的連結 (Z196).
+ *
+ * 跟 `GatedAction` 長得一樣，差別在它去得了地方。分開兩個元件是刻意的：停用
+ * 的那個**必須**帶一個理由（spec v2 §4），而能按的這個不該有地方放理由，於是
+ * 「順手把 milestone 留著」這件事在型別上就做不到。
+ */
+function PanelLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex shrink-0 items-center gap-1 text-[11px] text-ink-500 transition-colors hover:text-ink-200"
+    >
+      {children}
+      <span aria-hidden>→</span>
+    </Link>
+  )
+}
+
 function GatedAction({ label, milestone }: { label: string; milestone: string }) {
   return (
     <span
@@ -394,7 +414,9 @@ function EpisodePanel({ project }: { project: ProjectOverviewData }) {
            * spec v3 §11.3: the overview shows at most eight cards and must
            * offer a way to the full list. Never let these look like all of it.
            */
-          <GatedAction label={`查看全部 ${project.episodeCount} 集`} milestone="M1" />
+          <PanelLink href={`/projects/${project.id}/episodes`}>
+            查看全部 {project.episodeCount} 集
+          </PanelLink>
         ) : undefined
       }
     >
@@ -450,7 +472,13 @@ function EpisodePanel({ project }: { project: ProjectOverviewData }) {
 
           {remaining > 0 && (
             <p className="mt-3 text-center text-[11px] text-ink-600">
-              另有 {remaining} 集未顯示，完整清單待「集數管理」頁完成（M1）
+              另有 {remaining} 集未顯示，完整清單在
+              <Link
+                href={`/projects/${project.id}/episodes`}
+                className="mx-1 text-ink-400 underline-offset-2 transition-colors hover:text-ink-100 hover:underline"
+              >
+                集數管理
+              </Link>
             </p>
           )}
         </>
@@ -594,12 +622,12 @@ function TaskPanel({ project }: { project: ProjectOverviewData }) {
     <Panel
       title={`待辦任務（${project.tasks.length}）`}
       icon={<ListChecks className="size-3.5" />}
-      action={<GatedAction label="新增任務" milestone="M4" />}
+      action={<PanelLink href="/tasks">去任務看板</PanelLink>}
     >
       {project.tasks.length === 0 ? (
         <EmptyState
           title="目前沒有待辦任務"
-          description="任務看板於 M4 階段交付，屆時可在此指派與追蹤。"
+          description="到跨作品任務看板新增，這裡會列出這部作品還沒做完的。"
           icon={<ListChecks aria-hidden className="size-5 text-ink-500" />}
           className="py-8"
         />
@@ -607,9 +635,15 @@ function TaskPanel({ project }: { project: ProjectOverviewData }) {
         <ul className="flex flex-col gap-1">
           {project.tasks.map((task) => (
             <li key={task.id} className="flex items-center gap-2 rounded-lg px-1 py-1.5">
+              {/*
+                一個圓點，不是方框。
+                原本畫的是核取方塊的形狀而底下沒有 input 也沒有 handler——使用者
+                看到一排勾不起來的格子。這一欄是「還沒做完」的清單，圓點說得出
+                同一件事而且不會假裝自己按得動。
+              */}
               <span
                 aria-hidden
-                className="size-3.5 shrink-0 rounded border border-stage-600 bg-stage-850"
+                className="mt-[3px] size-1.5 shrink-0 rounded-full bg-accent-500/70"
               />
               <span className="min-w-0 flex-1 truncate text-xs text-ink-200">{task.title}</span>
               <DueChip due={task.dueDate} days={task.dueInDays} />

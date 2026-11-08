@@ -101,7 +101,6 @@ export function FloatingChat({
     handlers: ballHandlers,
   } = useDraggableBall(56, viewport.obscured)
   const [state, setState] = useState<'hidden' | 'ball' | 'open'>('ball')
-  const restored = useRef(false)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [ready, setReady] = useState(false)
@@ -134,9 +133,19 @@ export function FloatingChat({
    * initialiser without a hydration mismatch.
    */
   useEffect(() => {
-    if (restored.current) return
-    restored.current = true
-
+    /*
+     * **沒有 `restored.current` 這道守衛** (Z196).
+     *
+     * 原本有，而它在 StrictMode 下會把自己鎖死：第一次掛載把旗標設成 true 並
+     * 排一個 timer，cleanup 把 timer 取消，第二次掛載因為旗標已經是 true 直接
+     * return——於是 `setReady(true)` 永遠不會跑，而下面那行 `if (!ready) return
+     * null` 讓整個懸浮對話在開發環境裡**從來不出現**。
+     *
+     * 正式站沒有 StrictMode 的雙重掛載所以看不出來，而「只有 dev 壞」的意思
+     * 是：在本機沒有人驗得了這個元件的任何一行。
+     *
+     * 拿掉旗標之後 dev 會多讀一次 localStorage。那沒有任何代價。
+     */
     const timer = window.setTimeout(() => {
       try {
         const stored = window.localStorage.getItem(STORAGE_KEY)
@@ -316,7 +325,9 @@ export function FloatingChat({
             : clearance('1rem', viewport.obscured)
         }
         className={cn(
-          'fixed right-4 bottom-4 z-40 flex touch-none items-center gap-1.5',
+          // `group` 是給關閉鍵的 `group-hover:` 用的——少了它，那一條規則永遠
+          // 不會命中。見下面那顆按鈕的註解。
+          'group fixed right-4 bottom-4 z-40 flex touch-none items-center gap-1.5',
           ballDragging ? 'cursor-grabbing' : 'cursor-grab',
           // No transition while dragging, or it lags behind the finger.
           !ballDragging && 'transition-[left,top,opacity,transform] duration-200',
@@ -338,7 +349,19 @@ export function FloatingChat({
           onClick={() => persist('hidden')}
           aria-label="關閉懸浮對話"
           title="關閉（之後可從右下角小圖示叫回來）"
-          className="grid size-7 place-items-center rounded-full bg-stage-850 text-ink-600 opacity-0 ring-1 ring-stage-700 transition-opacity hover:text-ink-200 focus-visible:opacity-100 group-hover:opacity-100 sm:opacity-60"
+          /*
+           * 看得見，而且在每一個寬度上都看得見 (Z196).
+           *
+           * 原本是 `opacity-0 … group-hover:opacity-100 sm:opacity-60`，而這個
+           * 檔案裡**沒有任何 `.group` 祖先**（掛載鏈上那個 `role="group"` 是
+           * ARIA，不是 Tailwind）。所以 `sm` 以下它永遠是透明的——但照樣佔
+           * 28px 而且按得下去。誤觸就把懸浮對話永久關掉，而 `title` 裡承諾的
+           * 救援路徑「從右下角小圖示叫回來」那顆圖示也是隱形的同一顆。
+           *
+           * 現在底線是 `opacity-60`（看得見、不搶戲），滑過去才全亮。`.group`
+           * 也補到上面那層了，所以桌機的 hover 真的會作用。
+           */
+          className="grid size-7 place-items-center rounded-full bg-stage-850 text-ink-600 opacity-60 ring-1 ring-stage-700 transition-opacity hover:text-ink-200 focus-visible:opacity-100 group-hover:opacity-100"
         >
           <X aria-hidden className="size-3.5" />
         </button>

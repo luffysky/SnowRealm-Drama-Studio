@@ -61,6 +61,14 @@ const EMPTY: MusicFormValues = {
   description: '',
 }
 
+/**
+ * 一首歌最多掛幾個標籤。
+ *
+ * 原本寫死在三個地方（`commit`、建議膠囊的 `onClick` 與它的 `disabled`），改
+ * 一個漏兩個的那種。
+ */
+const MAX_TAGS = 12
+
 export function MusicForm({
   projectId,
   mode,
@@ -445,13 +453,39 @@ function TagField({
   onChange: (values: string[]) => void
 }) {
   const [draft, setDraft] = useState('')
+  /** 加不進去的理由。`null` 是沒事，不是「還沒檢查」。 */
+  const [problem, setProblem] = useState<string | null>(null)
   const unused = suggestions.filter((tag) => !values.includes(tag))
 
+  /**
+   * 加一個標籤，而**加不進去的時候不要把人家打的字吃掉** (Z196).
+   *
+   * 原本是先 `setDraft('')` 再判斷，所以打一個已經有的標籤、或第 13 個，按下
+   * Enter（或只是移開焦點，因為 `onBlur` 也走這裡）就是：輸入框清空、什麼都
+   * 沒加、也沒有任何訊息。而欄位的提示寫的正好相反——「沒有的直接打，按
+   * Enter 建立」。
+   *
+   * 現在只有真的加進去了才清空。12 個的上限畫面上本來也從沒說過。
+   */
   function commit() {
     const tag = draft.trim()
-    setDraft('')
-    if (!tag || values.includes(tag) || values.length >= 12) return
+    if (!tag) {
+      // 空白不是錯誤，只是沒事做——順手把殘留的空白清掉。
+      setDraft('')
+      setProblem(null)
+      return
+    }
+    if (values.includes(tag)) {
+      setProblem(`「${tag}」已經在上面了`)
+      return
+    }
+    if (values.length >= MAX_TAGS) {
+      setProblem(`最多 ${MAX_TAGS} 個，要再加就先移掉一個`)
+      return
+    }
     onChange([...values, tag])
+    setDraft('')
+    setProblem(null)
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -487,14 +521,29 @@ function TagField({
 
         <input
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            // 一開始改就把上一次的理由收掉——留著它會在描述已經不成立之後
+            // 還指著輸入框說它有問題。
+            if (problem) setProblem(null)
+          }}
           onKeyDown={onKeyDown}
           onBlur={commit}
           maxLength={24}
           placeholder={values.length === 0 ? '輸入後按 Enter' : ''}
           className="min-w-24 flex-1 bg-transparent px-1 text-xs text-ink-50 placeholder:text-ink-600 focus:outline-none"
         />
+
+        <span className="shrink-0 px-1 text-[10px] text-ink-600 tabular-nums">
+          {values.length}/{MAX_TAGS}
+        </span>
       </div>
+
+      {problem && (
+        <p role="status" className="mt-1 text-[11px] text-amber-300">
+          {problem}
+        </p>
+      )}
 
       {/*
         按的那一排 (Z119).
@@ -510,10 +559,12 @@ function TagField({
               key={tag}
               type="button"
               onClick={() => {
-                if (values.length >= 12) return
+                if (values.length >= MAX_TAGS) return
                 onChange([...values, tag])
               }}
-              disabled={values.length >= 12}
+              disabled={values.length >= MAX_TAGS}
+              // 灰掉的按鈕要說得出為什麼灰（spec v2 §4）。
+              title={values.length >= MAX_TAGS ? `最多 ${MAX_TAGS} 個標籤` : undefined}
               className="tap rounded-full bg-stage-850 px-2 py-0.5 text-[10px] text-ink-400 ring-1 ring-stage-700 transition-colors hover:bg-stage-800 hover:text-ink-100 disabled:opacity-40"
             >
               ＋{tag}

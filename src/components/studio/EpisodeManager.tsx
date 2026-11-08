@@ -1006,16 +1006,6 @@ function DetailRail({
         <span className="text-[11px] text-ink-200 tabular-nums">{toPercent(episode.progress)}%</span>
       </div>
 
-      {/* The per-episode workspace is M1; link only once it exists. */}
-      <span
-        aria-disabled="true"
-        title="集數詳情頁尚未實作，預計於 M1 階段交付"
-        className="mt-1 inline-flex cursor-default items-center justify-center gap-2 rounded-xl bg-stage-800 px-4 py-2.5 text-xs font-medium text-ink-600 ring-1 ring-stage-700 select-none"
-      >
-        進入集數詳情
-        <span className="text-[10px] text-ink-700">M1</span>
-      </span>
-
       <Link
         href={`/projects/${projectId}`}
         className="text-center text-[11px] text-ink-600 transition-colors hover:text-ink-300"

@@ -582,7 +582,7 @@ export function CallPanel({
 
               {phase !== 'active' && (
                 <span className="absolute inset-x-0 top-2 text-center text-[10px] text-white/70">
-                  {phase === 'ringing' ? 'ç­å°æ¹æ¥èµ·â¯' : 'é£ç·ä¸­â¯'}
+                  {phase === 'ringing' ? '等對方接起⋯' : '連線中⋯'}
                 </span>
               )}
             </div>
@@ -598,7 +598,7 @@ export function CallPanel({
               <div className="flex items-center gap-2">
                 <Volume2 aria-hidden className="size-3.5 shrink-0 text-ink-500" />
                 <label className="sr-only" htmlFor="call-volume">
-                  éè©±é³é
+                  通話音量
                 </label>
                 <input
                   id="call-volume"

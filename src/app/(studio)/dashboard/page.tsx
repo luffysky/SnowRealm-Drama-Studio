@@ -774,19 +774,18 @@ function TaskPanel({ data }: { data: DashboardData }) {
       title={`待處理任務（跨作品${data.tasks.length > 0 ? ` ${data.tasks.length}` : ''}）`}
       icon={<ListChecks className="size-3.5" />}
       action={
-        <span
-          aria-disabled="true"
-          title="跨作品任務頁尚未實作，預計於 M4 階段交付"
-          className="shrink-0 cursor-default text-[11px] text-ink-600 select-none"
+        <Link
+          href="/tasks"
+          className="shrink-0 text-[11px] text-ink-500 transition-colors hover:text-ink-200"
         >
-          查看全部 M4
-        </span>
+          查看全部 →
+        </Link>
       }
     >
       {data.tasks.length === 0 ? (
         <EmptyState
           title="目前沒有待處理任務"
-          description="任務看板於 M4 階段交付，屆時可在此跨作品指派與追蹤。"
+          description="到任務看板新增，這裡會列出所有作品還沒做完的。"
           icon={<ListChecks aria-hidden className="size-5 text-ink-500" />}
           className="py-8"
         />
@@ -794,10 +793,8 @@ function TaskPanel({ data }: { data: DashboardData }) {
         <ul className="flex flex-col gap-1.5">
           {data.tasks.map((task) => (
             <li key={task.id} className="flex items-center gap-2">
-              <span
-                aria-hidden
-                className="size-3.5 shrink-0 rounded border border-stage-600 bg-stage-850"
-              />
+              {/* 圓點，不是方框——方框底下沒有 input 也沒有 handler。 */}
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-accent-500/70" />
               {task.projectTitle && (
                 <span className="shrink-0 rounded bg-stage-800 px-1.5 py-0.5 text-[10px] text-ink-400 ring-1 ring-inset ring-stage-700">
                   {task.projectTitle}
