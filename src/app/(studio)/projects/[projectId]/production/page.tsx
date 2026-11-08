@@ -8,11 +8,13 @@ import { EmptyState } from '@/components/ui/StateViews'
 import { getSessionUser } from '@/lib/auth/session'
 import { EPISODE_STATUSES, type EpisodeStatusValue } from '@/lib/constants'
 import {
+  episodeSegments,
   getEpisodeDetail,
   listEpisodes,
   parsePerPage,
   parseSort,
   parseView,
+  stageCompletion,
   type EpisodeRow,
 } from '@/lib/episodes'
 import { requireProjectPage } from '@/lib/project-access'
@@ -80,6 +82,25 @@ export default async function ProductionPage({ params, searchParams }: Params) {
     ? await getEpisodeDetail(project.id, selectedId)
     : (result.rows[0] ?? null)
 
+  /*
+   * 另外兩種檢視要的彙總，只在用到的時候查 (Z197)。
+   *
+   * 集數管理頁有查有傳，這一頁沒有——而四顆檢視切換鍵是無條件畫出來的，兩個
+   * prop 的預設值又是 `[]`。所以在這一頁按「分段檢視」，表格上方明明列著集
+   * 數，下面寫「還沒有集數。」；按「進度總覽」則九大階段的欄位整排消失。兩
+   * 種都不是空資料，是沒把資料傳下去。
+   *
+   * 兩份都是跨全部集數的——列表一次只看得到二十筆，而「做到哪裡了」是整體的
+   * 問題；列表與卡片檢視用不到，所以不查。
+   */
+  const view = parseView(one(sp.view))
+  const [stageColumns, segments] =
+    view === 'PROGRESS'
+      ? [await stageCompletion(project.id), []]
+      : view === 'SEGMENT'
+        ? [[], await episodeSegments(project.id)]
+        : [[], []]
+
   return (
     <div className="flex flex-col">
       {/* 數字自己跟上，不用手動重新整理 (Z117)。 */}
@@ -101,7 +122,9 @@ export default async function ProductionPage({ params, searchParams }: Params) {
         projectId={project.id}
         result={{ ...result, rows: result.rows.map(serialise) }}
         selected={selected ? serialise(selected) : null}
-        view={parseView(one(sp.view))}
+        view={view}
+        stageColumns={stageColumns}
+        segments={segments}
         search={one(sp.q)}
         status={status ?? ''}
         stage={stage ?? ''}

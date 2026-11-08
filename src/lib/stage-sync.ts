@@ -199,7 +199,25 @@ async function syncStages(scope: ReturnType<typeof sql>): Promise<number> {
           case when m.stage_key = 'novel' and m.fraction >= 1 then 100 else 99 end
         ) as target_percent
       from measured m
-    )
+    ),
+    /*
+     * 更新**之前**的狀態 (Z197).
+     *
+     * 同一句 SQL 裡的每個 CTE 看到的是同一個快照，所以這裡讀到的一定是
+     * UPDATE 還沒動過的值——而 「UPDATE … RETURNING」 回的是新值，舊的在那之後
+     * 就沒了。下面的稽核列要記 from → to，少了這一份就只有 to。
+     */
+    pre as (
+      select
+        s.id,
+        s.status as from_status,
+        s.progress_percent as from_progress
+      from episode_production_stages s
+      join capped m
+        on s.episode_id = m.episode_id
+       and s.stage_key = m.stage_key::production_stage_key
+    ),
+    upd as (
     update episode_production_stages s
        set status = case
              /*
@@ -221,8 +239,9 @@ async function syncStages(scope: ReturnType<typeof sql>): Promise<number> {
              else s.completed_at
            end,
            updated_at = now()
-      from capped m
-     where s.episode_id = m.episode_id
+      from capped m, pre
+     where pre.id = s.id
+       and s.episode_id = m.episode_id
        and s.stage_key = m.stage_key::production_stage_key
        and m.fraction is not null
        /*
@@ -240,9 +259,58 @@ async function syncStages(scope: ReturnType<typeof sql>): Promise<number> {
          -- Reaching 完成 is a change even when the percentage did not move.
          or (m.finishes and s.status <> 'completed')
        )
+    returning
+      s.project_id,
+      s.episode_id,
+      s.id as stage_id,
+      s.stage_key,
+      s.status as to_status,
+      s.progress_percent as to_progress,
+      pre.from_status,
+      pre.from_progress
+    ),
+    /*
+     * 寫一筆進度稽核列 (Z197).
+     *
+     * 「production_progress_events」 這張表從建好那天起**沒有任何程式寫過
+     * 它**，而製作頁與儀表板的「製作進度趨勢」都讀它——所以那兩張圖從上線
+     * 到現在畫的一直是空狀態。
+     *
+     * 而要寫的就是**這一條路**：正式庫裡一筆 「episode_stage」 的活動紀錄都
+     * 沒有，也就是從來沒有人手動改過階段；二十三格不是未開始的，全部是這
+     * 裡依正文重算出來的。只記人工那條路的話，那張圖還是會一直空著。
+     *
+     * 只有狀態**真的變了**才記：百分比從 40 爬到 60 不是一次階段異動，而
+     * 記下去會讓趨勢圖把同一件事數很多次（這支在每一次存檔之後都會跑）。
+     *
+     * 「actor_id」 留空、「actor_type」 吃預設值：「assignee_type」 只有 USER／
+     * AI／EXTERNAL，沒有一個是「系統量出來的」。而 pg 的 enum 加了就刪不掉
+     * （沒有 「DROP VALUE」），為了一個標籤換一個不可逆的改動不划算——「reason」
+     * 這一欄已經說得出它是怎麼來的。
+     */
+    logged as (
+      insert into production_progress_events (
+        project_id, episode_id, stage_id, stage_key,
+        from_status, to_status, from_progress, to_progress, reason
+      )
+      select
+        project_id, episode_id, stage_id, stage_key,
+        from_status, to_status, from_progress, to_progress, '依正文自動重算'
+      from upd
+      where to_status is distinct from from_status
+      returning 1
+    )
+    select count(*)::int as n from upd
   `)
 
-  return result.rowCount ?? 0
+  /*
+   * 筆數從 `upd` 數，不是 `rowCount`。
+   *
+   * 最後一句現在是 SELECT，它的 `rowCount` 永遠是 1。真正的「改了幾列」在那
+   * 一列的 `n` 裡。
+   */
+  const rows = result.rows as { n: number | string }[]
+  return Number(rows[0]?.n ?? 0)
 }
 
 /**

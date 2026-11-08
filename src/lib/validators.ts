@@ -664,6 +664,53 @@ export const expenseSchema = z.object({
   note: z.string().trim().max(1000).optional().default(''),
 })
 
+/**
+ * 手動記一筆帳 (Z197)。`projectId` 從網址來，不從本體來。
+ *
+ * 本體裡再帶一個 `projectId` 的話，就有兩個來源可以對不上——而路由上的那個是
+ * 已經驗過權限的那一個。
+ */
+export const expenseCreateSchema = expenseSchema.omit({ projectId: true })
+
+/**
+ * 預算上限 (Z197)。
+ *
+ * `category` 與 `period` 都是**可以是 null** 的：null 代表「不分」。而
+ * `.nullable().optional()` 兩個都要——沒給跟給 null 是不一樣的意思，前者是
+ * 「照預設」後者是「明確地不分類」，而在這裡兩者剛好同一個結果。
+ */
+export const budgetSchema = z.object({
+  category: z
+    .enum([
+      'AI_API',
+      'SOFTWARE',
+      'OUTSOURCING',
+      'VOICE_TALENT',
+      'MUSIC_LICENSE',
+      'STOCK_FOOTAGE',
+      'HARDWARE',
+      'MARKETING',
+      'OTHER',
+    ])
+    .nullable()
+    .optional(),
+  /** `YYYY-MM`，或空字串表示不分期間。 */
+  period: z
+    .string()
+    .trim()
+    .regex(/^(\d{4}-(0[1-9]|1[0-2]))?$/, '期間要寫成 YYYY-MM')
+    .nullable()
+    .optional(),
+  /** 字串，不是數字：小數位不能讓 float 去湊。 */
+  amount: z
+    .string()
+    .trim()
+    .regex(/^\d+(\.\d{1,4})?$/, '金額格式不正確')
+    .refine((value) => Number(value) > 0, '上限要大於 0'),
+  currency: z.string().trim().length(3, '請使用三字母幣別代碼').toUpperCase(),
+  alertThresholdPct: z.coerce.number().int().min(1).max(100).optional().default(80),
+})
+
 export const worldEntrySchema = z.object({
   projectId: uuid,
   category: z

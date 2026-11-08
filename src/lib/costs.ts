@@ -54,6 +54,8 @@ export type CostByGroup = {
 
 export type BudgetStatus = {
   id: string
+  /** 移除那一列要用它組網址 (Z197)。 */
+  projectId: string
   projectTitle: string
   category: string | null
   period: string | null
@@ -313,6 +315,7 @@ export async function costOverview(input: {
 
     return {
       id: row.id,
+      projectId: row.projectId,
       projectTitle: row.projectTitle,
       category: row.category,
       period: row.period,

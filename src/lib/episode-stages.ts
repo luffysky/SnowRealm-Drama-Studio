@@ -1,6 +1,11 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { episodeProductionStages, episodes, users } from '@/db/schema'
+import {
+  episodeProductionStages,
+  episodes,
+  productionProgressEvents,
+  users,
+} from '@/db/schema'
 import { ApiError, logActivity } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import {
@@ -142,6 +147,27 @@ export async function updateEpisodeStage(input: {
   const now = new Date()
 
   /*
+   * 更新之前先把舊的狀態讀出來 (Z197).
+   *
+   * `production_progress_events` 記的是 from → to，而 `UPDATE … RETURNING`
+   * 回的是**新**值——舊的在那之後就沒了。多一次查詢換一份真的歷史。
+   */
+  const [before] = await db
+    .select({
+      id: episodeProductionStages.id,
+      status: episodeProductionStages.status,
+      progressPercent: episodeProductionStages.progressPercent,
+    })
+    .from(episodeProductionStages)
+    .where(
+      and(
+        eq(episodeProductionStages.episodeId, input.episodeId),
+        eq(episodeProductionStages.stageKey, input.stage)
+      )
+    )
+    .limit(1)
+
+  /*
    * `state` 沒給就一個時間戳都不能動。
    *
    * 包成一個物件而不是散在 `.set()` 裡，是為了讓「只改備註」這件事在型別上
@@ -194,6 +220,52 @@ export async function updateEpisodeStage(input: {
         ? { assigneeId: input.assigneeId, assigneeType: 'USER' as const }
         : {}),
     })
+  }
+
+  /*
+   * 寫一筆進度稽核列 (Z197).
+   *
+   * `production_progress_events` 這張表從建好那天起**沒有任何程式寫過它**，
+   * 而製作頁與儀表板的「製作進度趨勢」都讀它——所以那兩張圖從上線到現在畫的
+   * 一直是空狀態，而空狀態寫著「階段狀態第一次變更後，這裡會以稽核紀錄繪出
+   * 趨勢」。等不到，因為沒有人在寫。
+   *
+   * 只有**狀態真的變了**才記。把「已完成」再按一次完成不是一次進度異動，而
+   * 記下去的話趨勢圖會把同一件事數兩次。
+   *
+   * 失敗不擋主流程：階段已經改好了，而為了一行歷史把它回滾是本末倒置。
+   */
+  if (input.state !== undefined && before?.status !== input.state) {
+    const after = await db
+      .select({
+        id: episodeProductionStages.id,
+        progressPercent: episodeProductionStages.progressPercent,
+      })
+      .from(episodeProductionStages)
+      .where(
+        and(
+          eq(episodeProductionStages.episodeId, input.episodeId),
+          eq(episodeProductionStages.stageKey, input.stage)
+        )
+      )
+      .limit(1)
+
+    try {
+      await db.insert(productionProgressEvents).values({
+        projectId: input.projectId,
+        episodeId: input.episodeId,
+        stageId: after[0]?.id ?? before?.id ?? null,
+        stageKey: input.stage,
+        fromStatus: before?.status ?? null,
+        toStatus: input.state,
+        fromProgress: before?.progressPercent ?? null,
+        toProgress: after[0]?.progressPercent ?? 0,
+        actorId: input.user.id,
+        actorType: 'USER',
+      })
+    } catch {
+      // 歷史少一行，不值得讓一次已經成功的修改看起來像失敗。
+    }
   }
 
   /*

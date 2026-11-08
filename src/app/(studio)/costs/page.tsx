@@ -2,8 +2,11 @@ import { Wallet } from 'lucide-react'
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { EmptyState } from '@/components/ui/StateViews'
+import { BudgetRemoveButton, CostEntry } from '@/components/studio/CostEntry'
+import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { costOverview, type CostByGroup } from '@/lib/costs'
+import { listProjects } from '@/lib/projects'
 import { conversionNote, formatMoney } from '@/lib/money'
 import { getFxRates } from '@/lib/settings'
 import { cn, formatRelativeZh } from '@/lib/utils'
@@ -31,7 +34,17 @@ export default async function CostsPage() {
   if (!user) redirect('/login')
 
   const fx = await getFxRates()
-  const overview = await costOverview({ currency: user.displayCurrency, fx })
+  const [overview, projectList] = await Promise.all([
+    costOverview({ currency: user.displayCurrency, fx }),
+    /*
+     * 表單要的是**全部**看得到的作品，不是有花費紀錄的那幾個 (Z197)。
+     * `overview.byProject` 只列已經有帳的，而第一筆帳正是要記進一個還沒有帳
+     * 的作品。
+     */
+    listProjects(user.id),
+  ])
+  const canWrite = can(user, 'expense.write')
+  const projects = projectList.cards.map((card) => ({ id: card.id, title: card.title }))
 
   const money = (amount: number) => formatMoney(amount, overview.totals.currency)
   const note = conversionNote(overview.totals.currency, fx)
@@ -49,10 +62,12 @@ export default async function CostsPage() {
         {note && <span className="ml-auto text-[10px] text-ink-700">{note}</span>}
       </header>
 
+      <CostEntry projects={projects} canWrite={canWrite} />
+
       {!overview.hasData ? (
         <EmptyState
           title="還沒有任何花費紀錄"
-          description="排一個 AI 任務或記一筆支出之後，這裡就會有數字。"
+          description="排一個 AI 任務，或用上面的「記一筆支出」手動記一筆。"
         />
       ) : (
         <>
@@ -78,8 +93,8 @@ export default async function CostsPage() {
                * 一條對著想像中的上限畫的進度條，會讓人以為有人設過這個數字。
                */
               <p className="rounded-lg bg-stage-900 px-3 py-2.5 text-[11px] leading-relaxed text-ink-500 ring-1 ring-stage-700/60">
-                還沒有設定任何預算上限，所以沒有東西可以對照。設了之後這裡會顯示用掉多少、
-                什麼時候該停。
+                還沒有設定任何預算上限，所以沒有東西可以對照。用上面的「設一個預算上限」設一個，
+                這裡就會顯示用掉多少、什麼時候該停——而超過上限的 AI 任務會被擋下來。
               </p>
             ) : (
               <ul className="flex flex-col gap-1.5">
@@ -99,6 +114,12 @@ export default async function CostsPage() {
                       <span className="ml-auto tabular-nums text-ink-300">
                         {money(budget.spent)} / {money(budget.cap)}
                       </span>
+                      <BudgetRemoveButton
+                        projectId={budget.projectId}
+                        budgetId={budget.id}
+                        label={budget.projectTitle}
+                        canWrite={canWrite}
+                      />
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-stage-800">
                       <div
