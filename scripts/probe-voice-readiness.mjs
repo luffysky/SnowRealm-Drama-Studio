@@ -116,10 +116,16 @@ try {
     const list = root.querySelector('ul')
     const rows = list ? [...list.querySelectorAll('li')].map((li) => li.innerText || '') : []
     /*
-     * 警告段落＝這一區扣掉清單。在 innerText 上用 indexOf('EP') 切窗口的那個
-     * 寫法會把清單的第一行也切進來，於是「警告有沒有提到 EP001」永遠是真。
+     * 警告段落＝這一區裡**不在清單中**的每一段文字。
+     *
+     * 在 innerText 上用 indexOf('EP') 切窗口的那個寫法會把清單的第一行也切進
+     * 來，於是「警告有沒有提到 EP001」永遠是真。而第二版寫 :scope > p 又太
+     * 窄：警示後來拆成自己的元件，那些 <p> 變成孫節點，於是這一格永遠是空
+     * 字串——而空字串讓「警示有寫某某」全部紅，看起來像功能壞了。
      */
-    const banner = [...root.querySelectorAll(':scope > p')]
+    const rows0 = root.querySelector('ul')
+    const banner = [...root.querySelectorAll('p')]
+      .filter((p) => !rows0 || !rows0.contains(p))
       .map((p) => p.innerText || '')
       .join(String.fromCharCode(10))
     return {

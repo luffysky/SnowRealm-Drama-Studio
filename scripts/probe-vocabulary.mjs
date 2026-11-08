@@ -242,6 +242,63 @@ try {
     return JSON.stringify({ duplicate: list.status })
   })()`))
   ok('同一個代碼加第二次會被擋', cleaned.duplicate === 400, JSON.stringify(cleaned))
+
+  /*
+   * 收拾：把自己加的那一個刪掉，順便驗刪除那條路。
+   *
+   * 這一步在 migration 套到正式庫之後變成**必要**的——沒有它，每跑一次就在
+   * 大家的景別下拉裡多一個 `Z184_OTS`。
+   */
+  const removed = JSON.parse(await ev(`(async () => {
+    const csrf = document.cookie.split('; ').find((c) => c.startsWith('srds_csrf='))
+    const token = csrf ? decodeURIComponent(csrf.slice('srds_csrf='.length)) : ''
+    const chip = document.querySelector('[aria-label^="刪除景別"], [aria-label^="删除景别"]')
+    if (!chip) return JSON.stringify({ found: false })
+    chip.click()
+    await new Promise((r) => setTimeout(r, 2500))
+    const s = ${sizeSelect}
+    return JSON.stringify({
+      found: true,
+      left: s ? [...s.options].map((o) => ({ v: o.value, t: o.text })) : null,
+      chips: document.querySelectorAll('[aria-label^="刪除景別"], [aria-label^="删除景别"]').length,
+    })
+  })()`))
+
+  /*
+   * 刪完之後 `Z184_OTS` **還在下拉裡**，而那是對的。
+   *
+   * 這個鏡頭現在的值就是它，而一個 `<select>` 碰到不在選項裡的值會自己跳到
+   * 第一個——那等於**沒有人按就改了資料**。所以那個值會被補成一個標著「已從
+   * 清單移除」的項目。要看的是：它不再是可管理的那一個（刪除的叉叉沒了）。
+   */
+  const orphan = removed.left?.find((o) => o.v === 'Z184_OTS')
+  ok(
+    '刪得掉：自訂的那一個不見了，只剩下標著「已移除」的現值',
+    removed.found === true && removed.chips === 0 && /已從清單移除|已从清单移除/.test(orphan?.t ?? ''),
+    JSON.stringify({ orphan, chips: removed.chips })
+  )
+  ok(
+    '刪掉之後那個鏡頭還是顯示得出那個值',
+    await ev(`/Z184_OTS/.test(document.body.innerText || '')`),
+    '（這張表是「下拉裡有哪些選項」，不是「資料裡有哪些值」）'
+  )
+
+  /* 鏡頭也要改回內建值，不然正式庫裡留著一個指向已刪選項的鏡頭。 */
+  await ev(`(() => {
+    const s = ${sizeSelect}
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set
+    setter.call(s, 'MS')
+    s.dispatchEvent(new Event('change', { bubbles: true }))
+    const save = [...document.querySelectorAll('button')]
+      .find((b) => /儲存這個鏡頭|储存这个镜头/.test(b.innerText || ''))
+    if (save) save.click()
+    return true
+  })()`)
+  await wait(2500)
+  ok(
+    '收拾完畢：鏡頭改回內建的景別',
+    (await ev(`(() => { const s = ${sizeSelect}; return s ? s.value : null })()`)) === 'MS'
+  )
 } finally {
   chrome.kill()
 }
