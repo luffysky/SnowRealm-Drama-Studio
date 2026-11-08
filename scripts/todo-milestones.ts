@@ -94,6 +94,67 @@ function table(entries: Entry[]): string {
   return lines.join('\n')
 }
 
+/**
+ * 「統計」那張表，也從條目算出來.
+ *
+ * 它本來是手寫的，而它**過期過三次**（11-04、11-05、11-06），每一次都是事後
+ * 對帳才抓到。那一節自己附了重算指令，但附指令不等於有人會跑——而這支腳本本
+ * 來就已經在走同一批條目了，所以順便把它一起產生。
+ *
+ * 跟里程碑總覽差的那幾條是**轉址**（「看 Z63」那種指向別條的空條目）：它們不
+ * 掛里程碑徽章，不然同一件事會被算兩次。差幾條、是哪幾條，都由這裡算出來，不
+ * 是寫死的。
+ */
+function stats(entries: Entry[]): string {
+  const done = entries.filter((e) => e.done).length
+  const labelled = entries.filter((e) => e.milestone)
+  const unlabelled = entries.filter((e) => !e.milestone && e.supersededBy === null)
+  /*
+   * `!== null`，不是真假判斷 (Z174 子代理審出來).
+   *
+   * `supersededBy` 是 `number | null`，而 `Z0` 存在——所以一條「→ 看 `Z0`」的
+   * 轉址在真假判斷下會從這裡掉出去，同時被 `report()` 誤報成「沒有里程碑標
+   * 籤」。今天踩不到，但它是一個等著發生的錯。
+   */
+  const redirects = entries.filter((e) => !e.milestone && e.supersededBy !== null)
+
+  /*
+   * 差幾條，要把「無標籤也不是轉址」算進去 (Z174).
+   *
+   * 本來只算轉址，所以一旦有條目忘記掛徽章，這張表就會寫出一句算術錯誤的說
+   * 明。`report()` 會把它報成問題，但 `process.exitCode = 1` 發生在
+   * `writeFileSync` 之後——檔案已經寫進去了。
+   */
+  const gap = redirects.length + unlabelled.length
+
+  const parts: string[] = []
+  if (redirects.length > 0) {
+    parts.push(
+      `${redirects.map((e) => 'Z' + e.n).join('／')} 是指向別條的轉址（「看 Z${redirects[0]?.supersededBy ?? '?'}」那種），不掛里程碑徽章，不然會重複計算`
+    )
+  }
+  if (unlabelled.length > 0) {
+    parts.push(
+      `${unlabelled.map((e) => 'Z' + e.n).join('／')} **忘了掛里程碑徽章**，該補`
+    )
+  }
+
+  const note =
+    gap === 0
+      ? '每一條都掛了里程碑徽章，所以這張表跟里程碑總覽的合計一樣。'
+      : `跟里程碑總覽的 **${labelled.filter((e) => e.done).length}／${labelled.length}** 差 ${gap} 條：${parts.join('；')}。`
+
+  return [
+    '| 狀態 | 數量 |',
+    '|---|---|',
+    `| 已完成（劃線） | ${done} |`,
+    `| 待辦 | ${entries.length - done} |`,
+    `| **合計** | **${entries.length}** |`,
+    '',
+    note,
+  ].join('\n')
+}
+
 function report(entries: Entry[], nav: string): number {
   let problems = 0
 
@@ -124,7 +185,8 @@ function report(entries: Entry[], nav: string): number {
    * pointing at the entry that replaced it. Reporting those as missing a
    * label would train everyone to ignore this check.
    */
-  const unlabelled = entries.filter((e) => !e.milestone && !e.supersededBy)
+  // `=== null`，不是真假判斷：理由同 `stats()` 裡那一段 (Z174)。
+  const unlabelled = entries.filter((e) => !e.milestone && e.supersededBy === null)
   if (unlabelled.length > 0) {
     console.log(`  ✗ 沒有里程碑標籤：${unlabelled.map((e) => `Z${e.n}`).join('、')}`)
     problems += 1
@@ -178,22 +240,80 @@ function report(entries: Entry[], nav: string): number {
   return problems
 }
 
-const text = readFileSync(TODO, 'utf8')
-const entries = parseTodo(text)
-const built = table(entries)
+const OPEN = '<!-- 統計:自動產生 -->'
+const CLOSE = '<!-- /統計 -->'
 
-console.log(`${built}\n`)
-const problems = report(entries, readFileSync(NAV, 'utf8'))
-
-if (process.argv.includes('--write')) {
-  const start = text.indexOf('## 里程碑總覽')
+/**
+ * 把兩個算出來的區塊套進 TODO.md，回傳套完的全文.
+ *
+ * **產生與比對共用這一支**，所以「不帶參數時說它過期了」跟「帶 --write 時把它
+ * 寫對」不可能分岔。原本只有寫入那一條路，而那正是 TODO.md 自己記著的那個失
+ * 敗模式沒有被真正修掉的原因：附一個重算指令，不等於有東西會在它過期時喊。
+ *
+ * 里程碑總覽整節都是產生出來的，所以「從標題到下一條分隔線」切得乾淨。統計那
+ * 一節不是：表格之後還有一段人寫的說明（記著它過期過三次的那一段），而那一段
+ * 不該被蓋掉。標記把「機器寫的」跟「人寫的」分開，而且在檔案裡看得見。
+ */
+function applyTo(source: string, list: Entry[]): string {
+  const start = source.indexOf('## 里程碑總覽')
   if (start === -1) {
     console.error('\nTODO.md 裡沒有「## 里程碑總覽」這一節，不知道要換掉哪裡')
     process.exit(1)
   }
-  const end = text.indexOf('\n---', start)
-  writeFileSync(TODO, text.slice(0, start) + built + '\n' + text.slice(end), 'utf8')
-  console.log('\n已更新 TODO.md 的里程碑總覽')
+
+  const end = source.indexOf('\n---', start)
+  const withTable = source.slice(0, start) + table(list) + '\n' + source.slice(end)
+
+  const from = withTable.indexOf(OPEN)
+  const to = withTable.indexOf(CLOSE)
+  if (from === -1 || to === -1 || to < from) {
+    /*
+     * 訊息要說清楚**兩節都沒更新** (Z174).
+     *
+     * 兩節共用同一次寫入，所以標記壞掉的時候里程碑總覽也不會被寫進去——原本
+     * 的訊息只說「統計那一節沒有更新」，讀的人會以為另一節是好的。
+     */
+    console.error(
+      `\nTODO.md 裡找不到成對的 ${OPEN} / ${CLOSE}。\n兩節都沒有更新——它們共用同一次寫入。`
+    )
+    process.exit(1)
+  }
+
+  return (
+    withTable.slice(0, from + OPEN.length) +
+    '\n' +
+    stats(list) +
+    '\n' +
+    withTable.slice(to)
+  )
+}
+
+const text = readFileSync(TODO, 'utf8')
+const entries = parseTodo(text)
+
+console.log(`${table(entries)}\n`)
+let problems = report(entries, readFileSync(NAV, 'utf8'))
+
+const next = applyTo(text, entries)
+
+if (process.argv.includes('--write')) {
+  if (next === text) console.log('\nTODO.md 的兩張表本來就是對的，沒有改動。')
+  else {
+    writeFileSync(TODO, next, 'utf8')
+    console.log('\n已更新 TODO.md 的里程碑總覽與統計')
+  }
+} else if (next !== text) {
+  /*
+   * 不帶參數就是檢查，所以它要能失敗 (Z174).
+   *
+   * 這一支掛進 `npm run check`，於是「改完條目忘記重算」會在提交門檻上停下
+   * 來。在那之前 TODO.md 寫著「忘記重算這個失敗模式沒有了」——而那句話是假
+   * 的：它只是從記得跑三個指令變成記得跑一個指令。
+   */
+  console.log(
+    '\n  ✗ TODO.md 的里程碑總覽或統計表跟條目對不上。重算：\n      npx tsx scripts/todo-milestones.ts --write'
+  )
+  problems += 1
 }
 
 if (problems > 0) {

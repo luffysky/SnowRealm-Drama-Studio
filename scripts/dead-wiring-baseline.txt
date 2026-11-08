@@ -48,8 +48,8 @@ src/lib/chat.ts#TYPING_WINDOW_SEC
 src/lib/chinese.ts#DEFAULT_SCRIPT
 src/lib/chinese.ts#SCRIPT_LABEL
 src/lib/chinese.ts#convertParagraphs
-src/lib/chinese.ts#convertScript
 src/lib/chinese.ts#isScriptPreference
+src/lib/chinese.ts#toSimplified
 src/lib/chinese.ts#toTraditional
 src/lib/client-fetch.ts#readCsrfToken
 src/lib/constants.ts#APPROVAL_STATES
@@ -148,7 +148,6 @@ src/lib/tts/ssml.ts#prosodyPercent
 src/lib/tts/style.ts#EMOTIONS
 src/lib/tts/style.ts#EMOTION_LABEL
 src/lib/tts/style.ts#STYLE_CANDIDATES
-src/lib/turn.ts#turnConfigured
 src/lib/usage.ts#checkBudget
 src/lib/usage.ts#spendForPeriod
 src/lib/use-script-conversion.ts#isSkippedTag
@@ -169,4 +168,3 @@ src/lib/validators.ts#projectSchema
 src/lib/validators.ts#shotReorderSchema
 src/lib/validators.ts#taskSchema
 src/lib/validators.ts#worldEntrySchema
-src/lib/writing.ts#estimateSceneSeconds

@@ -30,3 +30,6 @@ Thumbs.db
 
 # 資料備份（含小說正文，不進版本庫）
 backups/
+
+# Next 16 每次啟動自己產生的，內容由框架決定；這個專案的指示寫在 CLAUDE.md
+AGENTS.md

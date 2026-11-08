@@ -1,3 +1,13 @@
+/*
+ * 只匯入型別，不匯入實作 (Z174).
+ *
+ * `@/lib/chinese` 在模組最上層 `import * as OpenCC`，而那整包字典是這個函式庫
+ * 的主體。`import type` 會被編譯器抹掉，所以這一行不會讓任何頁面因為拿一個型
+ * 別而付字典的錢——`SCRIPT_LABEL`／`isScriptPreference` 就不能這樣拿，所以上面
+ * 那三個值是手寫的。
+ */
+import type { ScriptPreference } from '@/lib/chinese'
+
 /**
  * Reader preferences, with no database imports.
  *
@@ -104,14 +114,22 @@ export type ReaderSettings = {
    */
   castVoices: boolean
   /**
-   * 正文顯示繁體還是簡體 (Z135)。
+   * 正文顯示哪一種字形 (Z135，第三個選項補在 Z174)。
    *
    * **跟介面的設定分開。** 介面是給操作的人看的，正文是作品本身——有人想用
    * 簡體介面讀繁體原文，也有人反過來。綁在一起就少了那兩種讀法。
    *
-   * `original` 是作者寫的字（繁體），所以切回去不需要任何轉換。
+   * **本來只有兩個值，而那是 Z172 沒有修好的地方。** 舊註解寫「`original` 是
+   * 作者寫的字（繁體），所以切回去不需要任何轉換」——稿子是簡體寫的，所以
+   * `original` 不是繁體，而「不轉換」給不出繁體。Z172 在
+   * `useScriptConverter` 裡把簡 → 繁 那個方向做出來了，而這個型別只有兩個值，
+   * 所以**那條路一次都走不到**：閱讀器上根本沒有一顆按鈕能選到它。
+   *
+   * 三個值現在各自有意義：`original` 不轉（今天的稿子＝簡體）、`simplified`
+   * 轉成簡體（對簡體稿是零動作，對將來混進來的繁體稿有用）、`traditional`
+   * 轉成繁體。
    */
-  script: 'original' | 'simplified'
+  script: ScriptPreference
 }
 
 export const READER_DEFAULTS: ReaderSettings = {
@@ -172,7 +190,19 @@ export function loadReaderSettings(): ReaderSettings {
       castVoices: parsed.castVoices === true,
       // Anything unrecognised falls back to the default rather than being
       // trusted — the same rule every other field here follows.
-      script: parsed.script === 'original' ? 'original' : READER_DEFAULTS.script,
+      /*
+       * 三個值都要收 (Z174).
+       *
+       * 本來是 `=== 'original' ? 'original' : 預設`，所以存進 localStorage 的
+       * `traditional` 會在下一次讀取時被默默丟掉——就算按鈕給得出來，設定也
+       * 存不住。認不出來的值照樣退回預設，那條規則沒變。
+       */
+      script:
+        parsed.script === 'original' ||
+        parsed.script === 'simplified' ||
+        parsed.script === 'traditional'
+          ? parsed.script
+          : READER_DEFAULTS.script,
     }
   } catch {
     return READER_DEFAULTS

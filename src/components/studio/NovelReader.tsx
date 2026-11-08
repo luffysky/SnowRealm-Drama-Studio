@@ -55,7 +55,7 @@ import {
   type SpeechHandle,
   type Voice,
 } from "@/lib/speech";
-import { useScriptConversion } from "@/lib/use-script-conversion";
+import { useScriptConverter } from "@/lib/use-script-conversion";
 import { cn } from "@/lib/utils";
 
 /**
@@ -156,6 +156,19 @@ export function NovelReader({
    * count: CSS columns decide where the text breaks, and any estimate here
    * would disagree with them and leave a page that cannot be reached.
    */
+  /*
+   * 正文自己的繁簡轉換 (Z135, 改寫於 Z172)。
+   *
+   * 本來跟介面那一份共用改 DOM 的 `useScriptConversion`，而那一支只跑繁 → 簡
+   * ——所以上傳一本**簡體**小說之後，選「繁體」只是把轉換關掉，看到的還是簡
+   * 體。那個設計裡「繁體」的意思是「不要轉」，因為它假設原文一定是繁體。
+   *
+   * 改成從原始字串轉：兩個方向都走得通，而且每次都從作者寫的那份算起，不會
+   * 有繁 → 簡 → 繁 的有損來回。這一欄仍然標 `data-script-own`，介面那份照樣
+   * 跳過它。
+   */
+  const script = useScriptConverter(settings.script);
+
   const measure = useCallback(() => {
     const node = pagerRef.current;
     if (!node || !paged) return;
@@ -177,6 +190,18 @@ export function NovelReader({
     settings.lineHeight,
     settings.font,
     ready,
+    /*
+     * 繁簡也會改變行數 (Z172).
+     *
+     * 分頁是量 `scrollWidth / clientWidth` 量出來的，而換一種字形之後同一段
+     * 話的斷行位置會變。少了這一條，切換繁簡之後頁數還是舊的——最後一頁可能
+     * 翻不到，或是多出一頁空白。
+     *
+     * `script` 本身也在相依裡：字典是動態載入的，載完那一刻正文才真的變成另
+     * 一種字形，而那是第一次繪製之後的事。
+     */
+    settings.script,
+    script,
   ]);
 
   useEffect(() => {
@@ -250,6 +275,19 @@ export function NovelReader({
 
   const chunks = useMemo(() => {
     if (!chapter) return [];
+
+    /*
+     * 朗讀用的是**原值**，不走 `script()` (Z174).
+     *
+     * 這是故意的，而且它沒有被寫下來過——子代理審的時候問了，而「顯示轉了、
+     * 朗讀沒轉」正是下一個人會順手「修掉」的那種不一致。三個理由：
+     *
+     *  1. 簡 → 繁 是一對多，餵轉換後的字給語音引擎等於多疊一層猜測（`着`／
+     *     `著` 的讀音不同）。原始字串是作者寫的，那才是該讀出來的。
+     *  2. 角色名比對的兩邊都來自資料庫（`cast` 的名字對段落），字形一致；
+     *     只轉一邊會讓分角色朗讀開始對不上。
+     *  3. 高亮走的是段落索引，不是文字，所以顯示轉換不影響它。
+     */
     const plain = splitForSpeech(chapter.paragraphs);
 
     /*
@@ -382,16 +420,6 @@ export function NovelReader({
   /** The scrolling prose column, for the reading rail. */
   const pageRef = useRef<HTMLDivElement | null>(null);
 
-  /*
-   * 正文自己的繁簡轉換 (Z135)。
-   *
-   * 跟整個介面那一份用同一個 hook，所以行為完全一樣——各寫一次遲早會分岔成
-   * 「介面轉了正文沒轉」那種讀起來像壞掉的狀態。範圍限在這一欄，而這一欄
-   * 標了 `data-script-own`，所以介面那份會跳過它。
-   */
-  const proseRoot = useCallback(() => pageRef.current, []);
-  useScriptConversion(proseRoot, settings.script === "simplified");
-
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.target instanceof HTMLInputElement) return;
@@ -425,6 +453,14 @@ export function NovelReader({
 
   const body = (
     <article
+      /*
+       * 正文的繁簡由閱讀器自己決定 (Z135，範圍在 Z174 收緊).
+       *
+       * `data-script-own` 讓整個介面的那份轉換跳過這一塊。分開是因為它們是兩
+       * 件事：介面是給操作的人看的，正文是作品本身——有人想用簡體介面讀繁體
+       * 原文，也有人反過來。綁在一起就少了那兩種讀法。
+       */
+      data-script-own
       className="reader-prose"
       style={{
         fontFamily: READER_FONT_STACK[settings.font],
@@ -439,10 +475,10 @@ export function NovelReader({
           style={{ fontSize: "0.7em", color: theme.faint }}
         >
           EP{String(chapter.episodeNumber).padStart(3, "0")}
-          {chapter.episodeTitle && `・${chapter.episodeTitle}`}
+          {chapter.episodeTitle && `・${script(chapter.episodeTitle)}`}
         </p>
         <h2 className="text-center font-medium" style={{ fontSize: "1.15em" }}>
-          {chapter.chapterTitle || chapter.episodeTitle || "未命名"}
+          {script(chapter.chapterTitle || chapter.episodeTitle || "未命名")}
         </h2>
       </header>
 
@@ -473,7 +509,7 @@ export function NovelReader({
               : {}),
           }}
         >
-          {paragraph}
+          {script(paragraph)}
         </p>
       ))}
     </article>
@@ -563,7 +599,94 @@ export function NovelReader({
           a speech engine has no voices at all, and a play button that does
           nothing is worse than no play button.
         */}
-        {speechSupported() && (
+                {/*
+                  字形選單不該綁在語音引擎上 (Z174).
+
+                  它原本縮在下面那個 `{speechSupported() && (` 裡面，跟朗讀音
+                  色、語速、分角色朗讀擺在一起——於是**沒有裝語音引擎的裝置
+                  連繁簡都切不了**。兩件事毫無關係，而這個錯只在少數裝置上
+                  出現，所以不會有人回報。
+
+                  子代理審 Z172 的時候順手指出來的；真正讓它現形的是瀏覽器
+                  probe——headless Chrome 沒有語音引擎，所以那三顆按鈕一顆
+                  都抓不到。
+                */}
+                    {/*
+                      正文的繁簡 (Z135).
+
+                      Separate from the interface switch on purpose: somebody
+                      may want a 简体 interface around 繁體 prose, or the
+                      other way round. Tying them together removes both of
+                      those readings.
+                    */}
+                    <Field
+                      label="正文字體"
+                      hint="只改顯示，寫進資料庫的字沒有被動過。跟介面的設定分開。原文＝不轉換（目前的稿子是簡體）。"
+                    >
+                      <div
+                        data-script-keep
+                        className="flex gap-1 rounded-md border p-0.5"
+                        style={{ borderColor: `${theme.faint}55` }}
+                      >
+                        {/*
+                          三顆，而本來只有兩顆 (Z174).
+
+                          舊的兩顆是「简体」跟「繁體（原文）」，而那個標籤把
+                          兩件事綁成一件：它假設原文就是繁體，所以「不轉換」
+                          等於「繁體」。稿子是簡體寫的，所以按那一顆什麼都不
+                          會發生——Z172 做出了簡 → 繁 的轉換，而**沒有任何一顆
+                          按鈕選得到它**。
+
+                          拆開之後：原文＝不轉、简体＝轉成簡體、繁體＝轉成繁
+                          體。對今天的稿子，前兩顆看起來一樣，而那是誠實的
+                          ——它們真的做的是兩件不同的事，只是在簡體稿上結果
+                          相同；哪天混進繁體的章節就分得出來了。
+                        */}
+                        {(
+                          [
+                            ["original", "原文"],
+                            ["simplified", "简体"],
+                            ["traditional", "繁體"],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={settings.script === value}
+                            onClick={() => update({ script: value })}
+                            className="tap flex-1 rounded px-1.5 py-1 text-[11px] transition-opacity"
+                            style={
+                              settings.script === value
+                                ? {
+                                    background: `${theme.faint}33`,
+                                    color: theme.ink,
+                                  }
+                                : { color: theme.faint }
+                            }
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </Field>
+        {/*
+          `ready &&`，不然整頁 hydration 失敗 (Z175).
+
+          `speechSupported()` 讀的是 `window.speechSynthesis`，而它**在 render
+          當中被呼叫**：伺服器端算出 false、用戶端算出 true，於是 React 拿到兩
+          份不一樣的樹，整個子樹被丟掉重畫。那正是錯誤訊息第一條講的
+          「server/client branch」。
+
+          這個錯在 Z173 之前看不到——頁面根本沒有 hydrate，所以不可能有
+          hydration 錯誤。修掉跨來源封鎖才讓它現形，而它在提交過的版本上同樣存
+          在（驗過：只暫存 src/、保留設定，錯誤照出現）。
+
+          `ready` 是這個檔案本來就有的 hydration 安全旗標（`useSyncExternalStore`
+          在伺服器端回 false），所以兩邊第一次繪製都是 false，朗讀入口在 hydrate
+          之後才出現。
+        */}
+        {ready && speechSupported() && (
           <>
             <button
               type="button"
@@ -622,13 +745,19 @@ export function NovelReader({
       <div
         ref={pageRef}
         /*
-         * 正文的繁簡由這裡自己決定 (Z135).
+         * `data-script-own` 從這個 div 搬到裡面的 `<article>` 上 (Z174).
          *
-         * `data-script-own` 讓整個介面的那份轉換跳過這一塊。分開是因為它們
-         * 是兩件事：介面是給操作的人看的，正文是作品本身——有人想用簡體介面
-         * 讀繁體原文，也有人反過來。綁在一起就少了那兩種讀法。
+         * 這個 div 除了正文還包著翻頁導覽列（上一頁／下一頁／第 N / M 章）。
+         * Z135 時代這裡標 `data-script-own` 沒問題，因為正文那一份是
+         * **改 DOM** 的、root 就是這個 div，所以導覽列跟著一起轉。
+         *
+         * Z172 把正文改成在資料層轉，只包了段落、集名、章名三處——導覽列於
+         * 是**誰都不轉**：介面那一份看到 `data-script-own` 就跳過，正文那一份
+         * 沒有碰它。簡體介面配簡體正文，底下還是「上一頁／下一頁」。
+         *
+         * 導覽列是介面，不是作品，所以它該跟著介面設定走。把標記縮到
+         * `<article>`（真正屬於作品的那一塊）就兩邊都對了。
          */
-        data-script-own
         className="relative mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-5 py-8 sm:px-8"
         onTouchStart={(event) => {
           const point = event.touches[0];
@@ -765,7 +894,8 @@ export function NovelReader({
             </div>
 
             {panel === "toc" ? (
-              <ol className="flex flex-col gap-0.5">
+              // `data-script-own`：篇名走正文那一套，見下面的註解 (Z174)。
+              <ol data-script-own className="flex flex-col gap-0.5">
                 {chapters.map((item, i) => (
                   <li key={item.id}>
                     <button
@@ -796,8 +926,20 @@ export function NovelReader({
                       >
                         {String(item.episodeNumber).padStart(3, "0")}
                       </span>
+                      {/*
+                        篇名走正文那一套，不走介面那一套 (Z174).
+
+                        這個抽屜是 `data-script-own` 的**兄弟節點**，所以它本
+                        來由介面那一份轉，用的是介面偏好；而同一個篇名在正文
+                        標頭上由 `script()` 轉，用的是正文偏好。兩個偏好刻意
+                        分開（那是設計），結果是同一個篇名在同一個畫面上一邊
+                        繁一邊簡。
+
+                        篇名是作品的字，所以跟著正文走。外面那層 `<ol>` 標了
+                        `data-script-own`，介面那一份因此不碰這裡。
+                      */}
                       <span className="min-w-0 flex-1 truncate">
-                        {item.chapterTitle || item.episodeTitle || "未命名"}
+                        {script(item.chapterTitle || item.episodeTitle || "未命名")}
                       </span>
                       <span
                         className="shrink-0 text-[11px] tabular-nums"
@@ -915,7 +1057,8 @@ export function NovelReader({
                   onChange={(brightness) => update({ brightness })}
                 />
 
-                {speechSupported() && (
+                {/* `ready &&` 的理由見上面朗讀入口那一段 (Z175)。 */}
+                {ready && speechSupported() && (
                   <>
                     <Field
                       label="朗讀音色"
@@ -953,50 +1096,6 @@ export function NovelReader({
                       </select>
                     </Field>
 
-                    {/*
-                      正文的繁簡 (Z135).
-
-                      Separate from the interface switch on purpose: somebody
-                      may want a 简体 interface around 繁體 prose, or the
-                      other way round. Tying them together removes both of
-                      those readings.
-                    */}
-                    <Field
-                      label="正文字體"
-                      hint="只改顯示，作者寫的字沒有被動過。跟介面的設定分開。"
-                    >
-                      <div
-                        data-script-keep
-                        className="flex gap-1 rounded-md border p-0.5"
-                        style={{ borderColor: `${theme.faint}55` }}
-                      >
-                        {(
-                          [
-                            ["simplified", "简体"],
-                            ["original", "繁體（原文）"],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            role="radio"
-                            aria-checked={settings.script === value}
-                            onClick={() => update({ script: value })}
-                            className="tap flex-1 rounded px-1.5 py-1 text-[11px] transition-opacity"
-                            style={
-                              settings.script === value
-                                ? {
-                                    background: `${theme.faint}33`,
-                                    color: theme.ink,
-                                  }
-                                : { color: theme.faint }
-                            }
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </Field>
 
                     {/*
                       分角色朗讀 (Z111).
