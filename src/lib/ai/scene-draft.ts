@@ -1,4 +1,5 @@
 import { countRichTextChars } from '@/lib/utils'
+import { unwrapJson } from '@/lib/ai/json-text'
 
 /**
  * 把 AI 改編的輸出讀成場次 (Z30).
@@ -45,11 +46,7 @@ export function sceneCodeFor(sortOrder: number): string {
   return `S${String(sortOrder).padStart(2, '0')}`
 }
 
-function unwrap(text: string): string {
-  const trimmed = text.trim()
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed)
-  return (fenced?.[1] ?? trimmed).trim()
-}
+
 
 /**
  * 最後一招：從第一個括號切到最後一個。
@@ -127,7 +124,7 @@ function str(value: unknown, max: number): string {
  * 集 142 秒」變成算錯的結果。
  */
 export function parseSceneList(text: string): ParsedScenes {
-  const unwrapped = unwrap(text)
+  const unwrapped = unwrapJson(text)
 
   let parsed: unknown
   try {

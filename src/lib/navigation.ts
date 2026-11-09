@@ -230,6 +230,14 @@ export const PROJECT_TABS: ProjectTab[] = [
   // Z41：定稿、鎖定、解鎖、審稿意見，而且那個鎖真的擋得住存檔。
   { key: 'reviews', label: '審核發布', segment: 'reviews', ready: true, design: 58 },
   { key: 'versions', label: '版本紀錄', segment: 'versions', ready: true, design: 8 },
+  /*
+   * 編劇助手 (Z198)。
+   *
+   * 老闆的 mockup 把它畫在全域側邊欄，但它每一個輸入——集數、本集全文、此前劇
+   * 情、人物、伏筆——都是作品範圍的。側邊欄是跨作品的那一層（spec v3 §11.3），
+   * 所以它是一個作品分頁。
+   */
+  { key: 'writer', label: '編劇助手', segment: 'writer', ready: true },
 ]
 
 /**

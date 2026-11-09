@@ -43,6 +43,30 @@ export type AiContext = {
   sourceText?: string
   /** Free-form extra instructions typed by the user. */
   userInstruction?: string
+
+  /* ---- 雙視角編劇審核 (Z198) ------------------------------------------ */
+
+  /**
+   * 這一次是哪一個視角在看。
+   *
+   * `audience` 是**完全隔離**的那一趟：它只拿得到本集全文與此前已公開的劇
+   * 情，拿不到隱藏設定，也拿不到後面任何一集。`writer` 那一趟才知道全部。
+   *
+   * 兩趟是兩次獨立的 API 呼叫，不是同一個對話裡的兩個段落——在同一個對話裡
+   * 叫模型「假裝不知道」，是一個請求，不是一個保證。
+   */
+  auditPass?: 'audience' | 'writer'
+  /** 此前已公開的劇情：觀眾看得到的那些，依集數排序。 */
+  priorSummary?: string
+  /**
+   * 編劇已確認的隱藏設定。**只有 `writer` 那一趟拿得到。**
+   *
+   * `renderContext` 在 `auditPass === 'audience'` 時遇到這一欄會直接丟例
+   * 外——讓一次外洩變成一次當掉，而不是一份看起來很合理的報告。
+   */
+  secretNotes?: string
+  /** 觀眾那一趟問出來的疑問，交給編劇那一趟逐條判定。 */
+  audienceFindings?: string
 }
 
 export type AiRunRequest = {

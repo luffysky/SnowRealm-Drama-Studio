@@ -1,4 +1,5 @@
 import { TASK_PRIORITIES, type TaskPriorityValue } from '@/lib/constants'
+import { unwrapJson } from '@/lib/ai/json-text'
 
 /**
  * 把「任務建議」的輸出讀成可以建立的卡片 (Z153).
@@ -38,11 +39,7 @@ export type ParsedSuggestions = {
 }
 
 /** 去掉 ```json 圍欄，取出第一段看起來像 JSON 的東西。 */
-function unwrap(text: string): string {
-  const trimmed = text.trim()
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed)
-  return (fenced?.[1] ?? trimmed).trim()
-}
+
 
 /** 從任意 JSON 值裡找出那個陣列：裸陣列，或物件裡唯一的陣列屬性。 */
 function arrayIn(value: unknown): unknown[] | null {
@@ -62,7 +59,7 @@ export function parseTaskSuggestions(
 
   let parsed: unknown
   try {
-    parsed = JSON.parse(unwrap(text))
+    parsed = JSON.parse(unwrapJson(text))
   } catch {
     return { suggestions: [], rejected: ['整段讀不出 JSON'] }
   }

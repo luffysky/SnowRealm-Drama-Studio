@@ -170,6 +170,75 @@ export function instructionFor(task: AiTaskKind): string {
   return TASK_INSTRUCTIONS[task]
 }
 
+/**
+ * 編劇助手的兩種整理（Z198）。
+ *
+ * 暖寶的原話是「整理給我看」加四個問題：劇情是否連貫合理、細節處理是否得當、
+ * 總結目前的主線與人設、每一集有沒有爽點和鉤子（爽點在哪裡、鉤子是什麼）。
+ * 下面兩段就是照那四句話寫的，不是一份通用的審稿樣板。
+ *
+ * **一律要原文。** 「這一集爽點不夠」是一句評語，「第三段『他把銅板推回去』那
+ * 裡本來該翻盤卻停住了」才是可以拿去改的東西。沒有引文的判斷在這份報告裡沒有
+ * 用，所以格式上就要求它。
+ */
+export const AUDIT_INSTRUCTIONS = {
+  episode: `整理這一集，回答下面的問題。**只輸出 JSON**，不要有任何其他文字。
+
+{
+  "events": ["本集主要事件，按發生順序，每則一句"],
+  "payoff": {
+    "present": true,
+    "what": "這一集的爽點是什麼",
+    "where": "在哪裡（段落位置的描述，例如「後段，灶前對質」）",
+    "quote": "那一段的原文，二十到六十字"
+  },
+  "hook": {
+    "present": true,
+    "what": "結尾留下什麼讓人想看下一集",
+    "where": "在哪裡",
+    "quote": "結尾那一段的原文"
+  },
+  "details": [
+    { "issue": "細節處理不妥的地方", "quote": "原文" }
+  ],
+  "doubts": [
+    { "question": "讀到這裡會卡住的問題", "quote": "原文", "why": "為什麼會卡住" }
+  ]
+}
+
+判斷標準：
+
+- **爽點**是情緒的回報：期待被滿足、壓抑被釋放、對手被打臉、能力被看見。鋪墊不是爽點。沒有就 \`"present": false\` 並在 \`what\` 說明為什麼沒有——不要為了填滿欄位而把一件普通的事說成爽點。
+- **鉤子**是結尾讓人想看下一集的理由。「明天繼續做菜」不是鉤子。
+- **細節**看的是：錢數、份量、時間、距離、工序前後、物品有沒有憑空出現或消失、稱謂是否一致。
+- **疑點**只記**讀到這一集為止**會卡住的問題。後面才會解釋的事情不是漏洞——你不知道後面寫了什麼，所以把它寫成問題，不要寫成指控。
+- 每一項都要有原文。找不到原文可以引的那一項，就不要寫。`,
+
+  digest: `根據下面每一集的摘要，整理這部作品到目前為止的樣子。**只輸出 JSON**，不要有任何其他文字。
+
+{
+  "mainline": "到目前為止的主線，三到六句。寫事件的推進，不要寫文案",
+  "threads": ["支線，每條一句"],
+  "characters": [
+    {
+      "name": "角色名（照原文用字，不要改名）",
+      "now": "他現在是什麼樣子、處在什麼位置",
+      "wants": "他想要什麼",
+      "changed": "從第一集到現在變了什麼；沒變就寫「尚未看出變化」"
+    }
+  ],
+  "issues": [
+    { "question": "跨集的問題：前後矛盾、時間對不上、人物知道了他不該知道的事", "quote": "指出是哪幾集", "why": "為什麼是問題" }
+  ]
+}
+
+規則：
+
+- 只寫摘要裡真的有的東西。**不要補完你覺得應該會有的劇情。**
+- 人物只列真正推動劇情的那幾個，不要把路人也列進來。
+- \`issues\` 寧缺勿濫：看起來像矛盾但可能是還沒交代的，寫進去的時候要在 \`why\` 說明你為什麼認為它是矛盾而不是伏筆。`,
+} as const
+
 /** Renders the volatile per-request context as the user message. */
 export function renderContext(context: AiContext): string {
   const parts: string[] = []
@@ -201,8 +270,33 @@ export function renderContext(context: AiContext): string {
     parts.push(`## 角色設定（不得改名）\n${lines.join('\n')}`)
   }
 
+  /*
+   * 觀眾視角拿不到隱藏設定，而這件事要**在這裡**擋 (Z198).
+   *
+   * 組 context 的那一端已經不會放這一欄進去了，但「組的時候沒放」是一個習
+   * 慣，不是一個保證——下一個人多傳一個欄位進來，外洩會悄悄發生，而產出看起
+   * 來完全合理：模型知道答案，所以它說這一集沒有問題。
+   *
+   * 丟例外，讓一次外洩變成一次當掉。
+   */
+  if (context.auditPass === 'audience' && context.secretNotes) {
+    throw new Error('觀眾視角不可以拿到隱藏設定（secretNotes）')
+  }
+
+  if (context.priorSummary) {
+    parts.push(`## 此前已公開的劇情（觀眾看過的）\n${context.priorSummary}`)
+  }
+
   if (context.sourceText) {
     parts.push(`## 來源內容\n${context.sourceText}`)
+  }
+
+  if (context.secretNotes) {
+    parts.push(`## 編劇已確認的隱藏設定（只有編劇視角看得到）\n${context.secretNotes}`)
+  }
+
+  if (context.audienceFindings) {
+    parts.push(`## 觀眾視角問出來的疑問（逐條判定）\n${context.audienceFindings}`)
   }
 
   if (context.userInstruction) {

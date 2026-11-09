@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>SnowRealm Drama Studio｜編劇助手</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            font-family: system-ui, "Microsoft JhengHei", sans-serif
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            margin: 0;
+            background: #0b0e14;
+            color: #edf1f8;
+            display: flex;
+            min-height: 100vh
+        }
+
+        aside {
+            width: 220px;
+            background: #121722;
+            border-right: 1px solid #303747;
+            padding: 22px;
+            flex-shrink: 0
+        }
+
+        aside h2 {
+            font-size: 18px;
+            margin: 0 0 30px
+        }
+
+        nav {
+            padding: 12px;
+            background: #283249;
+            border-radius: 10px
+        }
+
+        main {
+            flex: 1;
+            min-width: 0;
+            padding: 28px;
+            max-width: 1300px
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 27px
+        }
+
+        h2 {
+            font-size: 19px
+        }
+
+        p,
+        .muted {
+            color: #aab6c9
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 18px 0
+        }
+
+        button {
+            background: #293449;
+            border: 1px solid #45516a;
+            color: white;
+            border-radius: 9px;
+            padding: 10px 15px;
+            cursor: pointer
+        }
+
+        button.active,
+        .primary {
+            background: #7055c9;
+            border-color: #7055c9
+        }
+
+        button:hover {
+            filter: brightness(1.15)
+        }
+
+        .panel {
+            background: #171e2b;
+            border: 1px solid #343f54;
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 16px
+        }
+
+        .tab {
+            display: none
+        }
+
+        .tab.active {
+            display: block
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            background: #0e1420;
+            border: 1px solid #46536a;
+            border-radius: 8px;
+            padding: 12px;
+            color: white;
+            margin: 8px 0 15px
+        }
+
+        textarea {
+            min-height: 130px;
+            resize: vertical
+        }
+
+        label {
+            display: block;
+            margin-top: 8px
+        }
+
+        .check {
+            display: flex;
+            gap: 9px;
+            align-items: start;
+            padding: 6px 0
+        }
+
+        .check input {
+            width: auto;
+            margin: 6px 0
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 12px
+        }
+
+        .card {
+            background: #222b3b;
+            border-radius: 10px;
+            padding: 16px
+        }
+
+        small {
+            color: #9cabc2
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #0c121e;
+            padding: 16px;
+            border-radius: 10px
+        }
+
+        @media(max-width:720px) {
+            body {
+                display: block
+            }
+
+            aside {
+                width: 100%;
+                padding: 14px
+            }
+
+            aside h2 {
+                margin-bottom: 10px
+            }
+
+            main {
+                padding: 15px
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <aside>
+        <h2>SnowRealm Drama Studio</h2>
+        <nav>🎬 編劇助手</nav>
+    </aside>
+    <main>
+        <h1>首席編劇助手</h1>
+        <p>SnowRealm Chief Story Architect｜虛構 200 年資歷的傳奇總編劇</p>
+        <div class="tabs" id="tabs"></div>
+        <section id="content"></section>
+    </main>
+    <script>
+        const names = [
+            "創作工作台", "劇情總覽", "單集審核", "跨集連貫性",
+            "人物狀態", "伏筆與懸疑", "爽點與鉤子", "審核報告", "審核規則"
+        ];
+        const rules = [
+            "檢查劇情事件是否有合理因果",
+            "檢查人物行為與台詞是否符合其當下認知",
+            "人物不能知道尚未取得的資訊",
+            "懸疑允許留白，但不能以故作神祕拖延",
+            "先解答讀者疑問，再判斷是否需要修改",
+            "追蹤伏筆首次出現、發展與回收",
+            "檢查人物關係是否逐步自然發展",
+            "檢查每集爽點、情緒回報與結尾鉤子",
+            "檢查商業價格、成本、時間與道具一致性",
+            "評估劇情是否適合影像化",
+            "區分既定事實、候選設定與 AI 推測",
+            "保留創作彈性，但不能無故推翻既有事實",
+            "所有疑點需提供原文依據",
+            "未經確認不得改寫正式小說"
+        ];
+        const skills = [
+            "劇情摘要與事件提取", "人物動機與認知檢查",
+            "跨集連貫性檢查", "伏筆與懸疑追蹤",
+            "爽點與情緒節奏分析", "集尾鉤子審核",
+            "商業數據與世界觀一致性", "人物台詞審核",
+            "漫劇影像化評估", "首次觀看觀眾模擬",
+            "問題分級與證據定位", "編劇審核報告生成"
+        ];
+        const $ = id => document.getElementById(id);
+        const panel = (title, body) => `<div class="panel"><h2>${title}</h2>${body}</div>`;
+        const field = (label, id, placeholder = "") => `<label>${label}</label><textarea id="${id}" placeholder="${placeholder}"></textarea>`;
+        const input = (label, id) => `<label>${label}</label><input id="${id}">`;
+        let current = 0;
+        let lastReport = null;
+        function render() {
+            $("tabs").innerHTML = names.map((n, i) => `<button class="${i === current ? 'active' : ''}" onclick="show(${i})">${n}</button>`).join("");
+            let html = "";
+            if (current === 0) {
+                html = panel("從零開始創作",
+                    input("作品名稱", "work") +
+                    `<label>作品類型</label><select id="genre"><option>古風美食創業</option><option>懸疑推理</option><option>都市情感</option><option>喜劇</option><option>科幻</option><option>自訂</option></select>` +
+                    field("一句話創意或故事構想", "idea", "描述主角、目標、衝突與故事方向") +
+                    `<label>創作內容</label><select id="createType"><option>故事核心概念</option><option>世界觀</option><option>人物設定</option><option>完整大綱</option><option>分集規劃</option><option>小說章節</option><option>短劇劇本</option><option>台詞精修</option></select>` +
+                    `<button class="primary" onclick="makeCreativePrompt()">產生創作指令</button>`);
+            }
+            if (current === 1) {
+                html = panel("劇情總覽",
+                    field("已完成章節摘要", "overview", "貼上各集內容或摘要") +
+                    `<p>整理主線、支線、角色發展、已確認設定、候選設定與未解決疑問。</p>`);
+            }
+            if (current === 2) {
+                html = panel("單集審核",
+                    input("作品名稱", "reviewWork") +
+                    input("審核集數", "episode") +
+                    `<label>審核模式</label><select id="mode">
+<option value="雙視角">雙視角（推薦）</option>
+<option value="觀眾">觀眾模式</option>
+<option value="編劇">編劇模式</option></select>`+
+                    field("此前已公開劇情", "previous") +
+                    field("本集小說／劇本全文", "chapter") +
+                    field("編劇已確認的隱藏設定", "secret") +
+                    `<button class="primary" onclick="makeReviewPrompt()">產生審核指令</button>`);
+            }
+            if (current === 3) {
+                html = panel("跨集連貫性",
+                    field("跨集劇情資料", "continuity") +
+                    `<p>檢查事件順序、時間、因果、人物關係、物品及商業數據。</p>`);
+            }
+            if (current === 4) {
+                html = panel("人物狀態追蹤",
+                    field("人物資料與出場紀錄", "characters") +
+                    `<p>追蹤每一集人物知道什麼、不知道什麼、目標、動機、言行及變化。</p>`);
+            }
+            if (current === 5) {
+                html = panel("伏筆與懸疑",
+                    field("伏筆及相關章節", "clues") +
+                    `<p>標記已埋設、發展中、已回收、待確認。合理留白不自動判為漏洞。</p>`);
+            }
+            if (current === 6) {
+                html = panel("爽點與鉤子",
+                    field("每集主要事件與結尾", "hooks") +
+                    `<p>檢查期待、阻礙、反擊、情緒回報及下一集追看動機。</p>`);
+            }
+            if (current === 7) {
+                html = panel("審核報告",
+                    `<p>審核結果必須附原文依據，區分合理留白、鋪陳不足、真正漏洞及資料不足。</p>
+<button onclick="exportReport()">匯出 JSON 報告</button>
+<button onclick="exportMarkdown()">匯出 Markdown 報告</button>
+<pre id="reportView">${lastReport ? JSON.stringify(lastReport, null, 2) : "尚未建立審核指令或報告。"}</pre>`);
+            }
+            if (current === 8) {
+                html = panel("暖寶 CEO 編劇審核準則",
+                    rules.map((r, i) => `<label class="check"><input type="checkbox" checked id="rule${i}"><span>${r}</span></label>`).join("") +
+                    `<button onclick="copyRules()">複製審核規則</button>`) +
+                    panel("12 項編劇 Skills",
+                        skills.map((s, i) => `<div class="card" style="margin:8px 0">${i + 1}. ${s}</div>`).join(""));
+            }
+            $("content").innerHTML = html +
+                (current === 0 || current === 2 ? panel("指令輸出",
+                    `<textarea id="output" style="min-height:250px" readonly></textarea>
+<button onclick="copyOutput()">複製指令</button>
+<button onclick="downloadPrompt()">下載 TXT</button>`) : "");
+        }
+        function show(i) { current = i; render() }
+        function val(id) { return $(id)?.value || "" }
+        function getRules() { return rules.map((r, i) => "- " + r).join("\n") }
+        const persona = `你是 SnowRealm Drama Studio 的首席編劇總監。
+以虛構200年影視編劇經驗為專業標準。
+精通小說、電影、短劇、漫劇、懸疑、人物弧光、戲劇節奏與影像敘事。
+必須提供可檢驗的分析，不得假裝全知。
+遵守暖寶 CEO 的編劇要求：
+${getRules()}
+沒有原文證據時，應標示推測或待確認。
+不得擅自改寫原稿。`;
+        function makeCreativePrompt() {
+            let text = `${persona}
+
+任務：從零創作。
+作品：${val("work")}
+類型：${val("genre")}
+產出：${val("createType")}
+故事構想：
+${val("idea")}
+
+請提出人物、動機、故事主線、衝突、情緒節奏、爽點、伏筆與鉤子。
+區分已確定設定與可調整方案。
+重要決策交由使用者確認。`;
+            $("output").value = text;
+            lastReport = { type: "創作指令", content: text };
+        }
+        function makeReviewPrompt() {
+            let mode = val("mode");
+            let previous = val("previous");
+            let chapter = val("chapter");
+            let secret = val("secret");
+            let text = `${persona}
+
+任務：審核 ${val("reviewWork")} 第 ${val("episode")} 集。
+模式：${mode}
+
+此前公開內容：
+${previous}
+
+本集內容：
+${chapter}
+
+`;
+            if (mode === "編劇" || mode === "雙視角") {
+                text += `編劇隱藏設定（僅供編劇階段）：
+${secret}
+`;
+            }
+            text += `
+審核要求：
+1. 總結本集主要事件與人物。
+2. 檢查因果、人物動機與認知。
+3. 評估爽點、情緒回報與集尾鉤子。
+4. 對疑點提供原文證據及具體位置。
+5. 區分合理留白、鋪陳不足、真實漏洞與資料不足。
+6. 優先解釋，不直接改稿。
+7. 提出最小必要修改及候選解釋。
+
+雙視角必須先執行完全隔離未來資訊的觀眾審核，
+再由編劇視角判斷疑問是否已有合理解釋。
+不得讓觀眾階段接觸隱藏設定。`;
+            $("output").value = text;
+            lastReport = {
+                type: "審核指令", work: val("reviewWork"),
+                episode: val("episode"), mode, content: text,
+                note: "本檔案尚未執行 AI 審核"
+            };
+        }
+        function copyOutput() { navigator.clipboard.writeText(val("output")).then(() => alert("已複製")) }
+        function copyRules() { navigator.clipboard.writeText(getRules()).then(() => alert("已複製")) }
+        function save(name, content, type) {
+            let a = document.createElement("a");
+            a.href = URL.createObjectURL(new Blob([content], { type }));
+            a.download = name; a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        }
+        function downloadPrompt() { save("snowrealm_prompt.txt", val("output"), "text/plain;charset=utf-8") }
+        function exportReport() {
+            save("snowrealm_review.json", JSON.stringify(lastReport || { status: "尚未審核" }, null, 2), "application/json");
+        }
+        function exportMarkdown() {
+            save("snowrealm_review.md",
+                "# SnowRealm 編劇審核紀錄\n\n" +
+                (lastReport?.content || "尚未執行審核"),
+                "text/markdown;charset=utf-8");
+        }
+        render();
+    </script>
+</body>
+
+</html>
