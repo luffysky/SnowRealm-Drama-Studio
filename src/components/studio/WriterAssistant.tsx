@@ -8,6 +8,8 @@ import {
   Download,
   Loader2,
   MessageCircleHeart,
+  Lock,
+  Scale,
   Send,
   Sparkles,
   Trash2,
@@ -26,12 +28,17 @@ import {
   asTurns,
   AUDIT_QUESTIONS,
   REPORT_KIND_LABEL,
+  VERDICT_HINT,
+  VERDICT_LABEL,
+  asVerdicts,
   type AskTurn,
   type AuditBeat,
   type AuditDoubt,
   type EpisodeAudit,
+  type DoubtVerdict,
   type SavedReport,
   type StoryDigest,
+  type VerdictCode,
   type WriterReportKind,
 } from '@/lib/ai/story-audit-view'
 import { cn } from '@/lib/utils'
@@ -73,6 +80,10 @@ type EpisodeState = {
   audit?: EpisodeAudit | null
   problem?: string | null
   error?: string
+  /** 編劇視角判完的那一份（Z201）。 */
+  verdicts?: DoubtVerdict[]
+  /** 判的時候手上有沒有隱藏設定——沒有的話可信度完全不一樣。 */
+  hadSecret?: boolean
 }
 
 const RULES_KEY = 'srds:writer-rules'
@@ -82,6 +93,7 @@ export function WriterAssistant({
   projectTitle,
   episodes,
   saved,
+  withSecret,
   canRun,
 }: {
   projectId: string
@@ -89,6 +101,8 @@ export function WriterAssistant({
   episodes: WriterEpisode[]
   /** 存進資料庫的那些，最新的在前面。 */
   saved: SavedReport[]
+  /** 已經填過隱藏設定的集數 id——**只有 id，沒有內容**。 */
+  withSecret: string[]
   canRun: boolean
 }) {
   const toast = useToast()
@@ -196,6 +210,41 @@ export function WriterAssistant({
       })
       return false
     }
+  }
+
+  /**
+   * 編劇視角判一次（Z201）。
+   *
+   * 這是**第二次**呼叫，不是同一個對話的第二段：觀眾那一趟的 context 物件裡
+   * 根本沒有隱藏設定那一欄。在同一個對話裡叫模型「假裝不知道」是一個請求，兩
+   * 次獨立的呼叫才是一個保證。
+   */
+  async function judge(episode: WriterEpisode, doubts: EpisodeAudit['doubts']): Promise<void> {
+    const response = await apiFetch(`/api/projects/${projectId}/audit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        episodeId: episode.episodeId,
+        rules: enabled,
+        judge: doubts.map((d) => ({ question: d.question, quote: d.quote, why: d.why })),
+      }),
+    })
+    if (!response.ok) throw new Error(await readApiError(response))
+    const body = (await response.json()) as {
+      judge: { verdicts: DoubtVerdict[] | null; problem: string | null; hadSecret: boolean }
+    }
+    if (!body.judge.verdicts) {
+      toast.error('判不出來', body.judge.problem ?? undefined)
+      return
+    }
+    setStates((current) => ({
+      ...current,
+      [episode.episodeId]: {
+        ...(current[episode.episodeId] ?? { status: 'done' }),
+        verdicts: body.judge.verdicts!,
+        hadSecret: body.judge.hadSecret,
+      },
+    }))
   }
 
   async function runAll() {
@@ -355,6 +404,17 @@ export function WriterAssistant({
                     payload: audit,
                   })
                 }
+                hasSecret={withSecret.includes(episode.episodeId)}
+                onJudge={(doubts) => judge(episode, doubts)}
+                onSaveVerdicts={(verdicts) =>
+                  save({
+                    kind: 'VERDICT',
+                    episodeId: episode.episodeId,
+                    title: `第 ${episode.number} 集的編劇判定・${stamp()}`,
+                    payload: verdicts,
+                  })
+                }
+                projectId={projectId}
               />
             </li>
           ))}
@@ -652,14 +712,22 @@ function EpisodeCard({
   episode,
   state,
   canRun,
+  hasSecret,
   onRun,
   onSave,
+  onJudge,
+  onSaveVerdicts,
+  projectId,
 }: {
   episode: WriterEpisode
   state: EpisodeState | undefined
   canRun: boolean
+  hasSecret: boolean
   onRun: () => void
   onSave: (audit: EpisodeAudit) => Promise<void>
+  onJudge: (doubts: EpisodeAudit['doubts']) => Promise<void>
+  onSaveVerdicts: (verdicts: DoubtVerdict[]) => Promise<void>
+  projectId: string
 }) {
   const status = state?.status ?? 'idle'
 
@@ -719,12 +787,44 @@ function EpisodeCard({
         </p>
       )}
 
-      {state?.audit && <AuditView audit={state.audit} />}
+      {state?.audit && (
+        <AuditView
+          audit={state.audit}
+          verdicts={state.verdicts}
+          hadSecret={state.hadSecret}
+          canRun={canRun}
+          onJudge={onJudge}
+          onSaveVerdicts={onSaveVerdicts}
+        />
+      )}
+
+      {state?.audit && (
+        <SecretBox
+          projectId={projectId}
+          episodeId={episode.episodeId}
+          canRun={canRun}
+          hasSecret={hasSecret}
+        />
+      )}
     </section>
   )
 }
 
-function AuditView({ audit }: { audit: EpisodeAudit }) {
+function AuditView({
+  audit,
+  verdicts,
+  hadSecret,
+  canRun,
+  onJudge,
+  onSaveVerdicts,
+}: {
+  audit: EpisodeAudit
+  verdicts?: DoubtVerdict[]
+  hadSecret?: boolean
+  canRun?: boolean
+  onJudge?: (doubts: EpisodeAudit['doubts']) => Promise<void>
+  onSaveVerdicts?: (verdicts: DoubtVerdict[]) => Promise<void>
+}) {
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-3 lg:grid-cols-2">
@@ -772,13 +872,40 @@ function AuditView({ audit }: { audit: EpisodeAudit }) {
 
       {audit.doubts.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h4 className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-200">
-            <span aria-hidden>🤔</span> 讀到這裡會卡住的地方
-          </h4>
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-200">
+              <span aria-hidden>🤔</span> 讀到這裡會卡住的地方
+            </h4>
+            <span className="text-xs text-ink-600">這是**觀眾視角**，它看不到後面</span>
+
+            {onJudge && (
+              <span className="ml-auto flex items-center gap-2">
+                {verdicts && onSaveVerdicts && (
+                  <SaveButton onSave={() => onSaveVerdicts(verdicts)} />
+                )}
+                <JudgeButton
+                  canRun={Boolean(canRun)}
+                  again={Boolean(verdicts)}
+                  onJudge={() => onJudge(audit.doubts)}
+                />
+              </span>
+            )}
+          </div>
+
+          {verdicts && hadSecret === false && (
+            <p className="rounded-xl bg-amber-950/25 px-4 py-2.5 text-[13px] leading-relaxed text-amber-200/90 ring-1 ring-amber-900/40">
+              這一集還沒有填隱藏設定，所以編劇視角也不知道後面會怎麼寫——它只能靠正文判，
+              多半會落在「資料不足」。填了再判一次會準得多。
+            </p>
+          )}
+
           <ul className="flex flex-col gap-3">
             {audit.doubts.map((doubt) => (
               <li key={doubt.question}>
-                <DoubtView doubt={doubt} />
+                <DoubtView
+                  doubt={doubt}
+                  verdict={verdicts?.find((v) => v.question === doubt.question)}
+                />
               </li>
             ))}
           </ul>
@@ -834,13 +961,251 @@ function BeatCard({
   )
 }
 
-function DoubtView({ doubt }: { doubt: AuditDoubt }) {
+function DoubtView({ doubt, verdict }: { doubt: AuditDoubt; verdict?: DoubtVerdict }) {
   return (
-    <div className="flex flex-col gap-1.5 rounded-xl bg-stage-850/60 px-4 py-3 ring-1 ring-stage-700/50">
-      <span className="text-[15px] leading-7 text-ink-100">{doubt.question}</span>
+    <div
+      className={cn(
+        'flex flex-col gap-1.5 rounded-xl px-4 py-3 ring-1',
+        verdict ? VERDICT_STYLE[verdict.verdict] : 'bg-stage-850/60 ring-stage-700/50'
+      )}
+    >
+      <div className="flex flex-wrap items-baseline gap-2">
+        {verdict && <VerdictChip code={verdict.verdict} />}
+        <span className="min-w-0 flex-1 text-[15px] leading-7 text-ink-100">
+          {doubt.question}
+        </span>
+      </div>
+
       {doubt.why && <span className="text-sm leading-6 text-ink-400">{doubt.why}</span>}
       {doubt.quote && <Quote text={doubt.quote} />}
+
+      {verdict && (
+        <div className="mt-1 flex flex-col gap-1.5 border-t border-stage-700/50 pt-2.5">
+          <p className="flex gap-2 text-sm leading-7">
+            <span className="shrink-0 rounded-md bg-stage-800 px-1.5 text-[12px] leading-6 text-ink-500">
+              編劇
+            </span>
+            <span className="min-w-0 text-ink-200">{verdict.because}</span>
+          </p>
+          {verdict.fix && (
+            <p className="flex gap-2 text-sm leading-7">
+              <span className="shrink-0 rounded-md bg-accent-500/20 px-1.5 text-[12px] leading-6 text-accent-200">
+                怎麼改
+              </span>
+              <span className="min-w-0 text-ink-200">{verdict.fix}</span>
+            </p>
+          )}
+        </div>
+      )}
     </div>
+  )
+}
+
+/**
+ * 四種判定的顏色。
+ *
+ * **「合理留白」不是警告**：那是一個「不用改」的結論，所以它是綠的。第一版把
+ * 四種都畫成同一個灰，結果整份報告讀起來像四十條待辦。
+ */
+const VERDICT_STYLE: Record<VerdictCode, string> = {
+  HELD_BACK: 'bg-emerald-950/25 ring-emerald-900/40',
+  UNDER_SEEDED: 'bg-amber-950/25 ring-amber-900/40',
+  REAL_HOLE: 'bg-rose-950/30 ring-rose-900/50',
+  NOT_ENOUGH_INFO: 'bg-stage-850/60 ring-stage-700/50',
+}
+
+const VERDICT_CHIP: Record<VerdictCode, string> = {
+  HELD_BACK: 'bg-emerald-500/15 text-emerald-300 ring-emerald-700/50',
+  UNDER_SEEDED: 'bg-amber-500/15 text-amber-300 ring-amber-700/50',
+  REAL_HOLE: 'bg-rose-500/15 text-rose-300 ring-rose-700/50',
+  NOT_ENOUGH_INFO: 'bg-stage-800 text-ink-400 ring-stage-600',
+}
+
+function VerdictChip({ code }: { code: VerdictCode }) {
+  return (
+    <span
+      title={VERDICT_HINT[code]}
+      className={cn(
+        'shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset',
+        VERDICT_CHIP[code]
+      )}
+    >
+      {VERDICT_LABEL[code]}
+    </span>
+  )
+}
+
+function JudgeButton({
+  canRun,
+  again,
+  onJudge,
+}: {
+  canRun: boolean
+  again: boolean
+  onJudge: () => Promise<void>
+}) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+
+  async function run() {
+    if (busy) return
+    setBusy(true)
+    try {
+      await onJudge()
+    } catch (cause) {
+      toast.error('判不出來', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={run}
+      disabled={!canRun || busy}
+      title={
+        canRun
+          ? '它會拿到這一集的隱藏設定，判斷每一條是刻意留白還是真的漏了'
+          : '你的角色不能跑 AI 任務'
+      }
+      className={cn(
+        'tap inline-flex items-center gap-1.5 rounded-full bg-stage-850 px-3 py-1.5 text-[13px] text-ink-300 ring-1 ring-stage-700 transition-all',
+        'hover:-translate-y-0.5 hover:text-ink-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0'
+      )}
+    >
+      {busy ? (
+        <Loader2 aria-hidden className="size-3.5 animate-spin" />
+      ) : (
+        <Scale aria-hidden className="size-3.5" />
+      )}
+      {again ? '再判一次' : '用編劇視角判一次'}
+    </button>
+  )
+}
+
+/**
+ * 編劇已確認的隱藏設定（Z201）。
+ *
+ * 預設收合，而且標題不透露內容——這一塊是劇透，不該在捲動經過的時候被看到。
+ */
+function SecretBox({
+  projectId,
+  episodeId,
+  canRun,
+  hasSecret,
+}: {
+  projectId: string
+  episodeId: string
+  canRun: boolean
+  /** 已經填過了嗎。**只是一個布林，不是內容。** */
+  hasSecret: boolean
+}) {
+  const toast = useToast()
+  const [notes, setNotes] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [dirty, setDirty] = useState(false)
+
+  /** 展開的時候才去拿——這一欄是劇透，不要在頁面載入時就撈進瀏覽器。 */
+  async function load() {
+    if (loaded) return
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/episodes/${episodeId}/secret`
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+      const body = (await response.json()) as { notes: string }
+      setNotes(body.notes)
+      setLoaded(true)
+    } catch (cause) {
+      toast.error('讀不到隱藏設定', cause instanceof Error ? cause.message : undefined)
+    }
+  }
+
+  async function submit() {
+    if (busy) return
+    setBusy(true)
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/episodes/${episodeId}/secret`,
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ notes }),
+        }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+      toast.success('存好了', '下次判定就會用到。')
+      setDirty(false)
+    } catch (cause) {
+      toast.error('存不起來', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <details
+      className="group rounded-xl bg-stage-950/40 ring-1 ring-stage-700/50"
+      onToggle={(event) => {
+        if ((event.currentTarget as HTMLDetailsElement).open) void load()
+      }}
+    >
+      <summary className="tap flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-sm text-ink-400 transition-colors hover:text-ink-100">
+        <ChevronRight
+          aria-hidden
+          className="size-4 shrink-0 text-ink-600 transition-transform group-open:rotate-90"
+        />
+        <Lock aria-hidden className="size-3.5 text-ink-600" />
+        編劇已確認的隱藏設定
+        {hasSecret ? (
+          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-300">
+            已填
+          </span>
+        ) : (
+          <span className="rounded-full bg-stage-800 px-2 py-0.5 text-xs text-ink-500">
+            還沒填
+          </span>
+        )}
+        <span className="text-xs text-ink-600">只有「編劇視角」那一趟看得到</span>
+      </summary>
+
+      <div className="flex flex-col gap-2.5 border-t border-stage-700/50 p-4">
+        <textarea
+          value={notes}
+          rows={4}
+          maxLength={20_000}
+          disabled={!canRun || busy || !loaded}
+          placeholder={
+            loaded
+              ? '例如：梅花印其實是沈家與許家的共營商契，第 28 集才揭曉。許山河知道，但他要等沈知味自己查出來。'
+              : '讀取中…'
+          }
+          onChange={(event) => {
+            setNotes(event.target.value)
+            setDirty(true)
+          }}
+          className="w-full resize-y rounded-xl bg-stage-950 px-4 py-3 text-[15px] leading-7 text-ink-50 ring-1 ring-stage-700 outline-none placeholder:text-ink-600 focus:ring-2 focus:ring-accent-500/60 disabled:opacity-50"
+        />
+
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 text-xs leading-relaxed text-ink-600">
+            寫後面會怎麼交代。觀眾視角那一趟**拿不到這一段**——它是另一次獨立的呼叫，
+            連欄位都沒有。
+          </p>
+          <BigButton
+            primary
+            busy={busy}
+            disabled={!canRun || !dirty}
+            onClick={submit}
+            icon={<Lock className="size-4" />}
+          >
+            存設定
+          </BigButton>
+        </div>
+      </div>
+    </details>
   )
 }
 
@@ -1210,6 +1575,7 @@ function SavedItem({
   const digest = asStoryDigest(report)
   const audit = asEpisodeAudit(report)
   const turns = asTurns(report)
+  const verdicts = asVerdicts(report)
 
   async function remove() {
     if (removing) return
@@ -1251,6 +1617,20 @@ function SavedItem({
         {digest && <DigestView digest={digest} />}
 
         {audit && <AuditView audit={audit} />}
+
+        {verdicts.length > 0 && (
+          <ul className="flex flex-col gap-3">
+            {verdicts.map((verdict) => (
+              <li key={verdict.question}>
+                {/* 存起來的判定沒有原本那一條疑點的引文，所以用判定自己的問句。 */}
+                <DoubtView
+                  doubt={{ question: verdict.question, quote: '', why: '' }}
+                  verdict={verdict}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
 
         {turns.length > 0 && (
           <ul className="flex flex-col gap-5">

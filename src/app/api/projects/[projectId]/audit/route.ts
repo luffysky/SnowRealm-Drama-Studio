@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import { handle, jsonOk, parseJson, requirePermission } from '@/lib/api'
+import { ApiError, handle, jsonOk, parseJson, requirePermission } from '@/lib/api'
 import { requireProjectApi } from '@/lib/project-access'
-import { askWriter, auditEpisode, digestStory } from '@/lib/ai/story-audit'
+import { askWriter, auditEpisode, digestStory, judgeEpisode } from '@/lib/ai/story-audit'
 
 export const runtime = 'nodejs'
 
@@ -33,6 +33,21 @@ const bodySchema = z.object({
     .optional(),
   /** 已經算好的整理，當材料用——省得模型再把十萬字讀一次。 */
   material: z.string().max(60_000).optional(),
+  /**
+   * 有這個就是**編劇視角的判定**（Z201）：拿觀眾那一趟問出來的疑點，逐條判成
+   * 合理留白／鋪陳不足／真正漏洞／資料不足。
+   */
+  judge: z
+    .array(
+      z.object({
+        question: z.string().min(1).max(2000),
+        quote: z.string().max(2000).optional().default(''),
+        why: z.string().max(2000).optional().default(''),
+      })
+    )
+    .min(1)
+    .max(30)
+    .optional(),
 })
 
 /**
@@ -49,6 +64,18 @@ export const POST = handle(
     await requireProjectApi(projectId, user.id)
 
     const input = await parseJson(request, bodySchema)
+
+    if (input.judge) {
+      if (!input.episodeId) throw ApiError.badRequest('判定要指定是哪一集')
+      const result = await judgeEpisode({
+        projectId,
+        episodeId: input.episodeId,
+        doubts: input.judge,
+        user,
+        ...(input.rules ? { rules: input.rules } : {}),
+      })
+      return jsonOk({ judge: result })
+    }
 
     if (input.question) {
       const result = await askWriter({

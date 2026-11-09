@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { WriterAssistant } from '@/components/studio/WriterAssistant'
 import { auditableEpisodes } from '@/lib/ai/story-audit'
+import { secretEpisodeIds } from '@/lib/ai/episode-secrets'
 import { listReports } from '@/lib/ai/writer-reports'
 import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
@@ -27,10 +28,17 @@ export default async function WriterPage({ params }: Params) {
   const { projectId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const [episodes, saved] = await Promise.all([
+  const [episodes, saved, withSecret] = await Promise.all([
     auditableEpisodes(project.id),
     // 存起來的那些（Z200）。伺服器端讀，所以重新整理之後它們還在。
     listReports(project.id),
+    /*
+     * 哪幾集已經填過隱藏設定（Z201）。
+     *
+     * **只拿 id，不拿內容**——畫面要的是一個徽章，而把那段劇透送進每一次頁面
+     * 載入，正是這整個功能在防的事。
+     */
+    secretEpisodeIds(project.id),
   ])
 
   return (
@@ -40,6 +48,7 @@ export default async function WriterPage({ params }: Params) {
         projectTitle={project.title}
         episodes={episodes}
         saved={saved}
+        withSecret={withSecret}
         canRun={can(user, 'ai.run')}
       />
     </div>

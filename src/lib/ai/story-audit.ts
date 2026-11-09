@@ -1,14 +1,18 @@
 import { and, asc, eq, isNull, lt } from 'drizzle-orm'
 import { db } from '@/db'
-import { characters, chapters, documents, episodes, projects } from '@/db/schema'
+import { characters, chapters, documents, episodes, projects, worldEntries } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import { auditPersona } from '@/lib/ai/audit-rules'
 import { AUDIT_INSTRUCTIONS } from '@/lib/ai/prompts'
+import { getSecret } from '@/lib/ai/episode-secrets'
 import {
   parseEpisodeAudit,
   parseStoryDigest,
+  parseVerdicts,
   type AskTurn,
+  type AuditDoubt,
+  type DoubtVerdict,
   type EpisodeAudit,
   type StoryDigest,
 } from '@/lib/ai/story-audit-view'
@@ -255,6 +259,125 @@ export async function digestStory(input: {
     model: result.model,
     costUsd: result.costUsd,
     episodeNumbers: written.map((row) => row.number),
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+
+export type JudgeResult = {
+  verdicts: DoubtVerdict[] | null
+  problem: string | null
+  model: string
+  costUsd: number | null
+  /** 有沒有拿到隱藏設定。沒有的話判定的可信度完全不一樣，畫面要說。 */
+  hadSecret: boolean
+}
+
+/**
+ * 編劇視角：逐條判定觀眾問出來的疑點（Z201）。
+ *
+ * ## 這是**第二次**呼叫，不是同一個對話的第二段
+ *
+ * 觀眾那一趟（`auditEpisode`）的 context 物件裡根本沒有 `secretNotes` 這一欄，
+ * 而且它拿不到編號比這一集大的任何東西。在同一個對話裡叫模型「假裝不知道」，
+ * 是一個請求；兩次獨立的呼叫，才是一個保證。
+ *
+ * `renderContext` 還有第二道：`auditPass === 'audience'` 時遇到 `secretNotes`
+ * **直接丟例外**。組 context 的那一端不放是一個習慣，不是保證。
+ *
+ * ## 沒有隱藏設定也判得了，但判得比較差
+ *
+ * 那時候它只能靠正文與既定設定，所以「後面會交代」這件事無從確認——多半會落到
+ * `NOT_ENOUGH_INFO`。回傳 `hadSecret` 讓畫面說清楚，不要讓人以為那是一個有把握
+ * 的結論。
+ */
+export async function judgeEpisode(input: {
+  projectId: string
+  episodeId: string
+  doubts: readonly AuditDoubt[]
+  user: SessionUser
+  rules?: readonly number[]
+}): Promise<JudgeResult> {
+  if (input.doubts.length === 0) throw ApiError.badRequest('沒有疑點可以判定')
+
+  const [episode] = await db
+    .select({ id: episodes.id, number: episodes.number, title: episodes.title })
+    .from(episodes)
+    .where(
+      and(
+        eq(episodes.id, input.episodeId),
+        eq(episodes.projectId, input.projectId),
+        isNull(episodes.deletedAt)
+      )
+    )
+    .limit(1)
+  if (!episode) throw ApiError.notFound('找不到這一集')
+
+  const [project] = await db
+    .select({ title: projects.title })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .limit(1)
+
+  const [text, secret, cast, canon] = await Promise.all([
+    novelText(episode.id),
+    // 唯一拿得到隱藏設定的地方，見 `episode-secrets.ts` 的檔頭。
+    getSecret(input.projectId, episode.id),
+    db
+      .select({ name: characters.name, tier: characters.tier })
+      .from(characters)
+      .where(and(eq(characters.projectId, input.projectId), isNull(characters.deletedAt)))
+      .orderBy(asc(characters.name)),
+    db
+      .select({
+        title: worldEntries.title,
+        category: worldEntries.category,
+        body: worldEntries.body,
+      })
+      .from(worldEntries)
+      .where(and(eq(worldEntries.projectId, input.projectId), isNull(worldEntries.deletedAt)))
+      .limit(40),
+  ])
+
+  const listed = input.doubts
+    .map((doubt, index) => `${index + 1}. ${doubt.question}${doubt.quote ? `\n   原文：${doubt.quote}` : ''}`)
+    .join('\n')
+
+  const result = await runNow({
+    task: 'NOVEL_REVIEW',
+    projectId: input.projectId,
+    episodeId: episode.id,
+    user: input.user,
+    label: `編劇助手・判定第 ${episode.number} 集`,
+    context: {
+      ...(project?.title ? { projectTitle: project.title } : {}),
+      episodeNumber: episode.number,
+      ...(episode.title ? { episodeTitle: episode.title } : {}),
+      /*
+       * **`writer`，不是 `audience`。**
+       *
+       * 這一行決定了 `renderContext` 會不會讓 `secretNotes` 過去。寫錯成
+       * `audience` 的話它會丟例外，而不是悄悄把隱藏設定吃掉。
+       */
+      auditPass: 'writer',
+      ...(canon.length > 0 ? { worldEntries: canon } : {}),
+      ...(cast.length > 0
+        ? { characters: cast.map((row) => ({ name: row.name, tier: row.tier })) }
+        : {}),
+      sourceText: text,
+      ...(secret.trim() ? { secretNotes: secret.trim() } : {}),
+      audienceFindings: listed,
+      userInstruction: `${auditPersona(input.rules)}\n\n${AUDIT_INSTRUCTIONS.writer}`,
+    },
+  })
+
+  const parsed = parseVerdicts(result.text)
+  return {
+    verdicts: parsed.value,
+    problem: parsed.problem,
+    model: result.model,
+    costUsd: result.costUsd,
+    hadSecret: Boolean(secret.trim()),
   }
 }
 

@@ -11,6 +11,7 @@ src/lib/ai/queue.ts#decideMediaStep
 src/lib/ai/registry.ts#mediaAdapterFor
 src/lib/ai/registry.ts#resolveAdapterForTask
 src/lib/ai/vendors.ts#vendorByBaseUrl
+src/lib/ai/vip.ts#adapterErrorToApi
 src/lib/api.ts#jsonError
 src/lib/approvals.ts#approvalHistory
 src/lib/approvals.ts#currentApproval
@@ -23,7 +24,6 @@ src/lib/assistant/run.ts#chapterForModel
 src/lib/assistant/run.ts#newReadBudget
 src/lib/assistant/threads.ts#MAX_THREADS
 src/lib/attribution-job.ts#speakersFor
-src/lib/attribution.ts#numbered
 src/lib/auth/csrf.ts#generateCsrfToken
 src/lib/auth/csrf.ts#readCsrfCookie
 src/lib/auth/password.ts#ARGON2_OPTIONS
@@ -48,7 +48,6 @@ src/lib/chat.ts#TYPING_WINDOW_SEC
 src/lib/chinese.ts#DEFAULT_SCRIPT
 src/lib/chinese.ts#SCRIPT_LABEL
 src/lib/chinese.ts#convertParagraphs
-src/lib/chinese.ts#isScriptPreference
 src/lib/chinese.ts#toSimplified
 src/lib/chinese.ts#toTraditional
 src/lib/client-fetch.ts#readCsrfToken
@@ -57,8 +56,6 @@ src/lib/constants.ts#APPROVAL_STATE_LABEL
 src/lib/constants.ts#APPROVAL_STATE_STYLE
 src/lib/constants.ts#ASSET_VARIANT_KINDS
 src/lib/constants.ts#ASSET_VARIANT_KIND_LABEL
-src/lib/constants.ts#EXPENSE_CATEGORIES
-src/lib/constants.ts#EXPENSE_CATEGORY_LABEL
 src/lib/constants.ts#FLAGSHIP
 src/lib/constants.ts#NOTIFICATION_KINDS
 src/lib/constants.ts#NOTIFICATION_KIND_LABEL
@@ -92,7 +89,6 @@ src/lib/lyrics.ts#parsePlain
 src/lib/milestones.ts#MILESTONES
 src/lib/milestones.ts#MILESTONE_SUMMARY
 src/lib/milestones.ts#allMilestoneReports
-src/lib/money.ts#BASE_CURRENCY
 src/lib/music-tags.ts#MAX_SUGGESTIONS
 src/lib/narration.ts#DIALOGUE_SHAPE
 src/lib/narration.ts#TONES

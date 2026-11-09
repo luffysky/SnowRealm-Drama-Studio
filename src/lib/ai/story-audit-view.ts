@@ -102,12 +102,91 @@ export const AUDIT_QUESTIONS = [
 /* -------------------------------------------------------------------------- */
 
 /**
+ * 編劇視角對一條疑點的判定（Z201）。
+ *
+ * 這四種的分界就是這個功能存在的理由：**「觀眾看不懂」跟「作者寫壞了」是兩件
+ * 事**，而只看一集分不出來。編劇那一趟知道後面會怎麼寫，所以它判得出「刻意留
+ * 白」與「真的漏了」。
+ *
+ * 用**代碼**不是中文字串：模型回中文的時候會自己微調用字（「合理留白」寫成
+ * 「屬於合理留白」），而那會讓比對整個失效。中文在畫面那一層。
+ */
+const VERDICTS = ['HELD_BACK', 'UNDER_SEEDED', 'REAL_HOLE', 'NOT_ENOUGH_INFO'] as const
+export type VerdictCode = (typeof VERDICTS)[number]
+
+export const VERDICT_LABEL: Record<VerdictCode, string> = {
+  HELD_BACK: '合理留白',
+  UNDER_SEEDED: '鋪陳不足',
+  REAL_HOLE: '真正漏洞',
+  NOT_ENOUGH_INFO: '資料不足',
+}
+
+export const VERDICT_HINT: Record<VerdictCode, string> = {
+  HELD_BACK: '後面會交代，現在不講是對的',
+  UNDER_SEEDED: '後面會交代，但現在的鋪墊不夠讓人願意等',
+  REAL_HOLE: '後面也沒有交代，或是跟已經寫定的事情衝突',
+  NOT_ENOUGH_INFO: '手上的材料判不出來，要先補東西',
+}
+
+export type DoubtVerdict = {
+  /** 原本那一條疑點，照抄回來，用來對位。 */
+  question: string
+  verdict: VerdictCode
+  /** 為什麼這樣判——引隱藏設定或原文。 */
+  because: string
+  /** 最小必要修改。`合理留白` 時是空的：沒有東西要改。 */
+  fix: string
+}
+
+function isVerdict(value: unknown): value is VerdictCode {
+  return typeof value === 'string' && (VERDICTS as readonly string[]).includes(value)
+}
+
+/** 編劇那一趟的輸出。 */
+export function parseVerdicts(text: string): Parsed<DoubtVerdict[]> {
+  const raw = readJson(text)
+  if (!raw.value) return { value: null, problem: raw.problem }
+
+  const list = Array.isArray(raw.value)
+    ? raw.value
+    : ((raw.value as Record<string, unknown>).verdicts as unknown)
+
+  if (!Array.isArray(list)) return { value: null, problem: '回覆裡沒有一個判定的陣列' }
+
+  const out: DoubtVerdict[] = []
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const source = item as Record<string, unknown>
+    const question = str(source.question)
+    if (!question) continue
+    /*
+     * 判不出代碼的就當成「資料不足」。
+     *
+     * 丟掉那一條的話，畫面上會少一條而沒有人知道少了什麼——而「我判不出來」本
+     * 來就是四種答案之一，說出來比消失好。
+     */
+    const verdict = isVerdict(source.verdict) ? source.verdict : 'NOT_ENOUGH_INFO'
+    out.push({
+      question,
+      verdict,
+      because: str(source.because),
+      fix: verdict === 'HELD_BACK' ? '' : str(source.fix),
+    })
+  }
+
+  if (out.length === 0) return { value: null, problem: '一條判定都讀不出來' }
+  return { value: out, problem: null }
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
  * 存起來的那一份（Z200）。
  *
  * `kind` 是 text 不是 enum（Z184 的教訓：pg 的 enum 加了就刪不掉），所以合法值
  * 由這裡把關——資料庫擋不住，應用程式要擋。
  */
-export const REPORT_KINDS = ['DIGEST', 'EPISODE', 'ASK'] as const
+export const REPORT_KINDS = ['DIGEST', 'EPISODE', 'ASK', 'VERDICT'] as const
 export type WriterReportKind = (typeof REPORT_KINDS)[number]
 
 export function isReportKind(value: string): value is WriterReportKind {
@@ -118,6 +197,7 @@ export const REPORT_KIND_LABEL: Record<WriterReportKind, string> = {
   DIGEST: '主線與人設',
   EPISODE: '逐集整理',
   ASK: '問答',
+  VERDICT: '編劇判定',
 }
 
 export type SavedReport = {
@@ -141,6 +221,12 @@ export function asEpisodeAudit(report: SavedReport): EpisodeAudit | null {
 
 export function asStoryDigest(report: SavedReport): StoryDigest | null {
   return report.kind === 'DIGEST' ? (report.payload as StoryDigest) : null
+}
+
+export function asVerdicts(report: SavedReport): DoubtVerdict[] {
+  return report.kind === 'VERDICT' && Array.isArray(report.payload)
+    ? (report.payload as DoubtVerdict[])
+    : []
 }
 
 export function asTurns(report: SavedReport): AskTurn[] {

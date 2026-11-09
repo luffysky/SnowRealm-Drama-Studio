@@ -31,7 +31,8 @@ let pass = 0
 let fail = 0
 const ok = (label, good, detail = '') => {
   console.log(`  ${good ? '✓' : '✗'} ${label}${detail ? `  ${detail}` : ''}`)
-  good ? (pass += 1) : (fail += 1)
+  if (good) pass += 1
+  else fail += 1
 }
 
 const cookies = await signIn(base, 'collaborator')

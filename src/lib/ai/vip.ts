@@ -4,7 +4,7 @@ import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
 import { adapterForTask } from '@/lib/ai/jobs'
 import { TASK_EFFORT } from '@/lib/ai/prompts'
-import type { AiContext, AiRunResult, AiTaskKind } from '@/lib/ai/types'
+import { AiAdapterError, type AiContext, type AiRunResult, type AiTaskKind } from '@/lib/ai/types'
 import { assertWithinBudget, recordActual } from '@/lib/usage'
 
 /**
@@ -75,12 +75,18 @@ export async function runNow(input: {
     category: 'AI_API',
   })
 
-  const result = await resolved.adapter.run({
-    task: input.task,
-    context: input.context,
-    effort: input.effort ?? TASK_EFFORT[input.task],
-    ...(input.maxTokens ? { maxTokens: input.maxTokens } : {}),
-  })
+  let result: AiRunResult
+  try {
+    result = await resolved.adapter.run({
+      task: input.task,
+      context: input.context,
+      effort: input.effort ?? TASK_EFFORT[input.task],
+      ...(input.maxTokens ? { maxTokens: input.maxTokens } : {}),
+    })
+  } catch (cause) {
+    // 供應商說得出原因的時候，不要把它換成「伺服器發生錯誤」。見下面。
+    throw adapterErrorToApi(cause)
+  }
 
   const text = result.candidates[0]?.content ?? ''
   if (!text.trim()) {
@@ -96,6 +102,75 @@ export async function runNow(input: {
     inputTokens: result.usage.inputTokens,
     outputTokens: result.usage.outputTokens,
   }
+}
+
+/**
+ * 把適配器的錯誤換成一個說得出話的 API 錯誤（Z201）。
+ *
+ * 排佇列那條路上，失敗會留在 `ai_jobs` 上、顯示在 AI 製片中心，連供應商回的那
+ * 句話一起。**VIP 通道沒有那張工作列**，所以不翻譯的話它會從 `handle()` 掉出
+ * 去變成一個通用的 500：
+ *
+ *     伺服器發生錯誤
+ *
+ * 而供應商實際說的是：
+ *
+ *     Your credit balance is too low to access the Anthropic API.
+ *
+ * 第二句話是一分鐘能解決的事，第一句話是一個下午。這個翻譯今天真的省到我自
+ * 己——我先以為是剛寫的判定那條路壞了。
+ *
+ * 用 **502** 不是 500：上游拒絕了，不是我們這裡爆炸。而 `retryable` 的那幾種
+ * （逾時、限流）用 **503**，讓呼叫端分得出「再試一次可能會過」跟「再試幾次都
+ * 一樣」。
+ */
+export function adapterErrorToApi(cause: unknown): Error {
+  if (!(cause instanceof AiAdapterError)) {
+    return cause instanceof Error ? cause : new Error(String(cause))
+  }
+
+  /*
+   * 訊息原樣帶出去，但是截短。
+   *
+   * 供應商的錯誤訊息偶爾會把整個請求回放一遍，而那裡面有這部作品的正文——一個
+   * 錯誤提示不該變成一次外洩。兩百字夠說完是什麼問題了。
+   */
+  const detail = cause.message.slice(0, 200)
+  const hint = hintFor(cause.message)
+
+  return new ApiError(
+    cause.retryable ? 503 : 502,
+    hint ? `${hint}（供應商原話：${detail}）` : `AI 供應商拒絕了這次請求：${detail}`,
+    `provider_${cause.code}`
+  )
+}
+
+/**
+ * 幾種常見而且**有明確動作**的失敗，加一句中文。
+ *
+ * 供應商回的是英文，而這個工作室有一半的人不會想讀一段英文錯誤訊息去猜自己該
+ * 做什麼。原話照樣附在後面——翻譯是方便，不是取代：真的要查的時候，原話才是能
+ * 拿去搜尋的那一個。
+ *
+ * **只列動作明確的那幾種。** 把每一種錯誤都翻一遍，等於多養一本會過期的對照
+ * 表，而大部分錯誤翻成中文也還是不知道要做什麼。
+ */
+function hintFor(message: string): string | null {
+  const text = message.toLowerCase()
+
+  if (text.includes('credit balance') || text.includes('insufficient_quota')) {
+    return 'AI 供應商的額度用完了。到供應商後台加值之後再試一次'
+  }
+  if (text.includes('rate limit') || text.includes('429')) {
+    return '被供應商限流了，等幾分鐘再試'
+  }
+  if (text.includes('invalid x-api-key') || text.includes('authentication')) {
+    return 'AI 金鑰不對或已經失效，到「系統設定 → AI 供應商」換一把'
+  }
+  if (text.includes('overloaded')) {
+    return '供應商現在滿載，等一下再試'
+  }
+  return null
 }
 
 async function recordSpend(

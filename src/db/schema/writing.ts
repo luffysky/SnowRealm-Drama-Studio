@@ -305,3 +305,36 @@ export const episodeLineSpeakers = pgTable(
     index('episode_line_speakers_character_idx').on(t.characterId),
   ]
 )
+
+/**
+ * 編劇已確認的隱藏設定 (Z201).
+ *
+ * **自己一張表，不是 `episodes` 的一個欄位。**
+ *
+ * 雙視角審核的整個重點是「觀眾那一趟拿不到這些」，而一個長在 `episodes` 上的
+ * 欄位會被每一個 `select *`、每一個「順手多撈一欄」帶出去。放在另一張表的意思
+ * 是：要拿到它必須**明確地去 join**，而那是一個寫得出來、看得見、審得到的動作。
+ */
+export const episodeSecrets = pgTable(
+  'episode_secrets',
+  {
+    /** 一集一筆。 */
+    episodeId: uuid('episode_id')
+      .primaryKey()
+      .references(() => episodes.id, { onDelete: 'cascade' }),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** 編劇知道、觀眾還不知道的事。 */
+    notes: text('notes').notNull().default(''),
+    updatedById: uuid('updated_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('episode_secrets_project_idx').on(t.projectId)]
+)
+
+export const episodeSecretsRelations = relations(episodeSecrets, ({ one }) => ({
+  episode: one(episodes, { fields: [episodeSecrets.episodeId], references: [episodes.id] }),
+  project: one(projects, { fields: [episodeSecrets.projectId], references: [projects.id] }),
+}))
