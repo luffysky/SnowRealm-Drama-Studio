@@ -1,15 +1,24 @@
 'use client'
 
-import { Loader2, MessageSquare, Sparkles } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Button } from '@/components/ui/Button'
+import {
+  Anchor,
+  Check,
+  Download,
+  Loader2,
+  MessageCircleHeart,
+  Send,
+  Sparkles,
+  Wand2,
+} from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { RichText } from '@/components/assistant/RichText'
 import { EmptyState } from '@/components/ui/StateViews'
 import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { AUDIT_RULES, AUDIT_SKILLS } from '@/lib/ai/audit-rules'
-import type { AskTurn } from '@/lib/ai/story-audit-view'
 import {
   AUDIT_QUESTIONS,
+  type AskTurn,
   type AuditBeat,
   type AuditDoubt,
   type EpisodeAudit,
@@ -21,15 +30,25 @@ import { cn } from '@/lib/utils'
  * 編劇助手（Z198）。
  *
  * 暖寶要的是「**整理給我看**」，所以這一頁沒有一個要貼內容的輸入框——材料全部
- * 由伺服器端自己從資料庫湊齊。畫面上只有一顆按鈕跟一份報告。
+ * 由伺服器端自己從資料庫湊齊。畫面上只有按鈕、一份報告，跟一個可以問問題的地方。
+ *
+ * ## 字級
+ *
+ * 第一版整頁 10–11px，被退回來兩次。**這一頁的內容是拿來讀的，不是介面標籤**：
+ * 本文 15–16px、行高七，只有狀態與註解留小字。這跟專案其他頁面的密度不一樣，
+ * 而那是刻意的——那些頁面是工作台，這一頁是一份報告。
+ *
+ * ## 回答不要露出 markdown 符號
+ *
+ * 模型會寫 `**粗體**` 跟 `- 條列`，而第一版用 `whitespace-pre-wrap` 直接把原
+ * 字串印出來，於是讀的人看到的是一堆星號。改走 `RichText`（助理那邊早就有的
+ * 那一支），它把那個子集渲染成 React 節點而不是 HTML——模型的輸出不該有機會
+ * 變成標記。
  *
  * ## 一集一支請求
  *
- * 二十集一次跑完要五到十分鐘，而函式有執行時間上限。所以這裡一集一集叫，跑完
- * 一集就把那一集畫出來——她可以邊跑邊看，而不是盯著一個轉圈圈等十分鐘。
- *
- * 中途失敗的那一集留在原地標紅，不中斷其餘的：二十集裡有一集讀不出來，不是把
- * 另外十九集也丟掉的理由。
+ * 二十集一次跑完要五到十分鐘，而函式有執行時間上限。跑完一集就把那一集畫出
+ * 來——她可以邊跑邊看。中途失敗的那一集留在原地標紅，不中斷其餘的。
  */
 
 export type WriterEpisode = {
@@ -45,6 +64,8 @@ type EpisodeState = {
   problem?: string | null
   error?: string
 }
+
+const RULES_KEY = 'srds:writer-rules'
 
 export function WriterAssistant({
   projectId,
@@ -68,19 +89,15 @@ export function WriterAssistant({
    * 勾掉的準則要真的從提示詞裡消失。
    *
    * 存在 localStorage：這是一個偏好，不是資料。存進資料庫要一支遷移，而為了
-   * 十四個核取方塊的勾選狀態去改 schema 不划算——代價是它跟著這台裝置走，而
-   * 畫面上有寫。
+   * 十四個核取方塊去改 schema 不划算——代價是它跟著這台裝置走，而畫面上有寫。
    */
   const [enabled, setEnabled] = useState<number[]>(() => AUDIT_RULES.map((_, i) => i))
   useEffect(() => {
     /*
-     * 推到下一個 tick，因為 `localStorage` 在伺服器端渲染時不存在——不能當惰性
-     * 初始值，不然會水合不一致。
+     * 推到下一個 tick，因為 `localStorage` 在伺服器端渲染時不存在。
      *
      * **沒有 `restored.current` 那種守衛。** `FloatingChat` 有，而它在
-     * StrictMode 下會把自己鎖死：第一次掛載設旗標並排 timer，cleanup 取消
-     * timer，第二次掛載被旗標擋下來，於是那個 setState 永遠不會跑（Z196）。
-     * 這裡多讀一次 localStorage 沒有任何代價。
+     * StrictMode 下會把自己鎖死（Z196）。這裡多讀一次沒有任何代價。
      */
     const timer = window.setTimeout(() => {
       try {
@@ -172,7 +189,6 @@ export function WriterAssistant({
     setRunningAll(true)
     let failed = 0
     for (const episode of episodes) {
-      // 一集一支請求，照順序跑。跑完一集畫面就多一塊。
       const ok = await runEpisode(episode)
       if (!ok) failed += 1
     }
@@ -180,13 +196,6 @@ export function WriterAssistant({
     if (failed > 0) toast.error(`有 ${failed} 集沒整理出來`, '其餘的已經在下面了。')
   }
 
-  /**
-   * 問它一個問題。
-   *
-   * 材料是**已經算好的那一份**——主線整理加逐集的爽點鉤子，不是十萬字正文。那
-   * 份整理就是為了這個才先算的；指定某一集的時候才額外附上那一集全文，因為
-   * 「這一句寫得不好」這種問題非看原文不可。
-   */
   async function ask(question: string, episodeId: string | null): Promise<void> {
     const response = await apiFetch(`/api/projects/${projectId}/audit`, {
       method: 'POST',
@@ -205,8 +214,8 @@ export function WriterAssistant({
   }
 
   const done = episodes.filter((e) => states[e.episodeId]?.status === 'done').length
+  const hasSomething = Boolean(digest) || done > 0 || turns.length > 0
 
-  /** 畫面上現在有什麼就匯出什麼——不會為了匯出再跑一次，那是另一筆錢。 */
   const report = () => ({
     作品: projectTitle,
     產生時間: new Date().toISOString(),
@@ -222,94 +231,57 @@ export function WriterAssistant({
       .filter((row) => row.整理 !== null),
   })
 
-  const hasSomething = Boolean(digest) || done > 0 || turns.length > 0
-
   return (
-    <div className="flex flex-col gap-4">
-      <section className="panel flex flex-col gap-3 rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-100">
-            <Sparkles aria-hidden className="size-4 text-accent-400" />
-            整理給我看
-          </h2>
-          <p className="text-[11px] text-ink-500">
-            材料直接從這部作品裡讀，不用貼。目前有 {episodes.length} 集有正文。
-          </p>
-        </div>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
+      <Hero
+        episodeCount={episodes.length}
+        done={done}
+        digestBusy={digestBusy}
+        runningAll={runningAll}
+        canRun={canRun}
+        onDigest={runDigest}
+        onRunAll={runAll}
+      />
 
-        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-500">
-          {AUDIT_QUESTIONS.map((question) => (
-            <li key={question} className="inline-flex items-center gap-1">
-              <span aria-hidden className="text-accent-500/70">
-                ·
-              </span>
-              {question}
-            </li>
-          ))}
-        </ul>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            onClick={runDigest}
-            loading={digestBusy}
-            disabled={!canRun || digestBusy}
-            title={canRun ? undefined : '你的角色不能跑 AI 任務'}
-          >
-            整理主線與人設
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={runAll}
-            loading={runningAll}
-            disabled={!canRun || runningAll || episodes.length === 0}
-            title={canRun ? undefined : '你的角色不能跑 AI 任務'}
-          >
-            逐集看爽點與鉤子（{episodes.length} 集）
-          </Button>
-          {done > 0 && (
-            <span className="text-[11px] text-ink-600 tabular-nums">已整理 {done} 集</span>
-          )}
-        </div>
-
-        <p className="text-[10px] leading-relaxed text-ink-600">
-          一集一支請求，跑完一集就出現一塊，可以邊跑邊看。這會花錢（算在成本中心的 AI
-          那一欄），而且每次重跑都是一次新的花費。
-        </p>
-      </section>
+      {digest && <DigestView digest={digest} />}
 
       <AskPanel
         episodes={episodes}
         turns={turns}
         canRun={canRun}
-        onAsk={ask}
         ready={Boolean(digest) || done > 0}
+        onAsk={ask}
       />
 
       {hasSomething && (
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => download(`${projectTitle}-編劇審核.json`, JSON.stringify(report(), null, 2), 'application/json')}
-            className="tap rounded-lg bg-stage-850 px-2.5 py-1 text-[11px] text-ink-400 ring-1 ring-stage-700 transition-colors hover:text-ink-100"
+          <ChipButton
+            icon={<Download className="size-3.5" />}
+            onClick={() =>
+              download(
+                `${projectTitle}-編劇審核.json`,
+                JSON.stringify(report(), null, 2),
+                'application/json'
+              )
+            }
           >
-            匯出 JSON
-          </button>
-          <button
-            type="button"
-            onClick={() => download(`${projectTitle}-編劇審核.md`, toMarkdown(projectTitle, digest, episodes, states, enabled, turns), 'text/markdown;charset=utf-8')}
-            className="tap rounded-lg bg-stage-850 px-2.5 py-1 text-[11px] text-ink-400 ring-1 ring-stage-700 transition-colors hover:text-ink-100"
+            存成 JSON
+          </ChipButton>
+          <ChipButton
+            icon={<Download className="size-3.5" />}
+            onClick={() =>
+              download(
+                `${projectTitle}-編劇審核.md`,
+                toMarkdown(projectTitle, digest, episodes, states, enabled, turns),
+                'text/markdown;charset=utf-8'
+              )
+            }
           >
-            匯出 Markdown
-          </button>
-          <span className="text-[10px] text-ink-700">匯出畫面上現在有的，不會再跑一次</span>
+            存成文件
+          </ChipButton>
+          <span className="text-xs text-ink-600">存的是畫面上現在有的，不會再跑一次</span>
         </div>
       )}
-
-      {digest && <DigestView digest={digest} />}
-
-      <RulesPanel enabled={enabled} onToggle={toggleRule} />
 
       {episodes.length === 0 ? (
         <EmptyState
@@ -330,11 +302,489 @@ export function WriterAssistant({
           ))}
         </ul>
       )}
+
+      <RulesPanel enabled={enabled} onToggle={toggleRule} />
     </div>
   )
 }
 
-const RULES_KEY = 'srds:writer-rules'
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 最上面那一塊。
+ *
+ * 做得比其他面板搶眼一點，因為這一頁只有一個起點——不按它什麼都不會發生。而
+ * 「逐集看」那一顆會跑好幾分鐘，所以它自己帶一條進度。
+ */
+function Hero({
+  episodeCount,
+  done,
+  digestBusy,
+  runningAll,
+  canRun,
+  onDigest,
+  onRunAll,
+}: {
+  episodeCount: number
+  done: number
+  digestBusy: boolean
+  runningAll: boolean
+  canRun: boolean
+  onDigest: () => void
+  onRunAll: () => void
+}) {
+  const pct = episodeCount > 0 ? Math.round((done / episodeCount) * 100) : 0
+
+  return (
+    <section className="panel relative overflow-hidden rounded-2xl bg-stage-900 ring-1 ring-stage-700">
+      {/* 頂上一條漸層，讓它跟底下那一排報告卡片分得開。 */}
+      <div aria-hidden className="bg-brand-gradient h-1 w-full" />
+
+      <div className="flex flex-col gap-4 p-5 sm:p-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <span
+            aria-hidden
+            className="bg-brand-gradient glow-accent-sm grid size-10 shrink-0 place-items-center rounded-2xl text-white"
+          >
+            <Wand2 className="size-5" />
+          </span>
+          <div className="flex min-w-0 flex-col">
+            <h2 className="text-lg font-semibold tracking-tight text-ink-50">整理給我看</h2>
+            <p className="text-sm text-ink-400">
+              材料直接從這部作品裡讀，不用貼。目前有 {episodeCount} 集有正文。
+            </p>
+          </div>
+        </div>
+
+        <ul className="flex flex-wrap gap-2">
+          {AUDIT_QUESTIONS.map((question) => (
+            <li
+              key={question}
+              className="rounded-full bg-stage-850 px-3 py-1.5 text-[13px] text-ink-300 ring-1 ring-stage-700"
+            >
+              {question}
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <BigButton
+            primary
+            busy={digestBusy}
+            disabled={!canRun}
+            onClick={onDigest}
+            icon={<Sparkles className="size-4" />}
+            title={canRun ? undefined : '你的角色不能跑 AI 任務'}
+          >
+            {digestBusy ? '正在讀整部戲…' : '整理主線與人設'}
+          </BigButton>
+
+          <BigButton
+            busy={runningAll}
+            disabled={!canRun || episodeCount === 0}
+            onClick={onRunAll}
+            icon={<Anchor className="size-4" />}
+            title={canRun ? undefined : '你的角色不能跑 AI 任務'}
+          >
+            {runningAll
+              ? `整理中… ${done} / ${episodeCount}`
+              : `逐集看爽點與鉤子（${episodeCount} 集）`}
+          </BigButton>
+
+          {done > 0 && !runningAll && (
+            <span className="inline-flex items-center gap-1.5 text-[13px] text-emerald-300">
+              <Check className="size-3.5" />
+              已整理 {done} 集
+            </span>
+          )}
+        </div>
+
+        {(runningAll || done > 0) && (
+          <div className="flex items-center gap-3">
+            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stage-800">
+              <div
+                className="bg-brand-gradient h-full rounded-full transition-[width] duration-500"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <span className="shrink-0 text-xs text-ink-500 tabular-nums">{pct}%</span>
+          </div>
+        )}
+
+        <p className="text-xs leading-relaxed text-ink-600">
+          一集一支請求，跑完一集就出現一塊，可以邊跑邊看。這會花錢（算在成本中心的 AI
+          那一欄），每次重跑都是一次新的花費。
+        </p>
+      </div>
+    </section>
+  )
+}
+
+function BigButton({
+  children,
+  icon,
+  onClick,
+  busy = false,
+  disabled = false,
+  primary = false,
+  title,
+}: {
+  children: React.ReactNode
+  icon: React.ReactNode
+  onClick: () => void
+  busy?: boolean
+  disabled?: boolean
+  primary?: boolean
+  title?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || busy}
+      title={title}
+      className={cn(
+        'tap inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+        primary
+          ? 'bg-brand-gradient glow-accent-sm text-white hover:brightness-110'
+          : 'bg-stage-850 text-ink-200 ring-1 ring-stage-700 hover:bg-stage-800 hover:text-ink-50',
+        !disabled && !busy && 'hover:-translate-y-0.5 active:translate-y-0'
+      )}
+    >
+      <span aria-hidden>{busy ? <Loader2 className="size-4 animate-spin" /> : icon}</span>
+      {children}
+    </button>
+  )
+}
+
+function ChipButton({
+  children,
+  icon,
+  onClick,
+}: {
+  children: React.ReactNode
+  icon: React.ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="tap inline-flex items-center gap-1.5 rounded-full bg-stage-850 px-3 py-1.5 text-[13px] text-ink-300 ring-1 ring-stage-700 transition-all hover:-translate-y-0.5 hover:text-ink-50"
+    >
+      <span aria-hidden className="text-accent-400">
+        {icon}
+      </span>
+      {children}
+    </button>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+function DigestView({ digest }: { digest: StoryDigest }) {
+  return (
+    <section className="panel flex flex-col gap-5 rounded-2xl bg-stage-900 p-5 ring-1 ring-stage-700 sm:p-6">
+      <Section title="目前的主線" icon="📖">
+        <p className="text-base leading-8 whitespace-pre-wrap text-ink-100">{digest.mainline}</p>
+      </Section>
+
+      {digest.threads.length > 0 && (
+        <Section title="支線" icon="🧵">
+          <ul className="flex flex-col gap-2">
+            {digest.threads.map((thread) => (
+              <li
+                key={thread}
+                className="flex gap-2.5 rounded-xl bg-stage-850/60 px-3.5 py-2.5 text-[15px] leading-7 text-ink-200"
+              >
+                <span aria-hidden className="mt-2.5 size-1.5 shrink-0 rounded-full bg-accent-400" />
+                {thread}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+
+      {digest.characters.length > 0 && (
+        <Section title="人設現況" icon="🎭">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {digest.characters.map((person) => (
+              <div
+                key={person.name}
+                className="flex flex-col gap-2 rounded-2xl bg-stage-850 p-4 ring-1 ring-stage-700/60 transition-all hover:ring-accent-500/40"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    aria-hidden
+                    className="bg-brand-gradient grid size-7 shrink-0 place-items-center rounded-full text-[13px] font-semibold text-white"
+                  >
+                    {person.name.slice(0, 1)}
+                  </span>
+                  <span className="text-base font-medium text-ink-50">{person.name}</span>
+                </div>
+                {person.now && <Line label="現在" value={person.now} />}
+                {person.wants && <Line label="想要" value={person.wants} />}
+                {person.changed && <Line label="變化" value={person.changed} />}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {digest.issues.length > 0 && (
+        <Section title="跨集的問題" icon="🔍">
+          <ul className="flex flex-col gap-3">
+            {digest.issues.map((issue) => (
+              <li key={issue.question}>
+                <DoubtView doubt={issue} />
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+    </section>
+  )
+}
+
+function Section({
+  title,
+  icon,
+  children,
+}: {
+  title: string
+  icon: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <h3 className="inline-flex items-center gap-2 text-[15px] font-semibold text-ink-100">
+        <span aria-hidden className="text-base">
+          {icon}
+        </span>
+        {title}
+      </h3>
+      {children}
+    </div>
+  )
+}
+
+function Line({ label, value }: { label: string; value: string }) {
+  return (
+    <p className="flex gap-2 text-[15px] leading-7">
+      <span className="shrink-0 rounded-md bg-stage-800 px-1.5 text-[12px] leading-6 text-ink-500">
+        {label}
+      </span>
+      <span className="min-w-0 text-ink-300">{value}</span>
+    </p>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+function EpisodeCard({
+  episode,
+  state,
+  canRun,
+  onRun,
+}: {
+  episode: WriterEpisode
+  state: EpisodeState | undefined
+  canRun: boolean
+  onRun: () => void
+}) {
+  const status = state?.status ?? 'idle'
+
+  return (
+    <section
+      className={cn(
+        'panel flex flex-col gap-4 rounded-2xl bg-stage-900 p-5 ring-1 transition-all sm:p-6',
+        status === 'running' ? 'ring-accent-500/50' : 'ring-stage-700/60'
+      )}
+    >
+      <header className="flex flex-wrap items-center gap-3">
+        <span
+          aria-hidden
+          className={cn(
+            'grid size-9 shrink-0 place-items-center rounded-xl text-sm font-semibold tabular-nums transition-colors',
+            status === 'done'
+              ? 'bg-brand-gradient text-white'
+              : 'bg-stage-800 text-ink-500 ring-1 ring-stage-700'
+          )}
+        >
+          {episode.number}
+        </span>
+
+        <div className="flex min-w-0 flex-col">
+          <span className="text-base font-medium text-ink-50">
+            {episode.title ? `《${episode.title}》` : `第 ${episode.number} 集`}
+          </span>
+          <span className="text-xs text-ink-600 tabular-nums">
+            {episode.chars.toLocaleString('en-US')} 字
+          </span>
+        </div>
+
+        <span className="ml-auto">
+          {status === 'running' ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-500/15 px-3 py-1.5 text-[13px] text-accent-200">
+              <Loader2 aria-hidden className="size-3.5 animate-spin" />
+              正在讀…
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={onRun}
+              disabled={!canRun}
+              title={canRun ? undefined : '你的角色不能跑 AI 任務'}
+              className="tap rounded-full bg-stage-850 px-3 py-1.5 text-[13px] text-ink-400 ring-1 ring-stage-700 transition-all hover:-translate-y-0.5 hover:text-ink-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {status === 'idle' ? '整理這一集' : '再整理一次'}
+            </button>
+          )}
+        </span>
+      </header>
+
+      {status === 'failed' && (
+        <p className="rounded-xl bg-rose-950/40 px-4 py-3 text-sm text-rose-300 ring-1 ring-rose-900/60">
+          {state?.error ?? '讀不出來'}
+        </p>
+      )}
+
+      {state?.audit && <AuditView audit={state.audit} />}
+    </section>
+  )
+}
+
+function AuditView({ audit }: { audit: EpisodeAudit }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-3 lg:grid-cols-2">
+        <BeatCard label="爽點" icon="✨" beat={audit.payoff} tone="payoff" />
+        <BeatCard label="鉤子" icon="🪝" beat={audit.hook} tone="hook" />
+      </div>
+
+      {audit.events.length > 0 && (
+        <details className="group rounded-xl bg-stage-850/50 px-4 py-3">
+          <summary className="tap cursor-pointer list-none text-sm text-ink-400 transition-colors hover:text-ink-100">
+            <span
+              aria-hidden
+              className="mr-1.5 inline-block transition-transform group-open:rotate-90"
+            >
+              ›
+            </span>
+            本集事件（{audit.events.length}）
+          </summary>
+          <ol className="mt-3 flex list-decimal flex-col gap-2 pl-6 text-[15px] leading-7 text-ink-300">
+            {audit.events.map((event) => (
+              <li key={event}>{event}</li>
+            ))}
+          </ol>
+        </details>
+      )}
+
+      {audit.details.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h4 className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-300">
+            <span aria-hidden>🔎</span> 細節
+          </h4>
+          <ul className="flex flex-col gap-2.5">
+            {audit.details.map((note) => (
+              <li
+                key={note.issue}
+                className="flex flex-col gap-1.5 rounded-xl bg-amber-950/20 px-4 py-3 ring-1 ring-amber-900/40"
+              >
+                <span className="text-[15px] leading-7 text-ink-200">{note.issue}</span>
+                {note.quote && <Quote text={note.quote} />}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {audit.doubts.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h4 className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-200">
+            <span aria-hidden>🤔</span> 讀到這裡會卡住的地方
+          </h4>
+          <ul className="flex flex-col gap-3">
+            {audit.doubts.map((doubt) => (
+              <li key={doubt.question}>
+                <DoubtView doubt={doubt} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 爽點與鉤子。
+ *
+ * 這兩格是暖寶最想看的東西，所以它們長得跟別的不一樣：有顏色、有圖示、原文直
+ * 接攤開不要摺起來。沒有的時候**不要畫成錯誤**——「這一集沒有爽點」是一個發
+ * 現，不是一個故障。
+ */
+function BeatCard({
+  label,
+  icon,
+  beat,
+  tone,
+}: {
+  label: string
+  icon: string
+  beat: AuditBeat
+  tone: 'payoff' | 'hook'
+}) {
+  return (
+    <div
+      className={cn(
+        'flex flex-col gap-2.5 rounded-2xl p-4 ring-1 transition-all',
+        beat.present
+          ? tone === 'payoff'
+            ? 'bg-gradient-to-br from-emerald-950/50 to-stage-900 ring-emerald-800/50'
+            : 'bg-gradient-to-br from-stage-750 to-stage-900 ring-accent-700/50'
+          : 'bg-stage-850/60 ring-stage-700/60'
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span aria-hidden className="text-base">
+          {icon}
+        </span>
+        <span className="text-[15px] font-semibold text-ink-50">{label}</span>
+        {!beat.present && (
+          <span className="rounded-full bg-stage-800 px-2 py-0.5 text-xs text-amber-300">沒有</span>
+        )}
+        {beat.where && <span className="ml-auto truncate text-xs text-ink-500">{beat.where}</span>}
+      </div>
+
+      <p className="text-[15px] leading-7 text-ink-100">{beat.what || '——'}</p>
+      {beat.quote && <Quote text={beat.quote} />}
+    </div>
+  )
+}
+
+function DoubtView({ doubt }: { doubt: AuditDoubt }) {
+  return (
+    <div className="flex flex-col gap-1.5 rounded-xl bg-stage-850/60 px-4 py-3 ring-1 ring-stage-700/50">
+      <span className="text-[15px] leading-7 text-ink-100">{doubt.question}</span>
+      {doubt.why && <span className="text-sm leading-6 text-ink-400">{doubt.why}</span>}
+      {doubt.quote && <Quote text={doubt.quote} />}
+    </div>
+  )
+}
+
+/** 原文引文。沒有引文的判斷在這份報告裡沒有用，所以它要看得出來是原文。 */
+function Quote({ text }: { text: string }) {
+  return (
+    <p className="rounded-lg border-l-[3px] border-accent-500/60 bg-stage-950/50 py-2 pr-3 pl-3 text-sm leading-7 text-ink-300">
+      {text}
+    </p>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
 
 /**
  * 問它問題。
@@ -342,8 +792,8 @@ const RULES_KEY = 'srds:writer-rules'
  * 報告是唯讀的，而讀完一定會有問題——「第 7 集這個爽點我覺得不夠」「馬大後來
  * 怎麼不見了」。沒有地方問的話，這一頁就只是一份印出來的紙。
  *
- * **問答留在報告裡**，匯出的時候一起帶走：問過的問題跟結論本來就是這份審核的
- * 一部分。代價是重新整理頁面就沒了——要留下來得開一張表，那是下一步。
+ * **問答留在報告裡**，匯出的時候一起帶走。代價是重新整理頁面就沒了——要留下來
+ * 得開一張表，那是下一步。
  */
 function AskPanel({
   episodes,
@@ -355,7 +805,6 @@ function AskPanel({
   episodes: WriterEpisode[]
   turns: AskTurn[]
   canRun: boolean
-  /** 還沒整理過的時候它手上沒有材料，問了也只能憑空答。 */
   ready: boolean
   onAsk: (question: string, episodeId: string | null) => Promise<void>
 }) {
@@ -363,6 +812,12 @@ function AskPanel({
   const [draft, setDraft] = useState('')
   const [episodeId, setEpisodeId] = useState('')
   const [busy, setBusy] = useState(false)
+  const endRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    // 新的回答進來就捲到底，不然要自己找它跑到哪裡去了。
+    if (turns.length > 0) endRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [turns.length])
 
   async function submit() {
     const question = draft.trim()
@@ -379,33 +834,47 @@ function AskPanel({
   }
 
   return (
-    <section className="panel flex flex-col gap-3 rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-100">
-          <MessageSquare aria-hidden className="size-4 text-accent-400" />
-          問它
-        </h2>
-        <p className="text-xs text-ink-500">
-          它手上有上面整理好的東西，可以直接問。
-        </p>
+    <section className="panel flex flex-col gap-4 rounded-2xl bg-stage-900 p-5 ring-1 ring-stage-700 sm:p-6">
+      <div className="flex items-center gap-2.5">
+        <span
+          aria-hidden
+          className="grid size-9 shrink-0 place-items-center rounded-2xl bg-accent-500/15 text-accent-300"
+        >
+          <MessageCircleHeart className="size-5" />
+        </span>
+        <div className="flex min-w-0 flex-col">
+          <h2 className="text-base font-semibold text-ink-50">有問題就問它</h2>
+          <p className="text-[13px] text-ink-500">它手上有上面整理好的東西，可以直接問。</p>
+        </div>
       </div>
 
       {turns.length > 0 && (
-        <ul className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-5">
           {turns.map((turn, index) => (
-            <li key={`${index}-${turn.question}`} className="flex flex-col gap-1.5">
-              <p className="rounded-lg bg-stage-850 px-3 py-2 text-[13px] leading-relaxed text-ink-200">
+            <li key={`${index}-${turn.question}`} className="flex flex-col gap-3">
+              {/* 問句靠右，像訊息；回答靠左攤開，像一段文章。 */}
+              <p className="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-accent-600/25 px-4 py-2.5 text-[15px] leading-7 text-ink-50 ring-1 ring-accent-500/30">
                 {turn.question}
               </p>
-              <p className="px-1 text-sm leading-7 whitespace-pre-wrap text-ink-100">
-                {turn.answer}
-              </p>
+              <div className="flex gap-2.5">
+                <span
+                  aria-hidden
+                  className="bg-brand-gradient mt-1 grid size-7 shrink-0 place-items-center rounded-full text-white"
+                >
+                  <Wand2 className="size-3.5" />
+                </span>
+                <div className="min-w-0 flex-1 rounded-2xl rounded-tl-md bg-stage-850/70 px-4 py-3 ring-1 ring-stage-700/60">
+                  {/* RichText：模型會寫 **粗體** 跟條列，直接印會變成一堆星號。 */}
+                  <RichText text={turn.answer} size="lg" />
+                </div>
+              </div>
             </li>
           ))}
+          <div ref={endRef} />
         </ul>
       )}
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2.5">
         <textarea
           value={draft}
           rows={2}
@@ -424,7 +893,7 @@ function AskPanel({
               void submit()
             }
           }}
-          className="w-full resize-y rounded-lg bg-stage-950 px-3 py-2 text-sm leading-relaxed text-ink-50 ring-1 ring-stage-700 outline-none placeholder:text-ink-600 focus:ring-accent-500/60 disabled:opacity-50"
+          className="w-full resize-y rounded-2xl bg-stage-950 px-4 py-3 text-[15px] leading-7 text-ink-50 ring-1 ring-stage-700 outline-none transition-shadow placeholder:text-ink-600 focus:ring-2 focus:ring-accent-500/60 disabled:opacity-50"
         />
 
         <div className="flex flex-wrap items-center gap-2">
@@ -432,7 +901,7 @@ function AskPanel({
             value={episodeId}
             disabled={!canRun || busy}
             onChange={(event) => setEpisodeId(event.target.value)}
-            className="rounded-lg bg-stage-850 px-2 py-1 text-xs text-ink-300 ring-1 ring-stage-700 outline-none disabled:opacity-50"
+            className="rounded-full bg-stage-850 px-3 py-1.5 text-[13px] text-ink-300 ring-1 ring-stage-700 outline-none disabled:opacity-50"
           >
             <option value="">不指定集數</option>
             {episodes.map((episode) => (
@@ -441,24 +910,113 @@ function AskPanel({
               </option>
             ))}
           </select>
-          <span className="text-[11px] text-ink-600">
-            {episodeId ? '會附上那一集全文' : '只用上面整理好的內容'}
+          <span className="text-xs text-ink-600">
+            {episodeId ? '會把那一集全文一起給它' : '只用上面整理好的內容'}
           </span>
 
-          <Button
-            size="sm"
-            className="ml-auto"
-            onClick={submit}
-            loading={busy}
-            disabled={!canRun || busy || !draft.trim()}
-            title={canRun ? undefined : '你的角色不能跑 AI 任務'}
-          >
-            問
-          </Button>
+          <div className="ml-auto">
+            <BigButton
+              primary
+              busy={busy}
+              disabled={!canRun || !draft.trim()}
+              onClick={submit}
+              icon={<Send className="size-4" />}
+              title={canRun ? undefined : '你的角色不能跑 AI 任務'}
+            >
+              {busy ? '想一下…' : '問'}
+            </BigButton>
+          </div>
         </div>
       </div>
     </section>
   )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 暖寶 CEO 的十四條審核準則，與這個助手會做的十二件事。
+ *
+ * 原稿是老闆那份 HTML 裡寫死的兩個陣列（`docs/needs/`），一個字沒改。勾掉的那
+ * 幾條會真的從提示詞裡消失——`auditPersona(enabled)` 讀的是同一份清單，所以畫
+ * 面與提示詞不可能講不同的話。
+ */
+function RulesPanel({
+  enabled,
+  onToggle,
+}: {
+  enabled: number[]
+  onToggle: (index: number) => void
+}) {
+  return (
+    <details className="group panel rounded-2xl bg-stage-900 ring-1 ring-stage-700">
+      <summary className="tap flex cursor-pointer list-none items-center gap-2.5 px-5 py-4 text-sm text-ink-300 transition-colors hover:text-ink-100">
+        <span aria-hidden className="text-ink-600 transition-transform group-open:rotate-90">
+          ›
+        </span>
+        <span className="font-medium">審核準則</span>
+        <span className="rounded-full bg-stage-850 px-2 py-0.5 text-xs text-ink-500 tabular-nums">
+          {enabled.length} / {AUDIT_RULES.length}
+        </span>
+      </summary>
+
+      <div className="flex flex-col gap-5 border-t border-stage-700/60 p-5">
+        <ul className="grid gap-1.5 sm:grid-cols-2">
+          {AUDIT_RULES.map((rule, index) => {
+            const on = enabled.includes(index)
+            return (
+              <li key={rule}>
+                <label
+                  className={cn(
+                    'tap flex cursor-pointer items-start gap-2.5 rounded-xl px-3 py-2.5 transition-colors',
+                    on ? 'bg-stage-850/70 hover:bg-stage-800' : 'opacity-50 hover:opacity-80'
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => onToggle(index)}
+                    className="mt-1 size-4 shrink-0 accent-accent-500"
+                  />
+                  <span className="text-sm leading-6 text-ink-200">{rule}</span>
+                </label>
+              </li>
+            )
+          })}
+        </ul>
+
+        <p className="text-xs leading-relaxed text-ink-600">
+          勾掉的那幾條會真的從提示詞裡拿掉。這個選擇記在這台裝置上，換一台要重勾。
+        </p>
+
+        <div className="flex flex-col gap-2">
+          <h4 className="text-sm font-medium text-ink-300">它會做的十二件事</h4>
+          <ul className="flex flex-wrap gap-2">
+            {AUDIT_SKILLS.map((skill, index) => (
+              <li
+                key={skill}
+                className="rounded-full bg-stage-850 px-3 py-1 text-[13px] text-ink-400 ring-1 ring-stage-700"
+              >
+                {index + 1}. {skill}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </details>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/** 把畫面上現在有的東西存成檔案。 */
+function download(name: string, content: string, type: string) {
+  const anchor = document.createElement('a')
+  anchor.href = URL.createObjectURL(new Blob([content], { type }))
+  anchor.download = name
+  anchor.click()
+  // 不收回去的話這個 blob 會活到關掉分頁為止。
+  setTimeout(() => URL.revokeObjectURL(anchor.href), 1000)
 }
 
 /**
@@ -476,7 +1034,9 @@ function materialFor(
 
   if (digest) {
     parts.push(`主線：${digest.mainline}`)
-    if (digest.threads.length > 0) parts.push(`支線：\n${digest.threads.map((t) => `- ${t}`).join('\n')}`)
+    if (digest.threads.length > 0) {
+      parts.push(`支線：\n${digest.threads.map((t) => `- ${t}`).join('\n')}`)
+    }
     if (digest.characters.length > 0) {
       parts.push(
         `人物：\n${digest.characters
@@ -490,8 +1050,12 @@ function materialFor(
     const audit = states[episode.episodeId]?.audit
     if (!audit) continue
     const bits = [`第 ${episode.number} 集${episode.title ? `《${episode.title}》` : ''}`]
-    bits.push(`　爽點：${audit.payoff.present ? audit.payoff.what : '沒有'}${audit.payoff.quote ? `（原文：${audit.payoff.quote}）` : ''}`)
-    bits.push(`　鉤子：${audit.hook.present ? audit.hook.what : '沒有'}${audit.hook.quote ? `（原文：${audit.hook.quote}）` : ''}`)
+    bits.push(
+      `　爽點：${audit.payoff.present ? audit.payoff.what : '沒有'}${audit.payoff.quote ? `（原文：${audit.payoff.quote}）` : ''}`
+    )
+    bits.push(
+      `　鉤子：${audit.hook.present ? audit.hook.what : '沒有'}${audit.hook.quote ? `（原文：${audit.hook.quote}）` : ''}`
+    )
     if (audit.doubts.length > 0) {
       bits.push(`　疑點：${audit.doubts.map((d) => d.question).join('；')}`)
     }
@@ -499,83 +1063,6 @@ function materialFor(
   }
 
   return parts.join('\n\n')
-}
-
-/* -------------------------------------------------------------------------- */
-
-/**
- * 暖寶 CEO 的十四條審核準則，與這個助手會做的十二件事。
- *
- * 原稿是老闆那份 HTML 裡寫死的兩個陣列（`docs/needs/`），一個字沒改。勾掉的
- * 那幾條會真的從提示詞裡消失——`auditPersona(enabled)` 是同一份清單算出來的，
- * 所以畫面與提示詞不可能講不同的話。
- */
-function RulesPanel({
-  enabled,
-  onToggle,
-}: {
-  enabled: number[]
-  onToggle: (index: number) => void
-}) {
-  return (
-    <details className="group panel rounded-xl bg-stage-900 ring-1 ring-stage-700">
-      <summary className="tap flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-[11px] text-ink-300 transition-colors hover:text-ink-100">
-        <span aria-hidden className="text-ink-600 transition-transform group-open:rotate-90">
-          ›
-        </span>
-        <span className="font-medium">審核準則</span>
-        <span className="text-[10px] text-ink-600">
-          {enabled.length} / {AUDIT_RULES.length} 條在用
-        </span>
-      </summary>
-
-      <div className="flex flex-col gap-4 border-t border-stage-700/60 p-4">
-        <ul className="grid gap-1 sm:grid-cols-2">
-          {AUDIT_RULES.map((rule, index) => (
-            <li key={rule}>
-              <label className="tap flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-stage-850">
-                <input
-                  type="checkbox"
-                  checked={enabled.includes(index)}
-                  onChange={() => onToggle(index)}
-                  className="mt-0.5 size-3.5 shrink-0 accent-accent-500"
-                />
-                <span className="text-xs leading-relaxed text-ink-300">{rule}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
-
-        <p className="text-[10px] leading-relaxed text-ink-600">
-          勾掉的那幾條會真的從提示詞裡拿掉。這個選擇記在這台裝置上，換一台要重勾。
-        </p>
-
-        <div className="flex flex-col gap-1.5">
-          <h4 className="text-[11px] font-medium text-ink-400">它會做的十二件事</h4>
-          <ul className="flex flex-wrap gap-1.5">
-            {AUDIT_SKILLS.map((skill, index) => (
-              <li
-                key={skill}
-                className="rounded-full bg-stage-850 px-2 py-0.5 text-[10px] text-ink-500 ring-1 ring-stage-700"
-              >
-                {index + 1}. {skill}
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </details>
-  )
-}
-
-/** 把畫面上現在有的東西存成檔案。 */
-function download(name: string, content: string, type: string) {
-  const anchor = document.createElement('a')
-  anchor.href = URL.createObjectURL(new Blob([content], { type }))
-  anchor.download = name
-  anchor.click()
-  // 不收回去的話這個 blob 會活到關掉分頁為止。
-  setTimeout(() => URL.revokeObjectURL(anchor.href), 1000)
 }
 
 function toMarkdown(
@@ -619,11 +1106,11 @@ function toMarkdown(
     if (!audit) continue
     out.push(`## 第 ${episode.number} 集${episode.title ? `《${episode.title}》` : ''}`, '')
     out.push(
-      `- **爽點**：${audit.payoff.present ? audit.payoff.what : '沒有——' + audit.payoff.what}`
+      `- **爽點**：${audit.payoff.present ? audit.payoff.what : `沒有——${audit.payoff.what}`}`
     )
     if (audit.payoff.where) out.push(`  - 在哪裡：${audit.payoff.where}`)
     if (audit.payoff.quote) out.push(`  - 原文：${audit.payoff.quote}`)
-    out.push(`- **鉤子**：${audit.hook.present ? audit.hook.what : '沒有——' + audit.hook.what}`)
+    out.push(`- **鉤子**：${audit.hook.present ? audit.hook.what : `沒有——${audit.hook.what}`}`)
     if (audit.hook.quote) out.push(`  - 原文：${audit.hook.quote}`)
     out.push('')
     if (audit.events.length > 0) {
@@ -658,232 +1145,4 @@ function toMarkdown(
   out.push('---', '', '### 採用的審核準則', '')
   out.push(...AUDIT_RULES.filter((_, i) => enabled.includes(i)).map((rule) => `- ${rule}`))
   return out.join('\n')
-}
-
-/* -------------------------------------------------------------------------- */
-
-function DigestView({ digest }: { digest: StoryDigest }) {
-  return (
-    <section className="panel flex flex-col gap-4 rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700">
-      <div className="flex flex-col gap-1.5">
-        <h3 className="text-[13px] font-medium text-ink-300">目前的主線</h3>
-        <p className="text-[15px] leading-7 whitespace-pre-wrap text-ink-100">
-          {digest.mainline}
-        </p>
-      </div>
-
-      {digest.threads.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <h3 className="text-[13px] font-medium text-ink-300">支線</h3>
-          <ul className="flex flex-col gap-1">
-            {digest.threads.map((thread) => (
-              <li key={thread} className="flex gap-2 text-sm leading-relaxed text-ink-300">
-                <span aria-hidden className="mt-2 size-1 shrink-0 rounded-full bg-accent-500/70" />
-                {thread}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {digest.characters.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <h3 className="text-[13px] font-medium text-ink-300">人設現況</h3>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {digest.characters.map((person) => (
-              <div
-                key={person.name}
-                className="flex flex-col gap-1 rounded-lg bg-stage-850 p-3 ring-1 ring-stage-700/60"
-              >
-                <span className="text-sm font-medium text-ink-50">{person.name}</span>
-                {person.now && <Line label="現在" value={person.now} />}
-                {person.wants && <Line label="想要" value={person.wants} />}
-                {person.changed && <Line label="變化" value={person.changed} />}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {digest.issues.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <h3 className="text-[13px] font-medium text-ink-300">跨集的問題</h3>
-          <ul className="flex flex-col gap-2">
-            {digest.issues.map((issue) => (
-              <li key={issue.question}>
-                <DoubtView doubt={issue} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function Line({ label, value }: { label: string; value: string }) {
-  return (
-    <p className="flex gap-2 text-[13px] leading-relaxed">
-      <span className="shrink-0 text-ink-600">{label}</span>
-      <span className="min-w-0 text-ink-300">{value}</span>
-    </p>
-  )
-}
-
-function EpisodeCard({
-  episode,
-  state,
-  canRun,
-  onRun,
-}: {
-  episode: WriterEpisode
-  state: EpisodeState | undefined
-  canRun: boolean
-  onRun: () => void
-}) {
-  const status = state?.status ?? 'idle'
-
-  return (
-    <section className="panel flex flex-col gap-3 rounded-xl bg-stage-900 p-4 ring-1 ring-stage-700">
-      <header className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-ink-100">
-          第 {episode.number} 集{episode.title ? `《${episode.title}》` : ''}
-        </span>
-        <span className="text-[10px] text-ink-600 tabular-nums">
-          {episode.chars.toLocaleString('en-US')} 字
-        </span>
-
-        <span className="ml-auto">
-          {status === 'running' ? (
-            <span className="inline-flex items-center gap-1 text-[11px] text-ink-500">
-              <Loader2 aria-hidden className="size-3 animate-spin" />
-              整理中
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={onRun}
-              disabled={!canRun}
-              title={canRun ? undefined : '你的角色不能跑 AI 任務'}
-              className="tap text-[11px] text-ink-500 transition-colors hover:text-ink-200 disabled:opacity-50"
-            >
-              {status === 'idle' ? '整理這一集' : '重新整理'}
-            </button>
-          )}
-        </span>
-      </header>
-
-      {status === 'failed' && (
-        <p className="rounded-lg bg-rose-950/40 px-3 py-2 text-xs text-rose-300 ring-1 ring-rose-900/60">
-          {state?.error ?? '讀不出來'}
-        </p>
-      )}
-
-      {state?.audit && <AuditView audit={state.audit} />}
-    </section>
-  )
-}
-
-function AuditView({ audit }: { audit: EpisodeAudit }) {
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="grid gap-2 lg:grid-cols-2">
-        <BeatView label="爽點" beat={audit.payoff} tone="payoff" />
-        <BeatView label="鉤子" beat={audit.hook} tone="hook" />
-      </div>
-
-      {audit.events.length > 0 && (
-        <details className="group">
-          <summary className="tap cursor-pointer list-none text-[11px] text-ink-600 transition-colors hover:text-ink-300">
-            <span aria-hidden className="mr-1 inline-block transition-transform group-open:rotate-90">
-              ›
-            </span>
-            本集事件（{audit.events.length}）
-          </summary>
-          <ol className="mt-2 flex list-decimal flex-col gap-1.5 pl-5 text-sm leading-relaxed text-ink-300">
-            {audit.events.map((event) => (
-              <li key={event}>{event}</li>
-            ))}
-          </ol>
-        </details>
-      )}
-
-      {audit.details.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <h4 className="text-[13px] font-medium text-amber-300/90">細節</h4>
-          <ul className="flex flex-col gap-1.5">
-            {audit.details.map((note) => (
-              <li key={note.issue} className="flex flex-col gap-0.5">
-                <span className="text-sm leading-relaxed text-ink-200">{note.issue}</span>
-                {note.quote && <Quote text={note.quote} />}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {audit.doubts.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <h4 className="text-[13px] font-medium text-ink-300">讀到這裡會卡住的地方</h4>
-          <ul className="flex flex-col gap-2">
-            {audit.doubts.map((doubt) => (
-              <li key={doubt.question}>
-                <DoubtView doubt={doubt} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function BeatView({
-  label,
-  beat,
-  tone,
-}: {
-  label: string
-  beat: AuditBeat
-  tone: 'payoff' | 'hook'
-}) {
-  return (
-    <div
-      className={cn(
-        'flex flex-col gap-1 rounded-lg p-3 ring-1',
-        beat.present
-          ? tone === 'payoff'
-            ? 'bg-emerald-950/30 ring-emerald-900/50'
-            : 'bg-accent-950/30 ring-accent-800/50'
-          : 'bg-stage-850 ring-stage-700/60'
-      )}
-    >
-      <div className="flex items-baseline gap-2">
-        <span className="text-[13px] font-medium text-ink-200">{label}</span>
-        {!beat.present && <span className="text-[10px] text-amber-300/90">沒有</span>}
-        {beat.where && <span className="ml-auto text-[10px] text-ink-600">{beat.where}</span>}
-      </div>
-      <p className="text-sm leading-relaxed text-ink-200">{beat.what || '——'}</p>
-      {beat.quote && <Quote text={beat.quote} />}
-    </div>
-  )
-}
-
-function DoubtView({ doubt }: { doubt: AuditDoubt }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-sm leading-relaxed text-ink-200">{doubt.question}</span>
-      {doubt.why && <span className="text-xs leading-relaxed text-ink-500">{doubt.why}</span>}
-      {doubt.quote && <Quote text={doubt.quote} />}
-    </div>
-  )
-}
-
-/** 原文引文。沒有引文的判斷在這份報告裡沒有用，所以它要看得出來是原文。 */
-function Quote({ text }: { text: string }) {
-  return (
-    <p className="border-l-2 border-stage-600 py-0.5 pl-2.5 text-xs leading-relaxed text-ink-400">
-      {text}
-    </p>
-  )
 }
