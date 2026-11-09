@@ -2921,7 +2921,7 @@ Z143（排在 Z145 後面，不然會做錯）、Z81（等你給圖）、**Z51�
 分部規劃）**。最後那條卡住的不是程式：世界觀頁開得起來也說得出為什麼空，
 而我不會替你編一個朝代名。
 
-逐條排程在 `docs/todo/todo_list_1109.md`（上一張是 `todo_list_1106.md`）。
+逐條排程在 `docs/todo/todo_list_1110.md`（上一張是 `todo_list_1109.md`）。
 
 還有補 API 金鑰把七家接起來試（`docs/API_KEYS.md`）。`HEALTH_TOKEN` 已經加
 了（本機與 Vercel 都有），但每日健康檢查**還是跑不起來**，而原因不是 token
@@ -2932,10 +2932,15 @@ Z143（排在 Z145 後面，不然會做錯）、Z81（等你給圖）、**Z51�
 的瓶頸是 Z16／Z17 兩支 adapter（要金鑰）跟 Z11 `assets.scope`（不要金鑰，但
 要連權限路徑一起改）。
 
-**每次改完程式跑一次**：`npm run check`——十支加測試：
+**每次改完程式跑一次**：`npm run check`——十一支加測試：
 `typecheck` → `lint` → `check:links` → `check:api` → `check:ai` →
 `check:dead` → `check:client` → `check:todo` → `check:import` →
-`check:mojibake` → `vitest`。
+`check:mojibake` → `check:subquery` → `vitest`。
+
+**套遷移用 `npm run db:apply`，不要用 `db:migrate`**（11-10 加的）：
+`_journal.json` 只記到 0015，`drizzle-kit migrate` 看不到 0016 之後那二十幾支，
+在一座新資料庫上還會安靜地少建它們。`db:apply` 直接看 `drizzle/*.sql`，帳記在
+`public.applied_migrations`，跑過的跳過、被改掉的會叫。
 其中 `check:links`／`check:api`／`check:ai`／`check:client`／`check:mojibake`
 都內建自我檢查：抓不到已知的壞例子就直接說工具壞了，不報平安。
 
