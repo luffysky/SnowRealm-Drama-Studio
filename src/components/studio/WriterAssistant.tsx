@@ -2,14 +2,18 @@
 
 import {
   Anchor,
+  Archive,
   Check,
+  ChevronRight,
   Download,
   Loader2,
   MessageCircleHeart,
   Send,
   Sparkles,
+  Trash2,
   Wand2,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { RichText } from '@/components/assistant/RichText'
 import { EmptyState } from '@/components/ui/StateViews'
@@ -17,12 +21,18 @@ import { useToast } from '@/components/ui/Toast'
 import { apiFetch, readApiError } from '@/lib/client-fetch'
 import { AUDIT_RULES, AUDIT_SKILLS } from '@/lib/ai/audit-rules'
 import {
+  asEpisodeAudit,
+  asStoryDigest,
+  asTurns,
   AUDIT_QUESTIONS,
+  REPORT_KIND_LABEL,
   type AskTurn,
   type AuditBeat,
   type AuditDoubt,
   type EpisodeAudit,
+  type SavedReport,
   type StoryDigest,
+  type WriterReportKind,
 } from '@/lib/ai/story-audit-view'
 import { cn } from '@/lib/utils'
 
@@ -71,14 +81,18 @@ export function WriterAssistant({
   projectId,
   projectTitle,
   episodes,
+  saved,
   canRun,
 }: {
   projectId: string
   projectTitle: string
   episodes: WriterEpisode[]
+  /** 存進資料庫的那些，最新的在前面。 */
+  saved: SavedReport[]
   canRun: boolean
 }) {
   const toast = useToast()
+  const router = useRouter()
   const [digest, setDigest] = useState<StoryDigest | null>(null)
   const [digestBusy, setDigestBusy] = useState(false)
   const [states, setStates] = useState<Record<string, EpisodeState>>({})
@@ -213,6 +227,34 @@ export function WriterAssistant({
     setTurns((current) => [...current, { question, answer: body.ask.answer }])
   }
 
+  /**
+   * 存進資料庫 (Z200).
+   *
+   * 存的是**已經解析好的結果**，不是模型回的原字串——原字串要重新解析才畫得
+   * 出來，而解析器會改。存結果的話，畫面永遠畫得出來。
+   */
+  async function save(input: {
+    kind: WriterReportKind
+    title: string
+    payload: unknown
+    episodeId?: string | null
+  }): Promise<void> {
+    const response = await apiFetch(`/api/projects/${projectId}/audit/reports`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: input.kind,
+        title: input.title,
+        payload: input.payload,
+        ...(input.episodeId ? { episodeId: input.episodeId } : {}),
+      }),
+    })
+    if (!response.ok) throw new Error(await readApiError(response))
+    toast.success('存好了', '可以在下面「存起來的」裡隨時點開。')
+    // 伺服器端元件重新取一次，存起來的清單才會多那一列。
+    router.refresh()
+  }
+
   const done = episodes.filter((e) => states[e.episodeId]?.status === 'done').length
   const hasSomething = Boolean(digest) || done > 0 || turns.length > 0
 
@@ -243,7 +285,14 @@ export function WriterAssistant({
         onRunAll={runAll}
       />
 
-      {digest && <DigestView digest={digest} />}
+      {digest && (
+        <DigestView
+          digest={digest}
+          onSave={() =>
+            save({ kind: 'DIGEST', title: `主線與人設・${stamp()}`, payload: digest })
+          }
+        />
+      )}
 
       <AskPanel
         episodes={episodes}
@@ -251,6 +300,7 @@ export function WriterAssistant({
         canRun={canRun}
         ready={Boolean(digest) || done > 0}
         onAsk={ask}
+        onSave={() => save({ kind: 'ASK', title: `問答 ${turns.length} 則・${stamp()}`, payload: turns })}
       />
 
       {hasSomething && (
@@ -297,11 +347,21 @@ export function WriterAssistant({
                 state={states[episode.episodeId]}
                 canRun={canRun}
                 onRun={() => void runEpisode(episode)}
+                onSave={(audit) =>
+                  save({
+                    kind: 'EPISODE',
+                    episodeId: episode.episodeId,
+                    title: `第 ${episode.number} 集${episode.title ? `《${episode.title}》` : ''}・${stamp()}`,
+                    payload: audit,
+                  })
+                }
               />
             </li>
           ))}
         </ul>
       )}
+
+      <SavedPanel projectId={projectId} saved={saved} canRun={canRun} />
 
       <RulesPanel enabled={enabled} onToggle={toggleRule} />
     </div>
@@ -483,9 +543,15 @@ function ChipButton({
 
 /* -------------------------------------------------------------------------- */
 
-function DigestView({ digest }: { digest: StoryDigest }) {
+function DigestView({ digest, onSave }: { digest: StoryDigest; onSave?: () => Promise<void> }) {
   return (
     <section className="panel flex flex-col gap-5 rounded-2xl bg-stage-900 p-5 ring-1 ring-stage-700 sm:p-6">
+      {onSave && (
+        <div className="flex justify-end">
+          <SaveButton onSave={onSave} />
+        </div>
+      )}
+
       <Section title="目前的主線" icon="📖">
         <p className="text-base leading-8 whitespace-pre-wrap text-ink-100">{digest.mainline}</p>
       </Section>
@@ -587,11 +653,13 @@ function EpisodeCard({
   state,
   canRun,
   onRun,
+  onSave,
 }: {
   episode: WriterEpisode
   state: EpisodeState | undefined
   canRun: boolean
   onRun: () => void
+  onSave: (audit: EpisodeAudit) => Promise<void>
 }) {
   const status = state?.status ?? 'idle'
 
@@ -624,7 +692,8 @@ function EpisodeCard({
           </span>
         </div>
 
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-2">
+          {state?.audit && <SaveButton onSave={() => onSave(state.audit!)} />}
           {status === 'running' ? (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-500/15 px-3 py-1.5 text-[13px] text-accent-200">
               <Loader2 aria-hidden className="size-3.5 animate-spin" />
@@ -801,12 +870,14 @@ function AskPanel({
   canRun,
   ready,
   onAsk,
+  onSave,
 }: {
   episodes: WriterEpisode[]
   turns: AskTurn[]
   canRun: boolean
   ready: boolean
   onAsk: (question: string, episodeId: string | null) => Promise<void>
+  onSave: () => Promise<void>
 }) {
   const toast = useToast()
   const [draft, setDraft] = useState('')
@@ -846,6 +917,11 @@ function AskPanel({
           <h2 className="text-base font-semibold text-ink-50">有問題就問它</h2>
           <p className="text-[13px] text-ink-500">它手上有上面整理好的東西，可以直接問。</p>
         </div>
+        {turns.length > 0 && (
+          <span className="ml-auto">
+            <SaveButton onSave={onSave} />
+          </span>
+        )}
       </div>
 
       {turns.length > 0 && (
@@ -1001,6 +1077,236 @@ function RulesPanel({
               </li>
             ))}
           </ul>
+        </div>
+      </div>
+    </details>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+
+/** 今天幾號幾點，給存起來的那一份當標題用。 */
+function stamp(): string {
+  return new Intl.DateTimeFormat('zh-TW', {
+    timeZone: 'Asia/Taipei',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date())
+}
+
+/**
+ * 存進資料庫。
+ *
+ * 跟旁邊那兩顆「存成 JSON／文件」不一樣：那兩顆是下載到自己電腦，這一顆是存進
+ * 作品裡，兩個人都看得到、而且隨時點得開。按過之後變成一個勾——不擋你再按一
+ * 次（重跑一次通常正是因為上一次不夠好，而兩份並排比較是這東西的用途之一）。
+ */
+function SaveButton({ onSave }: { onSave: () => Promise<void> }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+
+  async function run() {
+    if (busy) return
+    setBusy(true)
+    try {
+      await onSave()
+      setDone(true)
+    } catch (cause) {
+      toast.error('存不起來', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={run}
+      disabled={busy}
+      title="存進這個作品，之後隨時點得開"
+      className={cn(
+        'tap inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] ring-1 transition-all',
+        done
+          ? 'bg-emerald-950/40 text-emerald-300 ring-emerald-800/60'
+          : 'bg-stage-850 text-ink-300 ring-stage-700 hover:-translate-y-0.5 hover:text-ink-50',
+        busy && 'opacity-60'
+      )}
+    >
+      {busy ? (
+        <Loader2 aria-hidden className="size-3.5 animate-spin" />
+      ) : done ? (
+        <Check aria-hidden className="size-3.5" />
+      ) : (
+        <Archive aria-hidden className="size-3.5" />
+      )}
+      {done ? '已存' : '存起來'}
+    </button>
+  )
+}
+
+/**
+ * 存起來的那些（Z200）。
+ *
+ * 每一份收起來，點箭頭展開。最新的在最上面——找的多半是「剛才那一份」，不是三
+ * 週前那一份。
+ */
+function SavedPanel({
+  projectId,
+  saved,
+  canRun,
+}: {
+  projectId: string
+  saved: SavedReport[]
+  canRun: boolean
+}) {
+  if (saved.length === 0) return null
+
+  return (
+    <section className="panel flex flex-col gap-3 rounded-2xl bg-stage-900 p-5 ring-1 ring-stage-700 sm:p-6">
+      <div className="flex items-center gap-2.5">
+        <span
+          aria-hidden
+          className="grid size-9 shrink-0 place-items-center rounded-2xl bg-emerald-500/15 text-emerald-300"
+        >
+          <Archive className="size-5" />
+        </span>
+        <div className="flex min-w-0 flex-col">
+          <h2 className="text-base font-semibold text-ink-50">存起來的</h2>
+          <p className="text-[13px] text-ink-500">
+            共 {saved.length} 份，點箭頭展開。兩個人都看得到。
+          </p>
+        </div>
+      </div>
+
+      <ul className="flex flex-col gap-2">
+        {saved.map((report) => (
+          <li key={report.id}>
+            <SavedItem projectId={projectId} report={report} canRun={canRun} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function SavedItem({
+  projectId,
+  report,
+  canRun,
+}: {
+  projectId: string
+  report: SavedReport
+  canRun: boolean
+}) {
+  const router = useRouter()
+  const toast = useToast()
+  const [removing, setRemoving] = useState(false)
+  const [asking, setAsking] = useState(false)
+
+  const digest = asStoryDigest(report)
+  const audit = asEpisodeAudit(report)
+  const turns = asTurns(report)
+
+  async function remove() {
+    if (removing) return
+    setRemoving(true)
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/audit/reports/${report.id}`,
+        { method: 'DELETE' }
+      )
+      if (!response.ok) throw new Error(await readApiError(response))
+      toast.success('刪掉了', report.title)
+      router.refresh()
+    } catch (cause) {
+      toast.error('刪不掉', cause instanceof Error ? cause.message : undefined)
+    } finally {
+      setRemoving(false)
+      setAsking(false)
+    }
+  }
+
+  return (
+    <details className="group rounded-2xl bg-stage-850/60 ring-1 ring-stage-700/60 transition-all open:bg-stage-850 open:ring-stage-700">
+      <summary className="tap flex cursor-pointer list-none items-center gap-2.5 px-4 py-3">
+        {/* 下拉／收合的那支箭頭。 */}
+        <ChevronRight
+          aria-hidden
+          className="size-4 shrink-0 text-ink-600 transition-transform group-open:rotate-90"
+        />
+        <span className="shrink-0 rounded-full bg-stage-800 px-2 py-0.5 text-[11px] text-ink-400">
+          {REPORT_KIND_LABEL[report.kind]}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-ink-100">{report.title}</span>
+        <span className="hidden shrink-0 text-xs text-ink-600 sm:inline">
+          {report.createdByName}
+        </span>
+      </summary>
+
+      <div className="flex flex-col gap-4 border-t border-stage-700/60 p-4">
+        {digest && <DigestView digest={digest} />}
+
+        {audit && <AuditView audit={audit} />}
+
+        {turns.length > 0 && (
+          <ul className="flex flex-col gap-5">
+            {turns.map((turn, index) => (
+              <li key={`${index}-${turn.question}`} className="flex flex-col gap-3">
+                <p className="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-accent-600/25 px-4 py-2.5 text-[15px] leading-7 text-ink-50 ring-1 ring-accent-500/30">
+                  {turn.question}
+                </p>
+                <div className="rounded-2xl rounded-tl-md bg-stage-900/70 px-4 py-3 ring-1 ring-stage-700/60">
+                  <RichText text={turn.answer} size="lg" />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3 border-t border-stage-700/40 pt-3">
+          <span className="text-xs text-ink-600">
+            {new Date(report.createdAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}
+            {report.model ? `・${report.model}` : ''}
+          </span>
+
+          {canRun && (
+            <span className="ml-auto">
+              {asking ? (
+                <span className="inline-flex items-center gap-1.5 text-xs">
+                  <span className="text-ink-500">刪掉這一份？</span>
+                  <button
+                    type="button"
+                    disabled={removing}
+                    onClick={remove}
+                    className="tap rounded px-2 py-0.5 text-rose-300 ring-1 ring-rose-800 transition-colors hover:bg-rose-950 disabled:opacity-50"
+                  >
+                    刪掉
+                  </button>
+                  <button
+                    type="button"
+                    disabled={removing}
+                    onClick={() => setAsking(false)}
+                    className="tap rounded px-2 py-0.5 text-ink-500 transition-colors hover:text-ink-300"
+                  >
+                    算了
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAsking(true)}
+                  className="tap inline-flex items-center gap-1 text-xs text-ink-600 transition-colors hover:text-rose-300"
+                >
+                  <Trash2 aria-hidden className="size-3.5" />
+                  刪掉
+                </button>
+              )}
+            </span>
+          )}
         </div>
       </div>
     </details>

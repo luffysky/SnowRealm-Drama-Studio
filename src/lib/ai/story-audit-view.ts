@@ -101,6 +101,56 @@ export const AUDIT_QUESTIONS = [
 
 /* -------------------------------------------------------------------------- */
 
+/**
+ * 存起來的那一份（Z200）。
+ *
+ * `kind` 是 text 不是 enum（Z184 的教訓：pg 的 enum 加了就刪不掉），所以合法值
+ * 由這裡把關——資料庫擋不住，應用程式要擋。
+ */
+export const REPORT_KINDS = ['DIGEST', 'EPISODE', 'ASK'] as const
+export type WriterReportKind = (typeof REPORT_KINDS)[number]
+
+export function isReportKind(value: string): value is WriterReportKind {
+  return (REPORT_KINDS as readonly string[]).includes(value)
+}
+
+export const REPORT_KIND_LABEL: Record<WriterReportKind, string> = {
+  DIGEST: '主線與人設',
+  EPISODE: '逐集整理',
+  ASK: '問答',
+}
+
+export type SavedReport = {
+  id: string
+  episodeId: string | null
+  episodeNumber: number | null
+  kind: WriterReportKind
+  title: string
+  /** 形狀依 `kind` 而定。畫之前要先用下面那幾支轉回來。 */
+  payload: unknown
+  model: string
+  createdByName: string
+  /** ISO 字串——伺服器端元件把 `Date` 傳給用戶端元件會被 Next 擋下來。 */
+  createdAt: string
+}
+
+/** 存起來的那一份是不是一集的整理。轉型之前先問。 */
+export function asEpisodeAudit(report: SavedReport): EpisodeAudit | null {
+  return report.kind === 'EPISODE' ? (report.payload as EpisodeAudit) : null
+}
+
+export function asStoryDigest(report: SavedReport): StoryDigest | null {
+  return report.kind === 'DIGEST' ? (report.payload as StoryDigest) : null
+}
+
+export function asTurns(report: SavedReport): AskTurn[] {
+  return report.kind === 'ASK' && Array.isArray(report.payload)
+    ? (report.payload as AskTurn[])
+    : []
+}
+
+/* -------------------------------------------------------------------------- */
+
 export type Parsed<T> = { value: T | null; problem: string | null }
 
 /** 一集的整理。讀不出來就說讀不出來，不要回一個半空的物件。 */

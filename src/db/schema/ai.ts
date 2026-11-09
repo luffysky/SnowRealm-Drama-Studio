@@ -295,3 +295,40 @@ export const aiOutputsRelations = relations(aiOutputs, ({ one }) => ({
   attempt: one(aiJobAttempts, { fields: [aiOutputs.attemptId], references: [aiJobAttempts.id] }),
   chosenBy: one(users, { fields: [aiOutputs.chosenById], references: [users.id] }),
 }))
+
+/**
+ * 編劇助手存下來的整理 (Z200).
+ *
+ * 在這之前它跑出來的東西只活在那個分頁裡：重新整理就沒了，而每跑一次都是一次
+ * 新的花費。存起來之後可以隨時點開看，也不用為了看昨天的結論再付一次錢。
+ *
+ * `kind` 是 **text 不是 enum**（Z184 的教訓）：pg 的 enum 加了就刪不掉，而這一
+ * 欄之後很可能會多出「伏筆追蹤」「跨集連貫」之類的種類。合法值由應用程式把關。
+ */
+export const writerReports = pgTable(
+  'writer_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    /** 逐集的那一種才有；主線整理與問答是 null。 */
+    episodeId: uuid('episode_id').references(() => episodes.id, { onDelete: 'set null' }),
+    /** `DIGEST`（主線與人設）／`EPISODE`（逐集）／`ASK`（問答）。 */
+    kind: text('kind').notNull(),
+    /** 列表上顯示的那一行。存下來就不用為了畫清單去解整包 JSON。 */
+    title: text('title').notNull().default(''),
+    /** 整包結果，形狀依 `kind` 而定（見 `src/lib/ai/story-audit-view.ts`）。 */
+    payload: jsonb('payload').notNull(),
+    model: text('model').notNull().default(''),
+    createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('writer_reports_project_idx').on(t.projectId, t.createdAt)]
+)
+
+export const writerReportsRelations = relations(writerReports, ({ one }) => ({
+  project: one(projects, { fields: [writerReports.projectId], references: [projects.id] }),
+  episode: one(episodes, { fields: [writerReports.episodeId], references: [episodes.id] }),
+  createdBy: one(users, { fields: [writerReports.createdById], references: [users.id] }),
+}))

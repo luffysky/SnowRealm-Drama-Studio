@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { WriterAssistant } from '@/components/studio/WriterAssistant'
 import { auditableEpisodes } from '@/lib/ai/story-audit'
+import { listReports } from '@/lib/ai/writer-reports'
 import { can } from '@/lib/auth/rbac'
 import { getSessionUser } from '@/lib/auth/session'
 import { requireProjectPage } from '@/lib/project-access'
@@ -26,7 +27,11 @@ export default async function WriterPage({ params }: Params) {
   const { projectId } = await params
   const project = await requireProjectPage(projectId, user.id)
 
-  const episodes = await auditableEpisodes(project.id)
+  const [episodes, saved] = await Promise.all([
+    auditableEpisodes(project.id),
+    // 存起來的那些（Z200）。伺服器端讀，所以重新整理之後它們還在。
+    listReports(project.id),
+  ])
 
   return (
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
@@ -34,6 +39,7 @@ export default async function WriterPage({ params }: Params) {
         projectId={project.id}
         projectTitle={project.title}
         episodes={episodes}
+        saved={saved}
         canRun={can(user, 'ai.run')}
       />
     </div>
