@@ -28,8 +28,6 @@ import {
   asTurns,
   AUDIT_QUESTIONS,
   REPORT_KIND_LABEL,
-  VERDICT_HINT,
-  VERDICT_LABEL,
   asVerdicts,
   type AskTurn,
   type AuditBeat,
@@ -38,9 +36,9 @@ import {
   type DoubtVerdict,
   type SavedReport,
   type StoryDigest,
-  type VerdictCode,
   type WriterReportKind,
 } from '@/lib/ai/story-audit-view'
+import { VERDICT_TONE, VerdictPill } from '@/components/studio/VerdictPill'
 import { cn } from '@/lib/utils'
 
 /**
@@ -876,7 +874,7 @@ function AuditView({
             <h4 className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-200">
               <span aria-hidden>🤔</span> 讀到這裡會卡住的地方
             </h4>
-            <span className="text-xs text-ink-600">這是**觀眾視角**，它看不到後面</span>
+            <span className="text-xs text-ink-600">這是觀眾視角，它看不到後面</span>
 
             {onJudge && (
               <span className="ml-auto flex items-center gap-2">
@@ -966,11 +964,11 @@ function DoubtView({ doubt, verdict }: { doubt: AuditDoubt; verdict?: DoubtVerdi
     <div
       className={cn(
         'flex flex-col gap-1.5 rounded-xl px-4 py-3 ring-1',
-        verdict ? VERDICT_STYLE[verdict.verdict] : 'bg-stage-850/60 ring-stage-700/50'
+        verdict ? VERDICT_TONE[verdict.verdict] : 'bg-stage-850/60 ring-stage-700/50'
       )}
     >
       <div className="flex flex-wrap items-baseline gap-2">
-        {verdict && <VerdictChip code={verdict.verdict} />}
+        {verdict && <VerdictPill code={verdict.verdict} />}
         <span className="min-w-0 flex-1 text-[15px] leading-7 text-ink-100">
           {doubt.question}
         </span>
@@ -1001,39 +999,6 @@ function DoubtView({ doubt, verdict }: { doubt: AuditDoubt; verdict?: DoubtVerdi
   )
 }
 
-/**
- * 四種判定的顏色。
- *
- * **「合理留白」不是警告**：那是一個「不用改」的結論，所以它是綠的。第一版把
- * 四種都畫成同一個灰，結果整份報告讀起來像四十條待辦。
- */
-const VERDICT_STYLE: Record<VerdictCode, string> = {
-  HELD_BACK: 'bg-emerald-950/25 ring-emerald-900/40',
-  UNDER_SEEDED: 'bg-amber-950/25 ring-amber-900/40',
-  REAL_HOLE: 'bg-rose-950/30 ring-rose-900/50',
-  NOT_ENOUGH_INFO: 'bg-stage-850/60 ring-stage-700/50',
-}
-
-const VERDICT_CHIP: Record<VerdictCode, string> = {
-  HELD_BACK: 'bg-emerald-500/15 text-emerald-300 ring-emerald-700/50',
-  UNDER_SEEDED: 'bg-amber-500/15 text-amber-300 ring-amber-700/50',
-  REAL_HOLE: 'bg-rose-500/15 text-rose-300 ring-rose-700/50',
-  NOT_ENOUGH_INFO: 'bg-stage-800 text-ink-400 ring-stage-600',
-}
-
-function VerdictChip({ code }: { code: VerdictCode }) {
-  return (
-    <span
-      title={VERDICT_HINT[code]}
-      className={cn(
-        'shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset',
-        VERDICT_CHIP[code]
-      )}
-    >
-      {VERDICT_LABEL[code]}
-    </span>
-  )
-}
 
 function JudgeButton({
   canRun,

@@ -132,7 +132,17 @@ mockup 第一個分頁：從零開始寫（故事核心概念／世界觀／人�
 的 `CharacterBrowser` 收了 `canWrite` 卻幾乎沒套。兩個人現在都是 OWNER 所以看不
 到——**加一個協作者帳號的當天就會看到**。
 
-### 2-7　小的，各一兩行
+### 2-7　`--color-accent-200` 這個 token 沒有定義，13 處在用
+
+`globals.css` 的 `@theme` 裡 accent 只有 300–700。Tailwind v4 對沒定義的 color
+token **不會產出任何 CSS**，所以那 13 處 `text-accent-200` 其實沒有顏色，是繼承
+來的。`globals.css:611` 還特地寫了 `var(--color-accent-200, var(--color-accent-300))`
+當後備，可見本來就知道它不在。
+
+修法是補一行 token，但那會同時改掉 13 個既有畫面的顏色，**要單獨看過一輪**，不
+要順手加。（Z202 自己那一處已經改成 `accent-300`。）
+
+### 2-8　小的，各一兩行
 
 「思考程度」下拉對七家供應商沒有作用、`NovelEditor` 的「備註與討論 `M2`」是永久
 空白區塊（審稿意見早就做好了）、`WorldBrowser` 的「AI 世界觀助理 `M2`」條件永遠

@@ -40,6 +40,32 @@ export default async function HelpPage() {
         </p>
       </header>
 
+      {/*
+        編劇助手那一頁獨立出去（Z202）：它有一個需要互動才講得清楚的概念，攤平
+        成文字就失去意義了。這裡放一張看得見的卡，不是藏在內文裡的連結。
+      */}
+      <Link
+        href="/help/writer"
+        className="panel group flex items-center gap-3.5 rounded-2xl bg-stage-900 p-4 ring-1 ring-stage-700 transition-all hover:-translate-y-0.5 hover:ring-accent-500/40"
+      >
+        <span
+          aria-hidden
+          className="bg-brand-gradient grid size-11 shrink-0 place-items-center rounded-2xl text-xl"
+        >
+          🎬
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="text-sm font-semibold text-ink-50">編劇助手怎麼用</span>
+          <span className="text-xs text-ink-500">
+            它會自己讀完你的小說，告訴你爽點在哪、哪裡會卡住。附第 1 集真的查到的三件事。
+          </span>
+        </span>
+        <ArrowRight
+          aria-hidden
+          className="size-4 shrink-0 text-ink-600 transition-transform group-hover:translate-x-0.5"
+        />
+      </Link>
+
       <Section title="第一次用，照這個順序">
         <ol className="flex flex-col gap-2">
           {[
