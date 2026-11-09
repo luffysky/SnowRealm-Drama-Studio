@@ -32,6 +32,7 @@ export default async function WriterPage({ params }: Params) {
     <div className="flex flex-col gap-4 p-3 sm:p-4 lg:p-6">
       <WriterAssistant
         projectId={project.id}
+        projectTitle={project.title}
         episodes={episodes}
         canRun={can(user, 'ai.run')}
       />

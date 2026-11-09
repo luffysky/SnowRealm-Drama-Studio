@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { handle, jsonOk, parseJson, requirePermission } from '@/lib/api'
 import { requireProjectApi } from '@/lib/project-access'
-import { auditEpisode, digestStory } from '@/lib/ai/story-audit'
+import { askWriter, auditEpisode, digestStory } from '@/lib/ai/story-audit'
 
 export const runtime = 'nodejs'
 
@@ -17,6 +17,22 @@ export const maxDuration = 300
 const bodySchema = z.object({
   /** 給了就整理那一集；沒給就整理主線與人設。 */
   episodeId: z.string().uuid().optional(),
+  /**
+   * 還留著的那幾條審核準則的索引（`AUDIT_RULES` 的位置）。
+   *
+   * 省略＝全部。畫面上勾掉一條的時候它要真的從提示詞裡消失——一個勾得動但沒
+   * 有作用的核取方塊，比沒有核取方塊糟。
+   */
+  rules: z.array(z.number().int().min(0).max(13)).optional(),
+  /** 有問題就是問答，沒有就是整理。 */
+  question: z.string().trim().min(1).max(2000).optional(),
+  /** 之前幾輪問答，由畫面那一端保存並帶回來。 */
+  history: z
+    .array(z.object({ question: z.string().max(2000), answer: z.string().max(20_000) }))
+    .max(20)
+    .optional(),
+  /** 已經算好的整理，當材料用——省得模型再把十萬字讀一次。 */
+  material: z.string().max(60_000).optional(),
 })
 
 /**
@@ -34,12 +50,34 @@ export const POST = handle(
 
     const input = await parseJson(request, bodySchema)
 
+    if (input.question) {
+      const result = await askWriter({
+        projectId,
+        question: input.question,
+        user,
+        ...(input.history ? { history: input.history } : {}),
+        ...(input.episodeId ? { episodeId: input.episodeId } : {}),
+        ...(input.material ? { material: input.material } : {}),
+        ...(input.rules ? { rules: input.rules } : {}),
+      })
+      return jsonOk({ ask: result })
+    }
+
     if (input.episodeId) {
-      const result = await auditEpisode({ projectId, episodeId: input.episodeId, user })
+      const result = await auditEpisode({
+        projectId,
+        episodeId: input.episodeId,
+        user,
+        ...(input.rules ? { rules: input.rules } : {}),
+      })
       return jsonOk({ episode: result })
     }
 
-    const result = await digestStory({ projectId, user })
+    const result = await digestStory({
+      projectId,
+      user,
+      ...(input.rules ? { rules: input.rules } : {}),
+    })
     return jsonOk({ digest: result })
   }
 )

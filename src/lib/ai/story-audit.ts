@@ -3,10 +3,12 @@ import { db } from '@/db'
 import { characters, chapters, documents, episodes, projects } from '@/db/schema'
 import { ApiError } from '@/lib/api'
 import type { SessionUser } from '@/lib/auth/session'
+import { auditPersona } from '@/lib/ai/audit-rules'
 import { AUDIT_INSTRUCTIONS } from '@/lib/ai/prompts'
 import {
   parseEpisodeAudit,
   parseStoryDigest,
+  type AskTurn,
   type EpisodeAudit,
   type StoryDigest,
 } from '@/lib/ai/story-audit-view'
@@ -97,6 +99,8 @@ export async function auditEpisode(input: {
   projectId: string
   episodeId: string
   user: SessionUser
+  /** 還留著的那幾條審核準則的索引；省略就是全部。 */
+  rules?: readonly number[]
 }): Promise<EpisodeAuditResult> {
   const [episode] = await db
     .select({
@@ -151,7 +155,7 @@ export async function auditEpisode(input: {
       auditPass: 'audience',
       ...(prior ? { priorSummary: prior } : {}),
       sourceText: text,
-      userInstruction: AUDIT_INSTRUCTIONS.episode,
+      userInstruction: `${auditPersona(input.rules)}\n\n${AUDIT_INSTRUCTIONS.episode}`,
     },
   })
 
@@ -182,6 +186,7 @@ export type StoryDigestResult = {
 export async function digestStory(input: {
   projectId: string
   user: SessionUser
+  rules?: readonly number[]
 }): Promise<StoryDigestResult> {
   const [project] = await db
     .select({ title: projects.title })
@@ -224,6 +229,14 @@ export async function digestStory(input: {
     projectId: input.projectId,
     user: input.user,
     label: '編劇助手・主線與人設',
+    /*
+     * 摘要這一支不要用 high。
+     *
+     * 它讀的是二十條一句話與大綱，不是十萬字正文——要做的是歸納，不是推理。
+     * `NOVEL_REVIEW` 預設的 high 會讓它想很久（實測等超過五分鐘還沒回），而
+     * 多出來的那幾分鐘買到的東西，跟 medium 回的那一份差不多。
+     */
+    effort: 'medium',
     context: {
       projectTitle: project.title,
       auditPass: 'audience',
@@ -231,7 +244,7 @@ export async function digestStory(input: {
         ? { characters: cast.map((row) => ({ name: row.name, tier: row.tier })) }
         : {}),
       sourceText: lines.join('\n\n'),
-      userInstruction: AUDIT_INSTRUCTIONS.digest,
+      userInstruction: `${auditPersona(input.rules)}\n\n${AUDIT_INSTRUCTIONS.digest}`,
     },
   })
 
@@ -243,6 +256,115 @@ export async function digestStory(input: {
     costUsd: result.costUsd,
     episodeNumbers: written.map((row) => row.number),
   }
+}
+
+/* -------------------------------------------------------------------------- */
+
+export type AskResult = {
+  answer: string
+  model: string
+  costUsd: number | null
+}
+
+/**
+ * 問它一個問題。
+ *
+ * 報告是唯讀的，而讀完一定會有問題——「第 7 集這個爽點我覺得不夠」「馬大後來
+ * 怎麼不見了」。沒有地方問的話，這一頁就只是一份印出來的紙。
+ *
+ * ## 材料是**已經算好的那一份**
+ *
+ * 它拿到的是主線整理與逐集的爽點鉤子，不是十萬字正文——那份整理就是為了這個
+ * 才先算的。指定某一集的時候才額外附上那一集的全文，因為「這一句寫得不好」這
+ * 種問題非看原文不可。
+ *
+ * ## 前幾輪也要帶
+ *
+ * 不帶的話「那這樣改呢？」會變成一個沒有主詞的問題。只帶最近幾輪：再往前的對
+ * 話對當下這個問題幫助不大，而每一輪都要付錢。
+ */
+export async function askWriter(input: {
+  projectId: string
+  question: string
+  /** 之前幾輪問答，由呼叫端保存。 */
+  history?: readonly AskTurn[]
+  /** 問題跟哪一集有關；給了就附上那一集全文。 */
+  episodeId?: string | null
+  /** 已經算好的整理，原樣帶進去當材料。 */
+  material?: string
+  rules?: readonly number[]
+  user: SessionUser
+}): Promise<AskResult> {
+  const question = input.question.trim()
+  if (!question) throw ApiError.badRequest('還沒有問題')
+
+  const [project] = await db
+    .select({ title: projects.title })
+    .from(projects)
+    .where(eq(projects.id, input.projectId))
+    .limit(1)
+  if (!project) throw ApiError.notFound('找不到這個作品')
+
+  const parts: string[] = []
+  if (input.material?.trim()) parts.push(`## 已經整理好的內容\n${input.material.trim()}`)
+
+  let episodeNumber: number | undefined
+  if (input.episodeId) {
+    const [episode] = await db
+      .select({ id: episodes.id, number: episodes.number, title: episodes.title })
+      .from(episodes)
+      .where(
+        and(
+          eq(episodes.id, input.episodeId),
+          eq(episodes.projectId, input.projectId),
+          isNull(episodes.deletedAt)
+        )
+      )
+      .limit(1)
+    if (!episode) throw ApiError.badRequest('指定的集數不屬於這個作品')
+
+    const text = await novelText(episode.id)
+    if (text.trim()) {
+      episodeNumber = episode.number
+      parts.push(
+        `## 第 ${episode.number} 集${episode.title ? `《${episode.title}》` : ''}全文\n${text}`
+      )
+    }
+  }
+
+  const recent = (input.history ?? []).slice(-4)
+  if (recent.length > 0) {
+    parts.push(
+      `## 先前的問答\n${recent.map((turn) => `Q：${turn.question}\nA：${turn.answer}`).join('\n\n')}`
+    )
+  }
+
+  parts.push(`## 這次的問題\n${question}`)
+
+  const result = await runNow({
+    task: 'NOVEL_REVIEW',
+    projectId: input.projectId,
+    ...(input.episodeId ? { episodeId: input.episodeId } : {}),
+    user: input.user,
+    label: episodeNumber ? `編劇助手・提問（第 ${episodeNumber} 集）` : '編劇助手・提問',
+    /*
+     * 問答不要用 high。
+     *
+     * 這裡多半是「這份材料裡寫了什麼」或「這樣改會動到哪幾集」，不是要重新推
+     * 理整部戲。`high` 會把額度花在思考上然後回一句話——而那一句話跟 medium
+     * 回的那一句差不多，價錢差很多。
+     */
+    effort: 'medium',
+    context: {
+      projectTitle: project.title,
+      ...(episodeNumber !== undefined ? { episodeNumber } : {}),
+      auditPass: 'audience',
+      sourceText: parts.join('\n\n'),
+      userInstruction: `${auditPersona(input.rules)}\n\n${AUDIT_INSTRUCTIONS.ask}`,
+    },
+  })
+
+  return { answer: result.text.trim(), model: result.model, costUsd: result.costUsd }
 }
 
 /* -------------------------------------------------------------------------- */

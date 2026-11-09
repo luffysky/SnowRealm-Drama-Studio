@@ -53,6 +53,15 @@ export type AuditDoubt = {
   why: string
 }
 
+/**
+ * 一輪問答。
+ *
+ * 放在 view 這一支而不是 `story-audit.ts`：畫面要保存這些、要顯示這些、匯出也
+ * 要帶上這些，而 `story-audit.ts` 會 import `@/db`——用戶端為了一個型別把整個
+ * 資料層拉進 bundle，正是 `check:client` 擋的事。
+ */
+export type AskTurn = { question: string; answer: string }
+
 /** 全書整理：主線與人設現況。 */
 export type StoryDigest = {
   /** 到目前為止的主線，三到六句。 */
