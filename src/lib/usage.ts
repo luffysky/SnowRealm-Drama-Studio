@@ -169,10 +169,18 @@ export async function spendForPeriod(
         eq(usageLedger.projectId, projectId),
         eq(usageLedger.period, period),
         eq(usageLedger.kind, 'ESTIMATE'),
+        /*
+         * 外層那一欄要**寫死限定名** (Z199)。
+         *
+         * 內插渲染成不帶表名的 "id"，而子查詢裡 `settling` 就是同一張表、也有
+         * `id`——條件變成 `settling.settles_id = settling.id`，永遠不成立，於是
+         * `not exists` 永遠為真：**每一筆估算都被算成還沒結算**。成本頁的「已
+         * 承諾未結算」因此一直是灌水的，而那個數字看起來完全合理。
+         */
         sql`not exists (
           select 1 from ${usageLedger} settling
            where settling.kind = 'ACTUAL'
-             and settling.settles_id = ${usageLedger.id}
+             and settling.settles_id = usage_ledger.id
         )`
       )
     )

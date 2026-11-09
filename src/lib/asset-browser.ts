@@ -170,14 +170,22 @@ export async function listAssets(
       episodeNumber: episodes.number,
       createdAt: assets.createdAt,
       updatedAt: assets.updatedAt,
+      /*
+       * 外層那一欄要**寫死限定名**，不要用 ${} 內插 (Z199).
+       *
+       * drizzle 把內插進 sql 模板的欄位物件渲染成**不帶表名**的 "id"，而在子
+       * 查詢裡那個名字會綁到最內層那張表——它也有 id 欄。於是條件變成
+       * `x.foo_id = x.id`，永遠不成立，而 Postgres 不會報錯，它只是乖乖回
+       * 0／false。
+       */
       hasPreview: sql<boolean>`exists (
         select 1 from ${assetVariants} v
-         where v.asset_id = ${assets.id} and v.kind = 'PREVIEW'
+         where v.asset_id = assets.id and v.kind = 'PREVIEW'
            and v.upload_status = 'COMPLETED'
       )`,
       hasWaveform: sql<boolean>`exists (
         select 1 from ${assetVariants} v
-         where v.asset_id = ${assets.id} and v.kind = 'WAVEFORM'
+         where v.asset_id = assets.id and v.kind = 'WAVEFORM'
            and v.upload_status = 'COMPLETED'
       )`,
     })

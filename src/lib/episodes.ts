@@ -84,9 +84,16 @@ export async function listEpisodes(
   if (query.stage) {
     // "Show me what still needs 分鏡" — episodes whose named stage is unfinished.
     conditions.push(
+      /*
+       * 外層那一欄要**寫死限定名** (Z199)。
+       *
+       * 內插會渲染成不帶表名的 "id"，而 `episode_production_stages s` 自己也有
+       * `id`——於是條件變成 `s.episode_id = s.id`，永遠不成立。症狀是「給我還沒
+       * 做分鏡的集數」一集都查不到，而那看起來就像「全部都做完了」。
+       */
       sql`exists (
         select 1 from ${episodeProductionStages} s
-         where s.episode_id = ${episodes.id}
+         where s.episode_id = episodes.id
            and s.stage_key = ${query.stage}
            and s.status <> 'completed'
       )`
@@ -616,9 +623,17 @@ export async function listOutline(
       synopsis: episodes.synopsis,
       status: episodes.status,
       updatedAt: episodes.updatedAt,
+      /*
+       * 外層那一欄要**寫死限定名**，不要用 ${} 內插 (Z199).
+       *
+       * drizzle 把內插進 sql 模板的欄位物件渲染成**不帶表名**的 "id"，而在子
+       * 查詢裡那個名字會綁到最內層那張表——它也有 id 欄。於是條件變成
+       * `x.foo_id = x.id`，永遠不成立，而 Postgres 不會報錯，它只是乖乖回
+       * 0／false。
+       */
       charCount: sql<number>`(
         select coalesce(max(char_count), 0) from documents
-         where documents.episode_id = ${episodes.id}
+         where documents.episode_id = episodes.id
            and documents.kind = 'NOVEL'
            and documents.deleted_at is null
       )`.mapWith(Number),

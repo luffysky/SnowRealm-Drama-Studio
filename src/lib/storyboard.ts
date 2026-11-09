@@ -58,19 +58,27 @@ export async function storyboardIndex(projectId: string): Promise<StoryboardEpis
       number: episodes.number,
       title: episodes.title,
       targetSec: episodes.targetSec,
+      /*
+       * 外層那一欄要**寫死限定名**，不要用 ${} 內插 (Z199).
+       *
+       * drizzle 把內插進 sql 模板的欄位物件渲染成**不帶表名**的 "id"，而在子
+       * 查詢裡那個名字會綁到最內層那張表——它也有 id 欄。於是條件變成
+       * `x.foo_id = x.id`，永遠不成立，而 Postgres 不會報錯，它只是乖乖回
+       * 0／false。
+       */
       shotCount: sql<number>`(
-        select count(*) from shots s where s.episode_id = ${episodes.id}
+        select count(*) from shots s where s.episode_id = episodes.id
       )`.mapWith(Number),
       totalSec: sql<number>`(
-        select coalesce(sum(s.duration_sec), 0) from shots s where s.episode_id = ${episodes.id}
+        select coalesce(sum(s.duration_sec), 0) from shots s where s.episode_id = episodes.id
       )`.mapWith(Number),
       approved: sql<number>`(
         select count(*) from shots s
-         where s.episode_id = ${episodes.id} and s.status = 'APPROVED'
+         where s.episode_id = episodes.id and s.status = 'APPROVED'
       )`.mapWith(Number),
       hasScript: sql<boolean>`exists (
         select 1 from documents d
-         where d.episode_id = ${episodes.id}
+         where d.episode_id = episodes.id
            and d.kind = 'SCRIPT'
            and d.deleted_at is null
            and d.char_count > 0

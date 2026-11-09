@@ -203,15 +203,23 @@ export async function novelIndex(
       charCount: documents.charCount,
       updatedAt: documents.updatedAt,
       lastEditorId: documents.lastEditorId,
+      /*
+       * 外層那一欄要**寫死限定名**，不要用 ${} 內插 (Z199).
+       *
+       * drizzle 把內插進 sql 模板的欄位物件渲染成**不帶表名**的 "id"，而在子
+       * 查詢裡那個名字會綁到最內層那張表——它也有 id 欄。於是條件變成
+       * `x.foo_id = x.id`，永遠不成立，而 Postgres 不會報錯，它只是乖乖回
+       * 0／false。
+       */
       chapterCount: sql<number>`(
-        select count(*) from ${chapters} where ${chapters}.document_id = ${documents.id}
+        select count(*) from ${chapters} where ${chapters}.document_id = documents.id
       )`.mapWith(Number),
       sceneCount: sql<number>`(
-        select count(*) from ${scenes} where ${scenes}.document_id = ${documents.id}
+        select count(*) from ${scenes} where ${scenes}.document_id = documents.id
       )`.mapWith(Number),
       seconds: sql<number>`(
         select coalesce(sum(estimated_sec), 0) from ${scenes}
-         where ${scenes}.document_id = ${documents.id}
+         where ${scenes}.document_id = documents.id
       )`.mapWith(Number),
     })
     .from(episodes)

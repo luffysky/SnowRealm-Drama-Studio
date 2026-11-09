@@ -31,9 +31,10 @@
     "check:ai": "tsx scripts/check-ai-tasks.ts",
     "check:dead": "tsx scripts/check-dead-wiring.ts",
     "check:client": "tsx scripts/check-client-boundary.ts",
-    "check": "npm run typecheck && npm run lint && npm run check:links && npm run check:api && npm run check:ai && npm run check:dead && npm run check:client && npm run check:todo && npm run check:import && npm run check:mojibake && npm run test",
+    "check": "npm run typecheck && npm run lint && npm run check:links && npm run check:api && npm run check:ai && npm run check:dead && npm run check:client && npm run check:todo && npm run check:import && npm run check:mojibake && npm run check:subquery && npm run test",
     "check:import": "tsx scripts/write-import-templates.ts",
     "check:mojibake": "tsx scripts/check-mojibake.ts",
+    "check:subquery": "tsx scripts/check-subquery.ts",
     "check:todo": "tsx scripts/todo-milestones.ts"
   },
   "dependencies": {
